@@ -76,3 +76,5 @@ Small commits as agreed in the plan. The repo has no commits yet, so the first o
 Now I simulate exactly what the hook will do at the next commit: feed it the real hook payload for this session, check the file is written and staged, then commit it.
 
 - 🔧 Bash: Run the hook with this session's real payload and verify the log is staged
+
+- 🔧 Bash: Commit the session log and run the full test suite once more
