@@ -171,6 +171,29 @@ class RenderMarkdownTest(unittest.TestCase):
         self.assertEqual(md, expected)
 
 
+class TranscribeTest(unittest.TestCase):
+    def test_writes_markdown_and_identical_jsonl_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = os.path.join(tmp, "t.jsonl")
+            raw = ("\n".join(FIXTURE) + "\n").encode("utf-8")
+            with open(transcript, "wb") as f:
+                f.write(raw)
+            out_dir = os.path.join(tmp, "agents-log")
+            md_path, jsonl_path = agents_log.transcribe(transcript, out_dir)
+            self.assertTrue(md_path.endswith(".md"))
+            self.assertEqual(jsonl_path, md_path[:-3] + ".jsonl")
+            with open(jsonl_path, "rb") as f:
+                self.assertEqual(f.read(), raw)
+
+    def test_no_user_message_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = os.path.join(tmp, "t.jsonl")
+            with open(transcript, "w") as f:
+                f.write(FIXTURE[0] + "\n")
+            self.assertIsNone(agents_log.transcribe(transcript, os.path.join(tmp, "agents-log")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agents-log")))
+
+
 class HookEndToEndTest(unittest.TestCase):
     def run_hook(self, cwd, command, transcript):
         payload = {"session_id": SESSION, "transcript_path": transcript, "cwd": cwd,
@@ -189,11 +212,12 @@ class HookEndToEndTest(unittest.TestCase):
             res = self.run_hook(tmp, "git commit -m 'x'", transcript)
             self.assertEqual(res.returncode, 0, res.stderr)
             files = sorted(os.listdir(os.path.join(tmp, "agents-log")))
-            self.assertEqual(len(files), 1)
-            self.assertTrue(files[0].endswith("-obiettivo-trascrivere-le-chat-con-gli-ag.md"))
+            self.assertEqual(len(files), 2)
+            self.assertTrue(files[0].endswith("-obiettivo-trascrivere-le-chat-con-gli-ag.jsonl"))
+            self.assertTrue(files[1].endswith("-obiettivo-trascrivere-le-chat-con-gli-ag.md"))
             staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp,
                                     capture_output=True, text=True).stdout.split()
-            self.assertEqual(staged, ["agents-log/" + files[0]])
+            self.assertEqual(staged, ["agents-log/" + f for f in files])
 
     def test_non_commit_does_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:

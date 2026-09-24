@@ -10,6 +10,7 @@ Solo stdlib, compatibile con Python 3.7.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unicodedata
@@ -159,16 +160,22 @@ def render_markdown(entries, meta):
 
 
 def transcribe(transcript_path, out_dir):
+    """Scrive <out_dir>/<nome>.md e una copia identica del transcript in <nome>.jsonl.
+
+    Ritorna (md_path, jsonl_path), oppure None se non c'e' alcun messaggio utente.
+    """
     with open(transcript_path, encoding="utf-8") as f:
         entries, meta = parse_transcript(f)
     name = session_filename(entries, meta.get("session_id"))
     if name is None:
         return None
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, name)
-    with open(path, "w", encoding="utf-8") as f:
+    md_path = os.path.join(out_dir, name)
+    with open(md_path, "w", encoding="utf-8") as f:
         f.write(render_markdown(entries, meta))
-    return path
+    jsonl_path = md_path[:-len(".md")] + ".jsonl"
+    shutil.copyfile(transcript_path, jsonl_path)
+    return md_path, jsonl_path
 
 
 def run_hook():
@@ -179,9 +186,9 @@ def run_hook():
         if not is_git_commit((payload.get("tool_input") or {}).get("command")):
             return
         cwd = payload.get("cwd") or os.getcwd()
-        path = transcribe(payload["transcript_path"], os.path.join(cwd, "agents-log"))
-        if path:
-            subprocess.run(["git", "add", "--", path], cwd=cwd, check=True)
+        paths = transcribe(payload["transcript_path"], os.path.join(cwd, "agents-log"))
+        if paths:
+            subprocess.run(["git", "add", "--"] + list(paths), cwd=cwd, check=True)
     except Exception as exc:  # mai bloccare il commit
         sys.stderr.write("agents_log: %s\n" % exc)
 
@@ -196,8 +203,8 @@ def main(argv):
     out_dir = "agents-log"
     if "--out-dir" in argv:
         out_dir = argv[argv.index("--out-dir") + 1]
-    path = transcribe(argv[0], out_dir)
-    print(path or "nessun messaggio utente: nessun file scritto")
+    paths = transcribe(argv[0], out_dir)
+    print("\n".join(paths) if paths else "nessun messaggio utente: nessun file scritto")
     return 0
 
 
