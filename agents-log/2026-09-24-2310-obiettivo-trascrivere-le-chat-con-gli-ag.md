@@ -70,3 +70,9 @@ The real transcript converts cleanly: no tool output, no system reminders, one l
 Small commits as agreed in the plan. The repo has no commits yet, so the first one also brings in the existing `CLAUDE.md` and settings.
 
 - 🔧 Bash: Commit docs and settings as the first commit
+
+- 🔧 Bash: Commit the converter with tests, then the agents-log directory
+
+Now I simulate exactly what the hook will do at the next commit: feed it the real hook payload for this session, check the file is written and staged, then commit it.
+
+- 🔧 Bash: Run the hook with this session's real payload and verify the log is staged
