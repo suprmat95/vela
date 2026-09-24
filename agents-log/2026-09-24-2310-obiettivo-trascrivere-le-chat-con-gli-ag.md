@@ -66,3 +66,7 @@ All 21 tests pass. Now the manual conversion check on this session's real transc
 The real transcript converts cleanly: no tool output, no system reminders, one line per tool. Now the hook config, then the commits.
 
 - 🔧 Bash: Add the PreToolUse hook to project settings and show status
+
+Small commits as agreed in the plan. The repo has no commits yet, so the first one also brings in the existing `CLAUDE.md` and settings.
+
+- 🔧 Bash: Commit docs and settings as the first commit
