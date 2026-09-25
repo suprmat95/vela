@@ -324,3 +324,17 @@ Falliscono tutti per i motivi attesi. Ora il codice in `say.py` e `usecases.py`.
 Task 3: `is_trip`.
 
 - 🔧 Bash: Add is_trip test and watch it fail
+
+- 🔧 Bash: Implement is_trip, run suite, commit
+
+Task 4: chooser v2. Prima riscrivo `tests/test_chooser.py` e lo vedo fallire.
+
+- 🔧 Bash: Rewrite chooser tests and watch them fail
+
+Fallisce all'import, come previsto dal piano. Ora scrivo `vela/domain/chooser.py` dal piano.
+
+- 🔧 Bash: Write chooser v2 from plan, run tests
+
+Tutta la suite è verde, compresi `test_usecases` e `test_app_replay` senza modifiche. Committo.
+
+- 🔧 Bash: Commit task 4
