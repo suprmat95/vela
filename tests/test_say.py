@@ -197,3 +197,80 @@ class EnglishTest(unittest.TestCase):
 
     def test_italian_is_default(self):
         self.assertEqual(say.say_no_match("pax"), say.say_no_match("pax", Criteria(language="it")))
+
+
+class QueueSayTest(unittest.TestCase):
+    """Frasi di M5 (RF-45, RF-16, RF-17, RF-25, RF-49): italiano e inglese, niente URL né markdown."""
+
+    def test_queued_minutes_singular_and_plural(self):
+        self.assertEqual(say.say_queued(1), "Ti ho messo in coda: tra circa un minuto il link di "
+                         "pagamento sarà pronto. Chiedimi a che punto è quando vuoi.")
+        self.assertIn("tra circa 12 minuti", say.say_queued(12))
+        self.assertEqual(say.say_queued(1, "en"), "You're in the queue: the payment link will be "
+                         "ready in about a minute. Ask me how it's going whenever you like.")
+        self.assertIn("in about 12 minutes", say.say_queued(12, "en"))
+
+    def test_status_queued_repeats_the_wait_or_says_preparing(self):
+        self.assertIn("tra circa 3 minuti", say.say_status(OrderStatus.QUEUED, None, None, minutes=3))
+        preparing = say.say_status(OrderStatus.QUEUED, None, None)
+        self.assertIn("Sto preparando il pagamento", preparing)
+        self.assertIn("I'm preparing the payment", say.say_status(OrderStatus.QUEUED, None, None, "en"))
+
+    def test_awaiting_payment_states_difference_before_link(self):
+        s = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, total=Decimal("720"),
+                           price_from_total=Decimal("700"))
+        self.assertTrue(s.startswith("Il totale reale è 720 euro, non i 700 stimati."))
+        self.assertLess(s.index("720 euro"), s.index("link"))
+        en = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, "en", total=Decimal("720"),
+                            price_from_total=Decimal("700"))
+        self.assertTrue(en.startswith("The real total is 720 euros, not the estimated 700."))
+        self.assertIn("waiting for payment", en)
+
+    def test_awaiting_payment_without_difference_keeps_the_m6_sentence(self):
+        s = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, total=Decimal("700"),
+                           price_from_total=Decimal("700"))
+        self.assertEqual(s, "L'ordine è in attesa del pagamento di 700 euro: usa il link che ti ho mandato.")
+
+    def test_replaced_does_not_mention_error(self):
+        s = say.say_replaced(PRODUCT, PROPOSAL)
+        self.assertTrue(s.startswith("Quel viaggio non è più prenotabile, ti propongo un'alternativa. "))
+        self.assertIn(say.say_proposal(PRODUCT, PROPOSAL), s)
+        en = say.say_replaced(PRODUCT, PROPOSAL, "en")
+        self.assertTrue(en.startswith("That trip can no longer be booked, here is an alternative. "))
+        for text in (s.lower(), en.lower()):
+            for word in ("errore", "error", "502", "404", "hofj"):
+                self.assertNotIn(word, text)
+
+    def test_cancelled_then_next_proposal(self):
+        self.assertEqual(say.say_status(OrderStatus.CANCELLED, None, None), "Ho annullato l'ordine.")
+        s = say.say_cancelled_then("Ti propongo altro.")
+        self.assertEqual(s, "Ho annullato l'ordine. Ti propongo altro.")
+        self.assertEqual(say.say_cancelled_then("I suggest something else.", "en"),
+                         "I've cancelled the order. I suggest something else.")
+
+    def test_failed_includes_reason(self):
+        reason = say.failure_reason("upstream")
+        self.assertEqual(reason, "il fornitore non ha risposto dopo tre tentativi")
+        s = say.say_status(OrderStatus.FAILED, None, reason)
+        self.assertEqual(s, "Non sono riuscito a preparare il pagamento: il fornitore non ha risposto "
+                         "dopo tre tentativi. Se vuoi, riproviamo con una nuova proposta.")
+        en = say.say_status(OrderStatus.FAILED, None, say.failure_reason("upstream", "en"), "en")
+        self.assertIn("the supplier did not answer after three attempts", en)
+
+    def test_every_failure_reason_has_both_languages(self):
+        for code in ("upstream", "config", "no_alternative", "payments"):
+            self.assertTrue(say.failure_reason(code))
+            self.assertTrue(say.failure_reason(code, "en"))
+            self.assertNotEqual(say.failure_reason(code), say.failure_reason(code, "en"))
+
+    def test_new_phrases_have_no_url_or_markdown(self):
+        texts = [say.say_queued(5), say.say_queued(5, "en"), say.say_replaced(PRODUCT, PROPOSAL),
+                 say.say_replaced(PRODUCT, PROPOSAL, "en"), say.say_cancelled_then("x"),
+                 say.failure_reason("config"), say.failure_reason("config", "en")]
+        for status in (OrderStatus.QUEUED, OrderStatus.REPLACED, OrderStatus.CANCELLED, OrderStatus.FAILED):
+            for lang in ("it", "en"):
+                texts.append(say.say_status(status, None, "motivo", lang))
+        for t in texts:
+            self.assertNotIn("http", t)
+            self.assertNotIn("**", t)
+            self.assertNotIn("`", t)

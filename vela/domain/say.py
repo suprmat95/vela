@@ -198,6 +198,11 @@ _STATUS = {
                                            "richiedi lo stato tra qualche secondo."),
         OrderStatus.BOOKING_FAILED: ("Il pagamento è arrivato ma la prenotazione non è riuscita: "
                                      "riprovo io, e se non ci riesco ti avviso."),
+        OrderStatus.QUEUED: "Sto preparando il pagamento con il fornitore: chiedimi di nuovo tra poco.",
+        OrderStatus.REPLACED: "Quel viaggio non è più prenotabile: ti ho proposto un'alternativa.",
+        OrderStatus.CANCELLED: "Ho annullato l'ordine.",
+        OrderStatus.FAILED: ("Non sono riuscito a preparare il pagamento: %s. Se vuoi, riproviamo "
+                             "con una nuova proposta."),
         None: "Il link di pagamento è scaduto: dimmi se vuoi che prepari una nuova proposta.",
     },
     "en": {
@@ -207,6 +212,11 @@ _STATUS = {
                                            "the status again in a few seconds."),
         OrderStatus.BOOKING_FAILED: ("The payment arrived but the booking did not go through: "
                                      "I'll try again, and if I can't I'll let you know."),
+        OrderStatus.QUEUED: "I'm preparing the payment with the supplier: ask me again in a moment.",
+        OrderStatus.REPLACED: "That trip can no longer be booked: I've suggested an alternative.",
+        OrderStatus.CANCELLED: "I've cancelled the order.",
+        OrderStatus.FAILED: ("I couldn't prepare the payment: %s. If you like, we can try again "
+                             "with a new proposal."),
         None: "The payment link has expired: tell me if you want me to prepare a new proposal.",
     },
 }
@@ -219,12 +229,83 @@ _AWAITING_AMOUNT = {
 
 
 def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
-               lang: str = "it", total: Optional[Decimal] = None) -> str:
+               lang: str = "it", total: Optional[Decimal] = None, minutes: Optional[int] = None,
+               price_from_total: Optional[Decimal] = None) -> str:
+    if status == OrderStatus.QUEUED and minutes is not None:
+        return say_queued(minutes, lang)
     if status == OrderStatus.AWAITING_PAYMENT and total is not None:
-        return _AWAITING_AMOUNT.get(lang, _AWAITING_AMOUNT["it"]) % fmt_money(total, lang)
+        text = _AWAITING_AMOUNT.get(lang, _AWAITING_AMOUNT["it"]) % fmt_money(total, lang)
+        if price_from_total is not None and total != price_from_total:
+            text = _price_changed(total, price_from_total, lang) + " " + text   # RF-16: prima del link
+        return text
     texts = _STATUS.get(lang, _STATUS["it"])
     text = texts.get(status, texts[None])
-    return text % booking_code if status == OrderStatus.CONFIRMED else text
+    if status == OrderStatus.CONFIRMED:
+        return text % booking_code
+    if status == OrderStatus.FAILED:
+        return text % (failure_reason or failure_reason_default(lang))
+    return text
+
+
+def _price_changed(total: Decimal, price_from_total: Decimal, lang: str = "it") -> str:
+    if lang == "en":
+        return "The real total is %s, not the estimated %s." % (
+            fmt_money(total, lang), fmt_money(price_from_total, lang).replace(" euros", ""))
+    return "Il totale reale è %s, non i %s stimati." % (
+        fmt_money(total), fmt_money(price_from_total).replace(" euro", ""))
+
+
+def say_queued(minutes: int, lang: str = "it") -> str:
+    """RF-45: l'attesa dichiarata in minuti (già arrotondati per eccesso, almeno 1)."""
+    if lang == "en":
+        wait = "a minute" if minutes == 1 else "%d minutes" % minutes
+        return ("You're in the queue: the payment link will be ready in about %s. Ask me how it's "
+                "going whenever you like." % wait)
+    wait = "un minuto" if minutes == 1 else "%d minuti" % minutes
+    return ("Ti ho messo in coda: tra circa %s il link di pagamento sarà pronto. Chiedimi a che "
+            "punto è quando vuoi." % wait)
+
+
+_REPLACED_INTRO = {
+    "it": "Quel viaggio non è più prenotabile, ti propongo un'alternativa. ",
+    "en": "That trip can no longer be booked, here is an alternative. ",
+}
+
+
+def say_replaced(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
+    """RF-17: la proposta sostitutiva, senza nominare l'errore del fornitore."""
+    return _REPLACED_INTRO.get(lang, _REPLACED_INTRO["it"]) + say_proposal(product, p, lang)
+
+
+def say_cancelled_then(next_sentence: str, lang: str = "it") -> str:
+    """RF-49: rinuncia a un ordine in coda, poi la proposta (o il nessun risultato) successiva."""
+    return _STATUS.get(lang, _STATUS["it"])[OrderStatus.CANCELLED] + " " + next_sentence
+
+
+_FAILURE_REASONS = {
+    "it": {
+        "upstream": "il fornitore non ha risposto dopo tre tentativi",
+        "config": "il collegamento con il fornitore non è configurato correttamente",
+        "no_alternative": "il viaggio non è più prenotabile e non ho trovato alternative",
+        "payments": "il servizio di pagamento non ha risposto dopo tre tentativi",
+    },
+    "en": {
+        "upstream": "the supplier did not answer after three attempts",
+        "config": "the connection to the supplier is not configured correctly",
+        "no_alternative": "the trip can no longer be booked and I found no alternative",
+        "payments": "the payment service did not answer after three attempts",
+    },
+}
+
+
+def failure_reason(code: str, lang: str = "it") -> str:
+    """Motivo leggibile di un ordine `failed` (RF-25, RF-46), salvato sull'ordine."""
+    reasons = _FAILURE_REASONS.get(lang, _FAILURE_REASONS["it"])
+    return reasons.get(code, reasons["upstream"])
+
+
+def failure_reason_default(lang: str = "it") -> str:
+    return failure_reason("upstream", lang)
 
 
 def say_paid() -> str:

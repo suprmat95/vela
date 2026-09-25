@@ -2714,3 +2714,50 @@ Aggiungo `set_bookable` anche su Postgres, collego il chooser all'ora corrente n
 - 🔧 Bash: Wire now into choose and run suite plus Postgres contract
 
 - 🔧 Bash: Commit Task 8
+
+Task 8 fatto (commit `80bc83b`): la suite passa da 586 a **593 test, verde**, e il contratto dei repository passa anche su Postgres.
+
+**Cosa ho fatto:**
+- **`ProductRepository.set_bookable(id, bookable, checked_at)`**, in memoria e su Postgres. Un id sconosciuto non ha effetto e non dà errore.
+- **Chooser** (`vela/domain/chooser.py`):
+  - nuova funzione `bookable(product, now)`: un prodotto marcato non prenotabile torna candidato **24 ore** dopo `bookable_checked_at` (RF-34);
+  - `choose` accetta `now` come argomento opzionale. Senza `now`, oppure senza l'ora del controllo, il prodotto resta escluso come prima.
+- **Caso d'uso:** `_propose` ora passa l'ora corrente al chooser.
+- **Test:**
+  - `test_set_bookable_roundtrip` nel contratto dei repository;
+  - 4 test nel chooser: meno di 24 ore escluso, 24 ore di nuovo candidato, senza ora del controllo escluso, senza `now` comportamento invariato;
+  - 1 test nel caso d'uso: tra un prodotto marcato 25 ore fa e uno marcato 1 ora fa, viene proposto il primo.
+- Ho visto fallire ogni test prima di implementare, tranne quello sul comportamento invariato, che protegge il comportamento esistente e quindi passava già.
+
+**Cosa ho deciso:** la riabilitazione vera, cioè `bookable=True` dopo che la creazione dell'itinerario riesce, la fa il job d'acquisto (Task 11). Qui il prodotto torna solo candidabile.
+
+**Dubbio da portare nel Task 11.** Quando un prodotto dà errore, il job deve proporre un'alternativa. Ma `_propose` oggi riusa l'ultima proposta aperta dell'intento, che sarebbe proprio quella dell'ordine sostituito. Nel Task 11 la proposta sostituita va chiusa, per esempio registrandola come rifiutata con motivo «non prenotabile», altrimenti verrebbe riproposta la stessa.
+
+Il prossimo è il **Task 9**, le frasi `say` in italiano e in inglese:
+- coda con i minuti di attesa;
+- importo da pagare, dichiarando la differenza prima del link;
+- sostituzione del viaggio senza citare l'errore;
+- rinuncia;
+- fallimento con motivo.
+
+Vado?
+
+## Utente 20:57
+
+si
+
+## Agente 20:57
+
+- 🔧 Bash: Read say module structure
+
+- 🔧 Bash: Read say test style and say_proposal
+
+Scrivo i test delle frasi nuove, in italiano e inglese.
+
+- 🔧 Bash: Write failing say tests
+
+Falliscono tutti per la ragione attesa: funzioni e parametri non esistono ancora. Implemento.
+
+- 🔧 Bash: Implement new say phrases
+
+- 🔧 Bash: Run suite and commit Task 9
