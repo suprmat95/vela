@@ -49,7 +49,8 @@ class StripePaymentsTest(unittest.TestCase):
             "currency": "eur", "unit_amount": 79990,
             "product_data": {"name": "Padel a Lanzarote"}}}])
         self.assertEqual(params["metadata"], {"order_id": "o1", "itinerary_id": "it-9"})
-        self.assertEqual(params["payment_intent_data"], {"metadata": params["metadata"]})
+        self.assertEqual(params["payment_intent_data"], {"metadata": {
+            "order_id": "o1", "itinerary_id": "it-9", "checkoutRefId": "it-9"}})
         self.assertEqual(params["client_reference_id"], "o1")
         self.assertEqual(params["success_url"], "https://vela.test/checkout/success")
         self.assertEqual(params["cancel_url"], "https://vela.test/checkout/cancel")
@@ -88,6 +89,13 @@ class StripePaymentsTest(unittest.TestCase):
     def test_missing_itinerary_is_an_empty_metadata_value(self):
         self.payments.create_payment_link(replace(order(), itinerary_id=None), "Padel")
         self.assertEqual(self.sessions.calls[0][0]["metadata"]["itinerary_id"], "")
+
+    def test_payment_intent_carries_hofj_checkout_ref(self):
+        """HofJ lega il PaymentIntent al carrello con metadata.checkoutRefId = itineraryId."""
+        self.payments.create_payment_link(order(), "Padel")
+        pi_metadata = self.sessions.calls[0][0]["payment_intent_data"]["metadata"]
+        self.assertEqual(pi_metadata["checkoutRefId"], "it-9")
+        self.assertNotIn("checkoutRefId", self.sessions.calls[0][0]["metadata"])
 
 
 class BuildClientTest(unittest.TestCase):
