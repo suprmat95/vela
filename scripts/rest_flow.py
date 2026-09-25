@@ -28,9 +28,11 @@ import httpx
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp_smoke import count_products  # noqa: E402
 
-# Frasi di prova: si fissano sul catalogo di staging (Task 7 del piano M7).
+# Frasi di prova sul catalogo di staging (fixtures/catalog-staging.json, verificate da
+# tests/test_staging_fixture.py): la frase di §10.1 per i criteri 1 e 3; Firenze per il criterio
+# 4, dove la prima proposta è la trappola 900078 e il sostituto il 78 vero.
 INTENT_FLOW = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
-INTENT_TRAP = INTENT_FLOW
+INTENT_TRAP = "un weekend di padel a Firenze a ottobre, siamo in due"
 REASON = "troppo caro"
 PROFILE = {"first_name": "Prova", "last_name": "Flusso", "email": "prova.flusso@example.com",
            "phone": "+390000000000", "participants": [{"first_name": "Seconda", "last_name": "Prova"}]}

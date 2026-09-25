@@ -71,3 +71,33 @@ contro le ~96 in 2 finestre dichiarate prima della corsa (nessun 429, nessuno ST
   traduzione parallela: gli id vanno da 181 a 1093 (in `en`: 12-1088) e i `categoryId` sono
   prevalentemente 8/7/9 (in `en`: 2/1/3; 108 prodotti su 110 in `it`, più due outlier isolati
   con `categoryId` 20 e 28). Gli id non sono quindi confrontabili tra le due locale.
+
+## Fixture di staging (`fixtures/catalog-staging.json`, M7)
+
+Catalogo di HofJ staging per `VELA_UPSTREAM_MODE=live` su staging: in live l'app carica la
+fixture il cui `base_url` coincide con `HOFJ_BASE_URL` e usa il suo `locale` per il carrello
+(`docs/decisions.md`, M7). Su staging i prodotti funzionano solo in `en`.
+
+| Voce | Valore |
+|---|---|
+| Registrata | 2026-09-25, host `https://staging.api.hofj.com`, brand `staging.weebora.com`, locale `en` |
+| Prodotti | 87 in lista, 56 non archiviati, più il prodotto trappola `900078` |
+| Chiamate autenticate | 58 |
+| Prodotto trappola | Clone del 78 (Spector Padel House, Firenze) con id `900078`, inesistente su HofJ, 249 € invece di 250 € e `vela_trap: true`: criterio 4 di spec §10, frase `INTENT_TRAP` di `scripts/rest_flow.py` |
+
+Staging contiene anche prodotti di prova ("GROUP TOUR TEST", "Test Companion e Player") e dati
+incoerenti (il 867 "Costa Blanca Padel Experience" ha destinazione Nicosia, Cipro): la fixture li
+riporta come sono.
+
+```bash
+# registrazione (la chiave solo dall'ambiente; cartella grezza fuori dal repo, nuova)
+HOFJ_BASE_URL=https://staging.api.hofj.com HOFJ_BRAND=staging.weebora.com \
+  uv run python scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-staging-en-AAAAMMGG \
+  --locale en --out fixtures/catalog-staging.json
+# ricostruzione con la trappola, senza chiamate
+HOFJ_BASE_URL=https://staging.api.hofj.com uv run python scripts/record_catalog.py \
+  --raw-dir ~/vela-raw/catalog-staging-en-AAAAMMGG --locale en --build-only --trap-from 78 \
+  --out fixtures/catalog-staging.json
+```
+
+Rigenerandola, gli id attesi in `tests/test_staging_fixture.py` vanno rivisti.

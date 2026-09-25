@@ -485,3 +485,156 @@ Aggiungo l'import mancante nel chooser e le frasi `price` in `say.py`:
 Suite verde. Faccio il commit del Task 6:
 
 - 🔧 Bash: Commit Task 6
+
+Task 6b e Task 6 sono fatti, suite verde: 765 test, 42 saltati.
+
+**Task 6b: "troppo caro" porta sempre a una proposta più economica** (commit `caa129d`)
+- **Cosa ho fatto:**
+  - Dopo un rifiuto per prezzo il chooser tiene solo i prodotti con totale strettamente minore di quello rifiutato. Il tetto si ricava dai rifiuti già salvati, quindi non ci sono migrazioni né campi nuovi nelle risposte.
+  - L'area resta il primo criterio d'ordinamento. Se il prodotto più economico è in un altro paese, la motivazione lo dichiara.
+  - Se non esiste niente di più economico, la risposta è `no_match` con `failed_criterion: "price"` e una frase in it e en.
+- **Test aggiornati:** quattro test esistenti fissavano il vecchio comportamento e li ho aggiornati; sono elencati in `docs/decisions.md`. Il più visibile: dopo "troppo caro" il caso d'uso ora propone il prodotto a 300 € in Italia invece di quello a 390 € in Spagna.
+- **Dove può cambiare il comportamento visto dal viaggiatore:** nel criterio 1 la seconda proposta può uscire dalla Spagna, dichiarandolo.
+
+**Task 6: `scripts/rest_flow.py`** (commit `d28768d`)
+- **Cosa fa:** esegue il flusso REST cronometrato e stampa una tabella Markdown dei tempi. Con `--trap` si ferma a `replaced`. Legge il token solo da `VELA_API_TOKEN` e non lo stampa mai.
+- **Test:** 16 test in `tests/test_rest_flow.py`, contro l'app replay e con risposte preparate.
+- **Scostamento dal piano:** in modalità trappola non serve annullare niente. Un errore di prodotto porta l'ordine in `replaced` prima che nasca un link, quindi non c'è polling Stripe da fermare.
+
+**Su cosa ho dubbi**
+- Il contratto Postgres di `archive_missing` e `list_for_intent` non è stato eseguito qui: manca `DATABASE_URL`. Va lanciato prima del merge.
+- Se un giorno la guardia su `awaiting_payment` in modalità trappola sparisse, `test_trap_that_does_not_fail_is_reported` resterebbe in attesa fino al timeout di 900 s invece di fallire subito. Posso abbassare il timeout in quel test.
+
+**Proposta per il Task 7 (registrazione del catalogo di staging, manuale con te), aspetto il tuo OK:**
+- **Chiamate a HofJ staging.**
+  - Una lettura della quota a ogni finestra da 60 s, poi le pagine della lista prodotti in `en` (probabilmente 1–2), poi un dettaglio per ogni prodotto non archiviato.
+  - Quanti sono i prodotti di staging non lo sappiamo. Il dry-run stima 123 e 92 perché ricade sui numeri di produzione, quindi non vale per staging.
+  - Tetto: 150 chiamate. Lo script si ferma da solo sotto 90 chiamate per finestra.
+- **Comando.** Lo lanci tu con `!`, così la chiave non passa da me. `HOFJ_API_KEY` dev'essere già nell'ambiente di quella shell:
+  ```
+  ! HOFJ_BASE_URL=https://staging.api.hofj.com HOFJ_BRAND=staging.weebora.com uv run python scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-staging-en-20260925 --locale en --out fixtures/catalog-staging.json
+  ```
+  Lo script stampa il numero di prodotti trovati; se supera il tetto lo interrompi.
+- **Dopo la registrazione** leggo io la fixture, senza altre chiamate, e ti propongo prima di scriverli:
+  - l'intento del criterio 1/3 (`INTENT_FLOW`) e quello del criterio 4 (`INTENT_TRAP`);
+  - il prodotto modello della trappola.
+
+  Il vincolo: dopo "troppo caro" deve esistere un prodotto più economico, e la trappola deve stare in un'area diversa da quella di `INTENT_FLOW` ma avere un sostituto reale.
+- **Poi, in TDD:** `--build-only --trap-from ID`, i test sulla fixture di staging (`tests/test_catalog_fixture.py`) e i test del chooser sugli intenti scelti (`tests/test_chooser_fixture.py`), infine il commit.
+
+## Utente 22:08
+
+come metto HOFJ_API_KEY nell'ambiente
+
+## Agente 22:08
+
+- 🔧 Bash: Check whether a .env file exists, without reading it
+
+In questo worktree non c'è un file `.env`: ho controllato solo che esista, senza aprirlo. Ci sono due modi per mettere la chiave nell'ambiente. In entrambi il valore non va mai scritto nel comando.
+
+**Perché mai nel comando.** Tutto quello che lanci con `!` finisce nella conversazione. L'hook di commit copia le conversazioni in `agent-log/`, quindi una chiave scritta nel comando verrebbe committata.
+
+Una seconda cosa: ogni comando `!` gira in una shell nuova. Un `export` fatto in un `!` precedente non vale per quello dopo, quindi la chiave va caricata nella stessa riga del comando.
+
+**Opzione 1: dal tuo terminale (consigliata).** La chiave la digiti senza che venga mostrata, e nulla passa dalla conversazione:
+```bash
+cd /Users/matteodospina/orca/workspaces/vela/task-m7
+read -rs HOFJ_API_KEY && export HOFJ_API_KEY     # incolli la chiave e premi Invio: non viene mostrata
+HOFJ_BASE_URL=https://staging.api.hofj.com HOFJ_BRAND=staging.weebora.com \
+  uv run python scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-staging-en-20260925 \
+  --locale en --out fixtures/catalog-staging.json
+```
+Il `read -s` non funziona con `!`, che non è interattivo: serve il tuo terminale. Alla fine mi incolli l'output dello script. Lo script non stampa la chiave: dà il conteggio delle chiamate e il percorso della fixture scritta.
+
+**Opzione 2: con `!`, da un file che hai già.** Se la chiave sta in un `.env` di un altro worktree (in M5 era `api-recognition`), carichi il file nella stessa riga senza stamparlo:
+```
+! set -a; . /percorso/del/tuo/.env; set +a; HOFJ_BASE_URL=https://staging.api.hofj.com HOFJ_BRAND=staging.weebora.com uv run python scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-staging-en-20260925 --locale en --out fixtures/catalog-staging.json
+```
+Note su questa opzione:
+- Le due variabili scritte prima di `uv run` vincono su quelle del file, anche se il `.env` contiene l'URL di produzione.
+- Lo script accetta sia `HOFJ_API_KEY` sia `API_BEAR_KEY`. Su staging funziona la chiave interna `test-dev-2`, la stessa usata in M5.
+
+In tutti e due i casi puoi prima lanciare lo stesso comando con `--dry-run`: non fa chiamate e non richiede la chiave. Ricorda però che la stima del dry-run usa i numeri di produzione. Il numero vero dei prodotti di staging lo stampa la registrazione, dopo la lista. Se supera il tetto di 150 chiamate, interrompi con Ctrl-C: le risposte già scaricate restano nella `--raw-dir`.
+
+## Utente 22:08
+
+ho messo .env
+
+## Agente 22:09
+
+Verifico che il file sia al suo posto e che contenga una chiave HofJ, senza stamparne il contenuto. Poi lancio la registrazione con le chiamate già dichiarate: lista prodotti di staging in `en` più un dettaglio per prodotto attivo, tetto 150.
+
+- 🔧 Bash: Check .env exists and defines a HofJ key, without printing values
+
+- 🔧 Bash: Record staging catalog in en (HofJ staging calls, declared)
+
+- 🔧 Bash: Summarize staging catalog for intent choice
+
+- 🔧 Bash: Simulate criterion 1 intent on staging catalog
+
+- 🔧 Bash: Build trap fixture in scratch and simulate both intents
+
+- 🔧 Bash: Simulate Florence trap intent and check areas
+
+Il comando è stato rifiutato, probabilmente per il `rm -rf`. Lo rilancio senza cancellare nulla, scrivendo la fixture di prova in una cartella nuova dello scratchpad:
+
+- 🔧 Bash: Build trap-78 fixture in scratch and simulate intents
+
+- 🔧 Bash: Inspect availability windows of candidate products
+
+Il 28 ha una finestra aperta dal 28 settembre al 31 dicembre, quindi il 1° ottobre è una data valida. La registrazione del catalogo è fatta; per le scelte successive aspetto il tuo OK.
+
+**Registrazione del catalogo di staging**
+- 58 chiamate HofJ su staging, dentro il tetto di 150.
+- `fixtures/catalog-staging.json`: 87 prodotti, 56 attivi, locale `en`, circa 975 KB. Per ora è fuori da git, ancora senza trappola.
+- Le risposte grezze stanno in `~/vela-raw/catalog-staging-en-20260925`. Da lì la fixture si ricostruisce senza chiamate.
+
+**Proposta di scelte per il criterio 1/3 e il criterio 4** (verificate con il dominio vero sulla fixture, oggi e al 2 ottobre):
+
+| | Scelta | Cosa succede |
+|---|---|---|
+| `INTENT_FLOW` (criteri 1 e 3) | La frase di §10.1 invariata: "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro" | Prima proposta: 28, Nueva Alcantara Club, Marbella, 398 € in due. Dopo "troppo caro": 867, "Costa Blanca Padel Experience", 200 €, dichiarata fuori dalla Spagna |
+| Modello della trappola | Prodotto 78, Spector Padel House, Firenze, 250 € a persona → trappola `900078` a 249 € | Non interferisce con l'intento sulla Spagna |
+| `INTENT_TRAP` (criterio 4) | "un weekend di padel a Firenze a ottobre, siamo in due" | Prima proposta: la trappola (498 €). Dopo il fallimento del carrello: il 78 vero (500 €), prodotto diverso |
+
+**Cose da sapere prima dell'OK**
+- **Il prodotto 867 è un dato sporco di staging.** Il titolo dice "Costa Blanca", ma la destinazione registrata è Nicosia (Cipro). Vela lo propone come più economico fuori dalla Spagna, e la frase del viaggiatore dirà che è a Nicosia. Per il criterio va bene, perché è più economico e dichiarato. In un video, però, suona strano.
+  - Alternativa: tetto "massimo 700 euro". Non cambia niente: il 28 resta primo e il 867 secondo.
+  - Il 867 ha 31 partenze settimanali, quindi se il carrello su HofJ accetta questo prodotto è plausibile. Lo sapremo solo in live.
+- **La trappola ha lo stesso titolo del prodotto 78.** Il viaggiatore vede prima "Spector Padel House – Florence" a 498 €, poi lo stesso titolo a 500 €. Tecnicamente è un prodotto diverso: il criterio chiede "una proposta diversa senza vedere l'errore". In registrazione lo dichiaro. Posso anche far cambiare leggermente il titolo della trappola a `add_trap`, ma aggiunge una regola alla funzione.
+- **Staging contiene prodotti di prova** ("GROUP TOUR TEST", "Test Companion e Player", "TEST GROUP TRIP"). Oggi nessuno esce per questi intenti; li lascio come sono, perché la fixture deve rispecchiare il catalogo.
+
+**Poi, in TDD:**
+- ricostruisco la fixture con `--build-only --trap-from 78`;
+- test sulla fixture di staging in `tests/test_catalog_fixture.py`: valida, `en`, host di staging, una sola trappola;
+- test del chooser su `INTENT_FLOW` e `INTENT_TRAP` con una data fissa;
+- costanti in `scripts/rest_flow.py`;
+- commit.
+
+Ti va bene così, con la trappola dal 78 e l'intento su Firenze?
+
+## Utente 22:12
+
+ok, procedi con il Task 7
+
+## Agente 22:12
+
+- 🔧 Bash: Read fixture test files structure
+
+Ricostruisco la fixture di staging con la trappola. Sono solo dati, nessuna chiamata:
+
+- 🔧 Bash: Rebuild staging fixture with trap 78
+
+RED: nuovo file di test per la fixture di staging e per gli scenari dei criteri, con le costanti di `rest_flow.py`.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_staging_fixture.py
+
+- 🔧 Bash: Run staging fixture tests, expect trap intent red
+
+- 🔧 Bash: Set trap intent constant and run suite
+
+Suite verde. Aggiungo a `docs/fixtures.md` come si rigenera la fixture di staging:
+
+- 🔧 Bash: Read fixtures doc structure
+
+- 🔧 Bash: Document staging fixture, run suite, commit Task 7
