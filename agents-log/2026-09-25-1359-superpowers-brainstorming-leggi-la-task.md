@@ -66,3 +66,43 @@ Ho tutto quello che mi serve. Carico la skill per scrivere piani e poi stendo il
 Piano approvato. Eseguo il Task 0: copio il piano in `docs/plans/` e aggiungo la voce a `docs/decisions.md`, poi un commit.
 
 - 🔧 Bash: Copy plan into docs/plans and append M1 decisions to decisions.md
+
+- 🔧 Bash: Commit plan and decisions
+
+Task 0 completato: piano e decisioni sono nel repo, commit `6b88298` su `task/m1`. La suite di test non è stata toccata e resta quella di partenza.
+
+**Cosa ho fatto**
+- Intervista: quattro domande, decisioni registrate in `docs/decisions.md` (sezione "M1: fixture del catalogo in locale `it`").
+- Piano in `docs/plans/2026-09-25-m1-fixture-catalogo.md`: sette task con test scritti prima, comandi, esiti attesi e commit. I task 1-5 girano senza rete; il Task 6 registra la fixture reale dopo aver dichiarato le chiamate via dry-run.
+
+**Cosa ho deciso**
+- Riuso di `Client` e `QuotaGuard` di `api_explore.py` senza modificarlo; risposte grezze fuori dal repo, così la fixture si ricostruisce senza quota.
+- Fixture con lista integrale più, per i non archiviati, una proiezione ai campi di RF-28 e un grezzo senza chiavi media.
+- Chiave da `HOFJ_API_KEY` con fallback `API_BEAR_KEY`; `HOFJ_BRAND` opzionale.
+
+**Di cui non sono sicuro**
+- La forma di `rawAttributes.hotels` non è documentata: la proiezione la porta com'è, l'hotel di default lo estrarrà M2.
+- Il tetto di 1,5 MB per il file è una stima: il Task 6 prevede come ampliare la lista di chiavi da scartare e ricostruire senza nuove chiamate.
+- In locale `it` il numero di prodotti può differire da 123/92: il test di validazione accetta almeno 80 attivi, da rivedere se il conteggio reale è più basso.
+
+Prossimo passo, tuo: lanciare l'esecuzione dal Task 1, per esempio con `/superpowers:subagent-driven-development docs/plans/2026-09-25-m1-fixture-catalogo.md`.
+
+Uso Subagent-Driven Development per eseguire il piano. Setup: workspace del piano, ledger, template dei prompt.
+
+- 🔧 Bash: Resolve plan workspace and read subagent prompt templates
+
+- 🔧 Bash: Generate task briefs 1-6 and write the SDD ledger with the pre-flight scan
+
+Pre-flight pulito. Dispatch dell'implementer per il Task 1 (codice completo nel brief: modello economico).
+
+- 🔧 Agent: Implement Task 1: strip_media e project_detail
+
+Implementer del Task 1 in corso. Nel frattempo preparo il blocco dei vincoli globali per i reviewer e leggo il template del reviewer finale.
+
+- 🔧 Bash: Write reviewer constraints block and read the final code-reviewer template
+
+Attendo il report dell'implementer del Task 1; non c'è altro lavoro indipendente da fare nel frattempo.
+
+- 🔧 ToolSearch
+
+Task 1 è in esecuzione da parte dell'implementer; riceverò la notifica al suo completamento e proseguirò con la review e i task successivi senza interruzioni.
