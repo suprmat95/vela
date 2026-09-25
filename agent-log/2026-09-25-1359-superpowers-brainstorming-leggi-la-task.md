@@ -258,3 +258,103 @@ RED su tutti e tre. Ora le correzioni.
 - 🔧 Bash: Make pool_timeout Postgres-only, adjust its test, rerun the suite
 
 - 🔧 Bash: Record decisions, commit the fix pass, update ledger, rebuild and smoke test the image
+
+Esecuzione arrivata alla T9, che richiede un tuo intervento. Tutto il resto è fatto e verificato.
+
+**Stato**
+- T1-T8 completate, ogni task in un commit sul branch `task/m0` (12 commit sopra `7da9992`), più un commit di fix dalla revisione.
+- Suite: 84 test verdi nel venv 3.12, 2 saltati senza `DATABASE_URL`. `tests.test_agents_log` verde anche col Python 3.7 di sistema.
+- `docker build` riuscito; il container con SQLite mostra `Running upgrade -> 0001` e `/health` risponde 200 `db: ok`. Senza `DATABASE_URL` termina con errore esplicito.
+- Storia di `agent-log/` preservata (`git log --follow` su un file arriva fino al commit del brief). L'hook ora logga anche questa sessione, che prima non produceva nulla.
+- Revisione finale fatta da un reviewer a contesto fresco: 0 Critical, 3 Important corretti con test rosso→verde, 6 Minor differiti.
+
+**Rulings I made** (in ordine, con il costo se sbagliate)
+- `vela.egg-info/` finito nel commit di T1: rimosso e ignorato in un commit successivo, nessun amend. Costo: un commit in più.
+- Il test "niente `.env`" di T3 era rosso al commit (matchava `env.get`) per una catena `&&` sbagliata: corretto il test in un commit successivo. Costo: nessuno sul codice.
+- `.dockerignore` esclude `docs`, `tests`, `scripts`, `loadtest`, `.claude`, `.superpowers` ma tiene `fixtures/` per M2. Costo: una riga.
+- Avevo disabilitato `/docs` e `/redoc`; il reviewer ha obiettato (strumento per sviluppatori, non UI del viaggiatore; `/openapi.json` restava esposto). Ripristinati i default FastAPI e registrato in `docs/decisions.md`. Costo: rimettere un argomento.
+- `statement_timeout` nel ping di `check_db` non aggiunto: `connect_timeout` e `pool_timeout` (3 s, solo Postgres) coprono i casi di M0; il DB che accetta e poi stalla è materia di M14. Costo: health lento in uno scenario raro.
+
+**Deferred minors**
+- Dockerfile: `chown -R` duplica `.venv` in un layer (meglio `useradd` prima e `COPY --chown`).
+- `postgresql+psycopg2://` passa invariato e fallisce all'import con `ModuleNotFoundError`.
+- `alembic/env.py`: `fileConfig` senza `disable_existing_loggers=False`, log INFO nell'output dei test.
+- Il piano dice `git log --follow agent-log/`; vale solo su un singolo file (corretto in `decisions.md`, non nel piano).
+- README, deploy passo 3: "possono restare vuote" per le variabili `sync: false` è da verificare su Render.
+- Alcune asserzioni sui dettagli implementativi nei test (stringa `--port`, `open(` nel sorgente, `test_health_is_public` banale fino a M4).
+
+**Cosa serve da te per la T9**
+1. Il push di `task/m0` su `origin` (è in `ask` nelle permissions e tocca un branch condiviso): dimmi se procedo.
+2. Su Render: New → Blueprint → repo `suprmat95/vela`, branch `task/m0`. Il Blueprint chiede un valore per ogni variabile `sync: false`: per M0 basta qualunque segnaposto. Poi passami l'URL del servizio.
+
+Con l'URL faccio la verifica `curl .../health`, annoto URL ed esito in README e decisions (T9), e poi ti chiedo l'OK per il merge su `master` (T10, conflitto previsto su `docs/decisions.md`).
+
+## Utente 14:40
+
+1 procedi poi faccio il 2
+
+## Agente 14:40
+
+- 🔧 Bash: Push task/m0 branch to origin
+
+Push fatto: `task/m0` è su `origin` con tracking (14 commit, HEAD `af5eaf6`).
+
+Per il punto 2, su Render:
+1. New → Blueprint → repo `suprmat95/vela`, branch `task/m0`.
+2. Render crea `vela-db` e il servizio `vela` da `render.yaml`. Per le variabili `sync: false` inserisci un segnaposto qualsiasi (per M0 non vengono usate).
+3. Quando il deploy finisce, passami:
+   - l'URL del servizio (`https://vela-xxxx.onrender.com`);
+   - se nel log di deploy compare la riga `Running upgrade  -> 0001`;
+   - se il Blueprint ha accettato valori vuoti per le variabili `sync: false` oppure ha richiesto un valore (serve per correggere il passo 3 del README).
+
+Con questi tre dati chiudo la T9 (verifica `curl /health`, URL nel README, esito in `docs/decisions.md`) e ti chiedo l'OK per il merge su `master`.
+
+## Utente 14:40
+
+ok
+
+## Agente 14:41
+
+Perfetto. Per chiudere la T9 mi serve ancora l'URL del servizio Render (e, se lo hai sotto mano, l'esito delle due verifiche sul log della migrazione e sulle variabili `sync: false`). Appena me lo passi eseguo il `curl` su `/health` e registro tutto.
+
+## Utente 14:43
+
+non hai mergiato
+
+## Agente 14:43
+
+Hai ragione, il merge è la T10 e la faccio ora. Verifico che il checkout di `master` sia pulito, poi merge di `task/m0` con risoluzione del conflitto atteso su `docs/decisions.md`.
+
+- 🔧 Bash: Merge task/m0 into master in the main checkout
+
+- 🔧 Bash: Resolve the agent-log file-location conflicts and inspect decisions.md
+
+- 🔧 Bash: Show the conflict region in decisions.md
+
+- 🔧 Bash: Resolve decisions.md keeping both sections, stage moved logs, run suite in master checkout
+
+- 🔧 Bash: Commit the merge on master and push it to origin
+
+- 🔧 Bash: Check merge commit contents and record T10 in the ledger
+
+Merge fatto e pushato.
+
+- `master` è ora `a61fc27` (merge `--no-ff` di `task/m0`), su `origin`.
+- Conflitti risolti: `docs/decisions.md` tiene entrambe le sezioni (roadmap, easter egg, M0); i quattro log che `master` aveva aggiunto in `agents-log/` sono stati spostati in `agent-log/`, la cartella vecchia non esiste più.
+- Suite eseguita nel checkout di `master`: 84 test verdi, 2 saltati senza `DATABASE_URL`.
+
+Nel frattempo `master` aveva ricevuto anche i commit della caccia agli easter egg (`suprmat95/key-reserch`): sono inclusi, nessun conflitto con M0.
+
+Resta aperta solo la T9. Ora puoi creare il Blueprint su Render direttamente dal branch `master`. Quando hai l'URL del servizio, passamelo insieme all'esito del log della migrazione e al comportamento delle variabili `sync: false`; con quello faccio il `curl` su `/health` e registro URL ed esito in README e decisions.
+
+## Utente 15:03
+
+https://vela-n506.onrender.com
+
+## Agente 15:03
+
+- 🔧 Bash: Check the Render deployment health endpoint
+
+`/health` su Render risponde 200 con `db: ok`. Registro URL ed esito, poi merge e push.
+
+- 🔧 Bash: Record the Render URL in README and decisions, commit, merge into master and push both branches
