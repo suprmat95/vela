@@ -8,6 +8,7 @@ In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan
 catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
 La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RFC 7807.
 Il webhook Stripe (``/webhooks/stripe``) è sempre montato; senza ``STRIPE_WEBHOOK_SECRET`` risponde 503.
+Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 """
 from contextlib import asynccontextmanager
 from typing import Callable, List, Optional, Tuple
@@ -20,9 +21,11 @@ from vela.adapters.db import make_engine
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.stripe_fake import FakePayments
+from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.models import Product
 from vela.domain.usecases import Vela
+from vela.ports.payments import PaymentsPort
 from vela.surfaces.checkout_pages import router as checkout_router
 from vela.surfaces.health import router as health_router
 from vela.surfaces.mcp import build_mcp, mcp_routes
@@ -35,13 +38,26 @@ REPLAY = "replay"
 CatalogLoader = Callable[[], List[Product]]
 
 
+def build_payments(settings: Settings) -> PaymentsPort:
+    """Stripe se `STRIPE_SECRET_KEY` è impostata (indipendente dall'upstream HofJ), altrimenti
+    il pagamento finto. Una configurazione Stripe incompleta blocca l'avvio."""
+    if not settings.stripe_secret_key:
+        return FakePayments(settings.vela_public_url)
+    if not settings.stripe_webhook_secret:
+        raise RuntimeError("STRIPE_SECRET_KEY è impostata ma STRIPE_WEBHOOK_SECRET no: "
+                           "i pagamenti non verrebbero mai confermati")
+    if not settings.vela_public_url:
+        raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
+                           "del Checkout")
+    return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
+
+
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, BookingRunner, CatalogLoader]:
     if settings.vela_upstream_mode != REPLAY:
         raise RuntimeError("VELA_UPSTREAM_MODE=%s non disponibile prima di M5: usare replay"
                            % settings.vela_upstream_mode)
     hofj = ReplayHofJ()
-    vela = Vela(PostgresRepositories(engine), hofj, FakePayments(settings.vela_public_url),
-                DEFAULT_TRAVELER)
+    vela = Vela(PostgresRepositories(engine), hofj, build_payments(settings), DEFAULT_TRAVELER)
     return vela, BookingRunner(vela.orders), hofj.load_catalog
 
 

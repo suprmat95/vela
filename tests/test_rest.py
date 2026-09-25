@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW, assert_problem, assert_single_product, make_product
+from support import NOW, FlakyPayments, assert_problem, assert_single_product, make_product
 from vela.adapters.background import InlineRunner
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
@@ -31,12 +31,13 @@ class Clock:
         return self.at
 
 
-def make_client(products=None, token=TOKEN):
+def make_client(products=None, token=TOKEN, payments=None):
     """App con repository in memoria, adapter replay e runner sincrono. `products=None` = fixture."""
     repos = MemoryRepositories()
     hofj = ReplayHofJ(rng=random.Random(7))
     repos.products.upsert_many(hofj.load_catalog() if products is None else products)
-    vela = Vela(repos, hofj, FakePayments("http://test"), DEFAULT_TRAVELER, now=Clock())
+    vela = Vela(repos, hofj, payments or FakePayments("http://test"), DEFAULT_TRAVELER,
+                now=Clock())
     settings = Settings(vela_upstream_mode="replay", vela_public_url="http://test",
                         vela_api_token=token)
     app = create_app(settings, vela=vela, runner=InlineRunner(vela.orders))
@@ -320,3 +321,32 @@ class FullFlowTest(unittest.TestCase):
         self.assertIn(final["booking_code"], final["say"])
         for body in bodies:                                   # RF-10 su ogni risposta
             assert_single_product(self, body)
+
+
+def proposal_id(c):
+    iid = new_intent(c)["intent_id"]
+    return c.get("/v1/intents/%s/proposal" % iid, headers=AUTH).json()["proposal_id"]
+
+
+class PaymentsErrorTest(unittest.TestCase):
+    def test_payments_error_is_503_and_retry_gives_the_link(self):
+        c, vela = make_client(payments=FlakyPayments(failures=1))
+        pid = proposal_id(c)
+        r = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)
+        body = assert_problem(self, r, 503, "payments-unavailable")
+        self.assertNotIn("fornitore", body["detail"])
+        r = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["payment_url"].startswith("http://pay.test/"))
+        self.assertEqual(vela.payments.attempts, 2)
+
+
+class OrderStatusPaymentTest(unittest.TestCase):
+    def test_awaiting_payment_status_has_link_and_amount(self):
+        c, _ = make_client()
+        order = c.post("/v1/proposals/%s/accept" % proposal_id(c), headers=AUTH).json()
+        r = c.get("/v1/orders/%s" % order["order_id"], headers=AUTH).json()
+        self.assertEqual((r["outcome"], r["status"]), ("order_status", "awaiting_payment"))
+        self.assertEqual((r["payment_url"], r["total"], r["currency"]),
+                         (order["payment_url"], order["total"], order["currency"]))
+        assert_single_product(self, r)

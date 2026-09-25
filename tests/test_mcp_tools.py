@@ -5,7 +5,8 @@ from datetime import timedelta
 
 from mcp import Client
 
-from support import NOW, FakeHofJ, StubPayments, assert_single_product, make_product
+from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
+                     make_product)
 from vela.adapters.background import InlineRunner
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
@@ -162,6 +163,18 @@ class ErrorsTest(McpCase):
         self.assertEqual(text, say.say_error())
         self.assertNotIn("segreto", text)
         self.assertIn("accept_proposal", logs.output[0])
+
+    async def test_payments_error_reads_a_sentence_and_retry_works(self):
+        self.vela.payments = FlakyPayments(failures=1)
+        intent = await self.ok("create_intent", text=INTENT)
+        proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        with self.assertLogs("vela.mcp", "WARNING"):
+            text = await self.error_text("accept_proposal", proposal_id=proposal["proposal_id"], **TRAVELER)
+        self.assertEqual(text, say.say_payments_unavailable())
+        order = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"])
+        self.assertTrue(order["payment_url"].startswith("http://pay.test/"))
+        status = await self.ok("get_order_status", order_id=order["order_id"])
+        self.assertEqual((status["payment_url"], status["total"]), (order["payment_url"], order["total"]))
 
     async def test_domain_unavailable(self):
         self.server = build_mcp(lambda: None)
