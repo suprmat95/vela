@@ -107,3 +107,9 @@ Origine: intervista sulla task M0 di `docs/roadmap.md`, piano in
 | Percorsi Alembic | `script_location = %(here)s/alembic`, `prepend_sys_path = %(here)s` | Le migrazioni funzionano da qualunque directory di lavoro, non solo dalla radice del repo o da `/app` nel container. |
 | Sessioni slash command | `scripts/agents_log.py` logga anche le sessioni il cui unico messaggio utente è uno slash command con argomenti | La sessione di brainstorm di M0 non aveva prodotto alcun log (primo messaggio filtrato come rumore, poi solo risposte ad `AskUserQuestion`). |
 | Storia di `agent-log/` | `git log --follow agent-log/<file>` su un singolo file | `--follow` accetta un solo path e non segue una directory attraverso la rinomina. |
+
+## 2026-09-25 — Deploy M0 verificato
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| URL live | `https://vela-n506.onrender.com`, Blueprint da `render.yaml` (web service Docker + Postgres free, Frankfurt) | `curl https://vela-n506.onrender.com/health` → `200 {"status":"ok","db":"ok"}` il 2026-09-25. L'entrypoint esegue `alembic upgrade head` con `set -e` prima di uvicorn: il servizio in ascolto prova che la migrazione `0001` è stata applicata. |

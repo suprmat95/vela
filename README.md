@@ -84,7 +84,7 @@ errore esplicito.
 Il piano free spegne il servizio dopo inattività: la prima richiesta può richiedere
 qualche decina di secondi. Il Postgres free scade dopo 30 giorni.
 
-URL live: da compilare dopo il primo deploy.
+URL live: https://vela-n506.onrender.com (`GET /health`, deploy M0 verificato il 2026-09-25).
 
 ## Struttura
 
