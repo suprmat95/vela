@@ -60,6 +60,25 @@ class CreateIntentTest(unittest.TestCase):
         self.assertEqual(vela.repos.intents.get(r.intent_id).profile.first_name, "Anna")
 
 
+    def test_fallback_extractor_is_used(self):
+        class Fx:
+            calls = 0
+
+            def extract(self, text, today):
+                Fx.calls += 1
+                return {"sport": "padel", "area": None, "period_start": "2026-10-01",
+                        "period_end": "2026-10-31", "pax": None, "budget": None}
+        vela = make_vela()
+        vela.extractor = Fx()
+        r = vela.create_intent("una vacanza con la racchetta in Spagna per due")
+        self.assertIsInstance(r, IntentCreated)
+        self.assertEqual(r.criteria.sport, "padel")
+        self.assertEqual(Fx.calls, 1)
+
+    def test_default_has_no_extractor(self):
+        self.assertIsNone(make_vela().extractor)
+
+
 class GetProposalTest(unittest.TestCase):
     def test_single_proposal_best_match(self):
         vela = make_vela()

@@ -17,6 +17,7 @@ from vela.domain.models import (AcceptResponse, Intent, IntentCreated, IntentQue
                                 ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
 from vela.ports.hofj import Customer, HofJPort
+from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
 from vela.ports.repositories import DuplicateOrder, Repositories
 
@@ -38,12 +39,14 @@ def summary_of(product: Product) -> ProductSummary:
 class Vela:
     def __init__(self, repos: Repositories, hofj: HofJPort, payments: PaymentsPort,
                  defaults=None, now: Optional[Callable[[], datetime]] = None,
-                 new_id: Optional[Callable[[], str]] = None):
+                 new_id: Optional[Callable[[], str]] = None,
+                 extractor: Optional[IntentExtractor] = None):
         self.repos = repos
         self.hofj = hofj
         self.payments = payments
         self.now = now or utcnow
         self.new_id = new_id or random_id
+        self.extractor = extractor
         self.defaults = defaults or TravelerDefaults()
         self.orders = OrderService(repos, hofj, self.now)
 
@@ -52,7 +55,7 @@ class Vela:
     def create_intent(self, text: str, profile: Optional[TravelerProfile] = None
                       ) -> Union[IntentCreated, IntentQuestion]:
         profile = profile or TravelerProfile()
-        result = parse_intent(text, profile, today=self.now().date())
+        result = parse_intent(text, profile, today=self.now().date(), extractor=self.extractor)
         if result.question:
             return IntentQuestion(result.question, result.question)
         intent = Intent(self.new_id(), text, result.criteria, profile, self.now())

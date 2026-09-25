@@ -313,3 +313,78 @@ class QuestionTest(unittest.TestCase):
         c = parse_intent("padel in Spagna a ottobre per due", today=TODAY).criteria
         self.assertEqual(c.area, Area("country", "Spagna", "ES"))
         self.assertEqual(c.period, Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"))
+
+
+class FakeExtractor:
+    def __init__(self, result=None, error=None):
+        self.result, self.error, self.calls = result, error, []
+
+    def extract(self, text, today):
+        self.calls.append((text, today))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+VAGUE = "una vacanza con la racchetta in Spagna per due"   # né sport né periodo
+GOOD = {"sport": "padel", "area": "Greece", "period_start": "2026-11-01",
+        "period_end": "2026-11-30", "pax": 3, "budget": 1500}
+
+
+class FallbackTest(unittest.TestCase):
+    def test_not_called_when_sport_found(self):
+        fx = FakeExtractor(GOOD)
+        parse_intent("padel in Spagna per due", today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [])
+
+    def test_not_called_when_period_found(self):
+        fx = FakeExtractor(GOOD)
+        parse_intent("qualcosa a ottobre per due", today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [])
+
+    def test_called_when_both_missing_and_overrides(self):
+        fx = FakeExtractor(GOOD)
+        r = parse_intent(VAGUE, today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [(VAGUE, TODAY)])
+        c = r.criteria
+        self.assertEqual(c.sport, "padel")
+        self.assertEqual(c.area, Area("country", "Grecia", "GR"))
+        self.assertEqual(c.period, Period(date(2026, 11, 1), date(2026, 11, 30), "llm"))
+        self.assertEqual(c.pax, 3)
+        self.assertEqual(c.budget, Decimal("1500"))
+        self.assertEqual(c.language, "it")
+        self.assertIsNone(r.question)
+
+    def test_null_fields_keep_parser_values(self):
+        fx = FakeExtractor({"sport": "tennis", "area": None, "period_start": None,
+                            "period_end": None, "pax": None, "budget": None})
+        c = parse_intent(VAGUE, today=TODAY, extractor=fx).criteria
+        self.assertEqual((c.sport, c.area.country_code, c.pax), ("tennis", "ES", 2))
+
+    def test_invalid_fields_are_ignored(self):
+        baseline = parse_intent(VAGUE, today=TODAY).criteria
+        for bad in [
+            {"sport": "golf", "area": "Atlantide", "period_start": "2026-12-10",
+             "period_end": "2026-12-01", "pax": 0, "budget": -5},
+            {"sport": 7, "area": 3, "period_start": "2025-01-01", "period_end": "2025-01-05",
+             "pax": True, "budget": "abc"},
+            {"period_start": "ieri", "period_end": "domani", "pax": 50, "budget": True},
+            {"period_start": "2026-11-01"},
+        ]:
+            with self.subTest(bad=bad):
+                r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(bad))
+                self.assertEqual(r.criteria, baseline)
+                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_extractor_error_is_ignored(self):
+        r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(error=RuntimeError("boom")))
+        self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_extractor_returning_none_or_junk(self):
+        for result in (None, "testo", ["x"]):
+            with self.subTest(result=result):
+                r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(result))
+                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_no_extractor_no_error(self):
+        self.assertEqual(parse_intent(VAGUE, today=TODAY).question, QUESTION_SPORT_OR_PERIOD)

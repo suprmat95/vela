@@ -1,18 +1,23 @@
-"""Parser deterministico minimo degli intenti, italiano e inglese (RF-02, RF-04; completo in M9).
+"""Parser deterministico degli intenti, italiano e inglese (RF-02, RF-04), con fallback LLM
+opzionale (RF-03).
 
 Estrae sport, area (dizionario `geo`), periodo, numero di persone, budget e lingua. Se manca
 sia lo sport che il periodo, oppure il numero di persone (e il profilo non lo dà), produce una
 sola domanda per l'agente. `today` è iniettato per rendere i periodi deterministici.
 """
 import calendar
+import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
 from vela.domain import geo
 from vela.domain.models import Criteria, Period, TravelerProfile
+from vela.ports.llm import IntentExtractor
+
+log = logging.getLogger(__name__)
 
 QUESTION_SPORT_OR_PERIOD = "Che sport ti interessa, padel o tennis, e in che periodo vuoi partire?"
 QUESTION_PAX = "In quante persone siete?"
@@ -42,6 +47,7 @@ NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 MAX_PAX = 20
+LLM_PERIOD_LABEL = "llm"
 
 IT_MARKERS = {"un", "una", "di", "del", "della", "per", "siamo", "con", "massimo", "vorrei",
               "voglio", "noi", "persone", "giorni", "il", "la", "viaggio", "vacanza", "due",
@@ -328,8 +334,53 @@ def is_per_person(text: str) -> bool:
     return _PER_PERSON.search(text.lower()) is not None
 
 
+def _llm_overrides(raw: dict, today: date) -> dict:
+    """Campi validi dell'output del fallback; quelli invalidi o nulli non compaiono."""
+    out = {}
+    sport = raw.get("sport")
+    if isinstance(sport, str) and sport.lower() in ("padel", "tennis"):
+        out["sport"] = sport.lower()
+    area = raw.get("area")
+    if isinstance(area, str):
+        found = geo.find_area(area)
+        if found is not None:
+            out["area"] = found
+    try:
+        start = date.fromisoformat(raw.get("period_start"))
+        end = date.fromisoformat(raw.get("period_end"))
+    except (TypeError, ValueError):
+        start = end = None
+    if start is not None and start <= end and end >= today:
+        out["period"] = Period(start, end, LLM_PERIOD_LABEL)
+    pax = raw.get("pax")
+    if isinstance(pax, int) and not isinstance(pax, bool) and 1 <= pax <= MAX_PAX:
+        out["pax"] = pax
+    budget = raw.get("budget")
+    if isinstance(budget, (int, float, str)) and not isinstance(budget, bool):
+        try:
+            value = Decimal(str(budget))
+        except ArithmeticError:
+            value = None
+        if value is not None and value.is_finite() and value > 0:
+            out["budget"] = value.quantize(Decimal("0.01"))
+    return out
+
+
+def _with_fallback(criteria: Criteria, text: str, today: date,
+                   extractor: IntentExtractor) -> Criteria:
+    try:
+        raw = extractor.extract(text, today)
+    except Exception as exc:   # il fallback non deve mai rompere create_intent
+        log.warning("fallback LLM fallito: %s", type(exc).__name__)
+        return criteria
+    if not isinstance(raw, dict):
+        return criteria
+    return replace(criteria, **_llm_overrides(raw, today))
+
+
 def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
-                 today: Optional[date] = None) -> ParseResult:
+                 today: Optional[date] = None,
+                 extractor: Optional[IntentExtractor] = None) -> ParseResult:
     today = today or date.today()
     profile = profile or TravelerProfile()
     pax = parse_pax(text) or profile.pax
@@ -344,6 +395,8 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         budget=budget,
         language=detect_language(text),
     )
+    if criteria.sport is None and criteria.period is None and extractor is not None:
+        criteria = _with_fallback(criteria, text, today, extractor)
     question = None
     if criteria.sport is None and criteria.period is None:
         question = QUESTION_SPORT_OR_PERIOD
