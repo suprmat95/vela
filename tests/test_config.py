@@ -80,4 +80,5 @@ class NoDotenvTest(unittest.TestCase):
         source = inspect.getsource(config)
         self.assertNotIn("open(", source)
         self.assertNotIn("dotenv", source)
-        self.assertNotIn(".env", source)
+        for literal in ("'.env", '".env'):  # il nome file come stringa; `env.get` è lecito
+            self.assertNotIn(literal, source)

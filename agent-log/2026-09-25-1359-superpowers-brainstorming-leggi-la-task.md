@@ -110,3 +110,7 @@ T2 chiusa: rinomina fatta, storia preservata, e l'hook ora logga anche questa se
 - 🔧 Bash: Write failing tests for vela.config
 
 - 🔧 Bash: Implement vela.config, verify green, commit T3 and record in ledger
+
+- 🔧 Bash: Show the failing test in the T3 log
+
+- 🔧 Bash: Fix the no-dotenv test, commit, and record T3 in ledger
