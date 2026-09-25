@@ -390,3 +390,15 @@ staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`). Forme oss
 | Pax | `pax-1` è precompilato dal customer: il `PUT pax` scrive comunque tutti i nomi preservando i `refId` | Nessun cambio al job |
 | Pagamento (esito §8 riga 3) | Il pagamento va fatto sul PaymentIntent creato da HofJ (`POST /v1/itineraries/{id}/payment` → `client_secret`, conferma con Stripe.js), non su un Payment Link del nostro account Stripe. Il progetto concreto è M6; in M5 il job resta dietro `PaymentsPort` e il booking manda solo `{itineraryId, paymentType}` | È il flusso documentato da DOCS; il nostro `paymentIntentId` è solo inoltrato e non può essere verificato dal brand site |
 | Importo del link | `checkout.openAmount` (DOCS: `full` addebita "the entire open amount") | Il PaymentIntent di prova su `checkout.total` (368) era probabilmente l'importo sbagliato |
+
+## 2026-09-25 — M5: seconda sonda sul pagamento (flusso documentato)
+
+Origine: richiesta dell'utente dopo la rilettura di DOCS/OAS. 6 chiamate HofJ + 2 Stripe (test).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Esito del flusso documentato | `POST .../payment` → PaymentIntent del brand da 337 € (`openAmount`) con `metadata.checkoutRefId = itineraryId`, confermato `succeeded`; booking 200 con `data = itineraryId`; `checkout.status` resta `BookingInitiated` | Stesso comportamento della prima sonda: su staging il booking restituisce l'`itineraryId` e lo stato del carrello non cambia, pagamento o no |
+| Conclusione sulla §8 riga 3 | La conclusione "HofJ ignora il nostro pagamento" è **ritirata**: la chiave Stripe è di HofJ, i due PaymentIntent stanno sullo stesso account, e dall'API non si distingue un booking pagato da uno non pagato. Differenze reali del nostro PaymentIntent: importo (`total` invece di `openAmount`) e assenza di `metadata.checkoutRefId` | Nessun segnale osservabile dall'API interna; `GET /v1/bookings/{id}` richiede il token dell'utente finale |
+| Pagamento in M6 (da decidere in M6) | Due strade compatibili con quanto osservato: (a) usare il PaymentIntent del brand (`POST .../payment`) e confermarlo da una pagina nostra; (b) creare noi il PaymentIntent sullo stesso account con `amount = openAmount` e `metadata.checkoutRefId = itineraryId`. Da chiedere a HofJ quale riconcilia il pagamento lato brand | La chiave è ristretta e di HofJ: serve la loro conferma |
+| Importo del link | Confermato `openAmount` (il PaymentIntent del brand è di 337 €) | Osservato |
+

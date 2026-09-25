@@ -1482,3 +1482,104 @@ Parto dal punto 1.
 - 🔧 Bash: Locate plan lines to update
 
 - 🔧 Bash: Record payment decision and update M5 plan
+
+Punto 1 fatto (commit `6454c99`):
+- in `docs/decisions.md` c'è la decisione «pagamento sul PaymentIntent di HofJ, progetto in M6, importo = `openAmount`»;
+- il piano M5 ha una nuova sezione, «Modifiche dopo le verifiche di §8». Il job legge `openAmount`, il booking manda solo `{itineraryId, paymentType}` e il codice di prenotazione è la stringa che torna, qualunque forma abbia. I test del Task 15 usano i corpi reali delle risposte.
+
+## Punto 2: le chiamate da fare
+
+Serve un carrello nuovo: su quello di prima c'è già il nostro booking, che è un upsert, e il risultato sarebbe ambiguo.
+
+| # | Dove | Chiamata | Effetto |
+|---|---|---|---|
+| 0 | sito `staging.weebora.com` | 1-2 GET delle pagine pubbliche e del JavaScript, per trovare la **chiave pubblicabile Stripe** (`pk_test_…`) del brand | sola lettura, fuori dalla quota API |
+| 1 | HofJ | `POST /v1/itineraries` (118, `locale=en`) | nuovo carrello di staging |
+| 2 | HofJ | `PUT …/customer` | — |
+| 3 | HofJ | `PUT …/pax` con i `refId` `pax-1`/`pax-2`, già noti dal carrello precedente | salto il `GET pax` |
+| 4 | HofJ | `POST …/payment {paymentType:"full"}` | HofJ crea un PaymentIntent **sul suo account Stripe** e ci dà il `client_secret` |
+| 5 | Stripe | conferma di quel PaymentIntent con `pk_test` + `client_secret` + carta di test `pm_card_visa`, cioè quello che farebbe Stripe.js | pagamento **di test** sull'account di HofJ |
+| 6 | HofJ | `POST /v1/bookings {itineraryId, paymentType:"full"}` | ci aspettiamo un codice `R-…` |
+| 7 | HofJ | `GET /v1/itineraries/{id}` | vediamo come cambiano `checkout.status` e `openAmount` |
+
+In tutto sono 6 chiamate HofJ, 1 chiamata Stripe sull'account di HofJ e 1-2 GET al loro sito. Mi fermo alla prima risposta inattesa.
+
+**Due punti da confermare:**
+- **Chiave pubblicabile.** Per costruzione una chiave pubblicabile è pubblica: sta nel codice che il loro sito manda a ogni browser. La uso **solo se è `pk_test_…`**. Se trovo una `pk_live_…` mi fermo, perché il pagamento sarebbe reale.
+- **Stato del carrello.** Se il pagamento riesce, il carrello di staging risulta pagato in test sull'account Stripe di HofJ, e questo potrebbe comparire nei loro sistemi di staging. È lo stesso flusso che eseguirà il nostro frontend.
+
+In alternativa la `pk_test` può chiederla tu a HofJ, invece di recuperarla io dal loro sito.
+
+Procedo?
+
+## Utente 19:03
+
+si
+
+## Agente 19:04
+
+- 🔧 Bash: Fetch staging brand homepage and look for Stripe publishable key
+
+- 🔧 Bash: Look for Stripe references and likely chunks
+
+La chiave non è nell'HTML della home: nella pagina ci sono solo i testi dell'interfaccia di Stripe ("Pay now"). Come nelle app Next.js, sarà inlinata in uno dei **40 file JavaScript statici** che la home carica.
+
+Per trovarla dovrei scaricarli, fino a 40 GET di file statici dalla loro CDN: sola lettura, niente quota API e nessun effetto collaterale. Però ti avevo dichiarato 1-2 GET, quindi prima chiedo:
+
+1. **Scarico i file statici, fino a 40 GET**, e cerco solo `pk_test_…`. Se trovo una `pk_live_…` mi fermo.
+2. **Chiedi tu la `pk_test` a HofJ** e la metti nel `.env` come `HOFJ_STRIPE_PK`, solo per questa sonda.
+
+## Utente 19:08
+
+ok ho la pk_test è quella che ho chiamato STRIPE_SECRET_KEY nel .env verifica
+
+## Agente 19:08
+
+- 🔧 Bash: Check key types by prefix without printing values
+
+No: quella in `STRIPE_SECRET_KEY` **non è una `pk_test`**. Dal prefisso, senza stamparla, risulta una **`rk_test_…`**: una chiave *segreta ristretta*, in modalità test. È la stessa che ha creato il PaymentIntent di prova da 368 €, e una chiave pubblicabile non avrebbe potuto farlo.
+
+| Prefisso | Tipo | Dove si usa |
+|---|---|---|
+| `pk_test_…` | pubblicabile, pubblica per costruzione | nel browser, con Stripe.js |
+| `sk_test_…` / `rk_test_…` | **segreta** (la `rk` ha permessi limitati) | solo lato server |
+
+Nel `.env` non c'è nessuna `pk_test`.
+
+**Da dove viene questa chiave?** Cambia l'interpretazione della sonda di prima:
+
+- **Se è del nostro account Stripe:** vale quello che ti ho detto. Il PaymentIntent da 368 € stava sul nostro account e HofJ non poteva vederlo.
+- **Se te l'ha data HofJ**, per esempio con il brief: il PaymentIntent di prova è stato creato **sull'account di HofJ**. In questo caso il loro sistema avrebbe potuto vederlo, e il fatto che il booking non abbia restituito un codice `R-…` avrebbe un'altra causa. Probabilmente il PaymentIntent non era quello collegato al carrello, cioè non creato da `POST …/payment`. Inoltre con una chiave segreta del loro account potrei confermare il loro PaymentIntent lato server, senza bisogno della `pk_test`.
+
+Quale dei due casi è?
+
+## Utente 19:09
+
+me l'hanno data loro
+
+## Agente 19:09
+
+Allora la `rk_test` è una chiave dell'account Stripe di HofJ, e la sonda si semplifica: **non serve la `pk_test`**. Posso confermare il loro PaymentIntent lato server con la chiave che hai. Non scarico niente dal loro sito.
+
+Rispetto a quanto ti avevo dichiarato cambiano due cose: niente GET al sito del brand, e su Stripe le chiamate diventano 2 invece di 1.
+
+| # | Dove | Chiamata |
+|---|---|---|
+| 1 | HofJ | `POST /v1/itineraries` (118, `en`) |
+| 2 | HofJ | `PUT …/customer` |
+| 3 | HofJ | `PUT …/pax` (`pax-1`, `pax-2`) |
+| 4 | HofJ | `POST …/payment {paymentType:"full"}` → `client_secret` |
+| 5 | Stripe | `PaymentIntent.retrieve` (sola lettura: importo, stato, metadati) |
+| 6 | Stripe | `PaymentIntent.confirm` con `pm_card_visa`, in modalità test |
+| 7 | HofJ | `POST /v1/bookings {itineraryId, paymentType:"full"}` |
+| 8 | HofJ | `GET /v1/itineraries/{id}` |
+
+In tutto sono 6 chiamate HofJ e 2 Stripe. Procedo, come mi hai già autorizzato, e mi fermo alla prima risposta inattesa.
+
+- 🔧 Write /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m5/4e77c5e2-1cbd-49a4-a46b-71f152659842/scratchpad/s8_probe2.py
+
+- 🔧 Bash: Run documented HofJ payment flow probe
+
+- 🔧 Bash: Resume probe from Stripe retrieve, confirm, then book
+
+- 🔧 Bash: Record second probe results and commit

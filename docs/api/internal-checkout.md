@@ -32,6 +32,21 @@ differiscono vale questa tabella.
 
 Content-type sempre `application/json; charset=utf-8`, anche sugli errori.
 
+Seconda sonda, flusso documentato (2026-09-25, carrello `iznhotwwgneg`, 6 chiamate HofJ + 2
+Stripe con la chiave ristretta di test fornita da HofJ):
+
+| Passo | Esito |
+|---|---|
+| `POST /v1/itineraries/{id}/payment {paymentType: "full"}` | 200 `{data: "<client_secret>", meta: {now}}` |
+| PaymentIntent del brand (Stripe retrieve) | `amount` 33700 = `openAmount` 337 €, `livemode: false`, `payment_method_types` card/sepa_debit/klarna/paypal, `capture_method: automatic_async`, `metadata {checkoutRefId: <itineraryId>, bnpl_idempotency_root, bnpl_plan_index, bnpl_role}` |
+| Conferma con `pm_card_visa` | `succeeded` |
+| `POST /v1/bookings {itineraryId, paymentType: "full"}` | 200 `{data: "<itineraryId>"}`: **stessa forma della prima sonda**, nessun `R-…` |
+| `GET /v1/itineraries/{id}` | `checkout.status` ancora `BookingInitiated`, importi invariati |
+
+Il PaymentIntent del brand e quello creato da noi nella prima sonda stanno sullo **stesso
+account Stripe** (la chiave in `STRIPE_SECRET_KEY` è di HofJ). Le uniche differenze sono
+l'importo (337 contro 368) e `metadata.checkoutRefId`, che lega il PaymentIntent al carrello.
+
 Cosa dicono OAS e DOCS sul pagamento (riletti il 2026-09-25):
 - Flusso previsto (DOCS "Checkout flow (internal)", diagramma di sequenza): `POST
   /v1/itineraries/{id}/payment {paymentType}` → il brand site restituisce il
