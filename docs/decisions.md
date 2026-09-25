@@ -165,3 +165,26 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m2-dominio-replay.md` in TD
 | Default RF-13 | `TravelerDefaults` definita in `vela/domain/models.py` con i valori; `DEFAULT_TRAVELER` in `vela/config.py` | Il dominio non importa la configurazione |
 | Verifica end-to-end | Il flusso completo in replay (intento, proposta, rifiuto, doppio accept, checkout, `confirmed` con codice `R-`) è stato eseguito sull'app vera con Postgres nello schema `vela_test` | Prova il wiring reale oltre ai test con repository in memoria |
 | Interprete | Test eseguiti con `uv run python` (3.12); il `python3` di sistema è 3.7 | Come da M0 |
+
+## 2026-09-25 — Twist: 50.000 viaggiatori in dieci minuti
+
+Origine: twist del brief ("Vela ha appena chiuso un accordo di distribuzione"); analisi sulla
+carta contro `docs/spec.md` e `docs/api/quota-health.md`, nessuna chiamata esterna.
+
+**Verdetto dell'analisi.** Lo strato conversazionale regge: intento, proposta e rifiuto non
+toccano HofJ, il processo è stateless e scala con le istanze. Lo strato d'acquisto no: con
+120 chiamate al minuto e 6 chiamate per acquisto Vela completa al massimo 20 acquisti al
+minuto per client (200 in dieci minuti); il design precedente (RF-37) rispondeva "riprovo tra
+un minuto" a quota esaurita, trasformando il picco in errori ripetuti, e RNF-04 (accettazione
+sincrona entro 30 s) non teneva con 5 chiamate seriali da 2-6 s.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Risposta al twist | Coda d'acquisto + scheduler della quota nel dominio (spec §4.10) | Trasforma il tetto fisico in attesa dichiarata. Scartato "solo analisi in ARCHITECTURE.md" (il load test avrebbe mostrato gli errori) e "più client HofJ" (serve una seconda chiave; resta come prossimo passo in ARCHITECTURE.md) |
+| Meccanica | A: coda in Postgres, worker in ogni istanza con `FOR UPDATE SKIP LOCKED`, contatore di quota in Postgres con prenotazione atomica di blocchi | Nessun servizio nuovo, coerente con "un processo", sopravvive ai crash. Scartati B (Redis/Celery: secondo servizio) e C (drenatore unico eletto: nessuna alta disponibilità) |
+| Accettazione | Sempre asincrona: `queued` + attesa stimata, link via `get_order_status` | Un solo percorso da testare. Scartato l'ibrido sincrono-se-c'è-budget. Cambia §10.1 e le descrizioni dei tool MCP |
+| Attesa lunga | Nessun tetto: l'attesa si dichiara, il viaggiatore può rinunciare con `reject_proposal` | Rifiutare e far ritentare ricrea il problema di RF-37 |
+| Priorità | `booking` con riserva 20% della finestra, poi `purchase` FIFO, poi `sync` | Garantisce la prenotazione degli ordini pagati (twist: "una prenotazione al minuto sei") |
+| Sostituzione in coda | Errore prodotto → ordine `replaced` con proposta sostitutiva; nuovo accept rientra in testa | Il viaggiatore riacconsente perché prezzo e hotel cambiano; non perde il posto |
+| Dove nella roadmap | M5 (dominio, scheduler, worker, superfici adattate) e M13 (scenario twist); M2 non viene riaperta | M2 era già conclusa e mergiata quando è arrivato il twist |
+| Degradazione | Interruttore sul fallback Haiku (M9), catalogo in memoria per istanza (M14), MCP stateless (M3) | RNF-12, RNF-13 |
