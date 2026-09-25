@@ -57,6 +57,12 @@ class RepositoryContract:
         self.assertEqual(self.repos.products.list_all(), [])
         self.repos.products.upsert_many([])
 
+    def test_products_last_fetched_at(self):
+        self.assertIsNone(self.repos.products.last_fetched_at())
+        later = NOW + timedelta(hours=1)
+        self.repos.products.upsert_many([make_product(1), replace(make_product(2), fetched_at=later)])
+        self.assertEqual(self.repos.products.last_fetched_at(), later)
+
     # intenti
     def test_intents_round_trip(self):
         self.repos.intents.add(intent())

@@ -6,9 +6,11 @@ ElevenLabs, o un client REST). Non ha una homepage e non mostra liste: propone u
 volta, lo prenota sull'API House of Journeys e restituisce il codice di prenotazione.
 Requisiti in `docs/spec.md`, roadmap in `docs/roadmap.md`, decisioni in `docs/decisions.md`.
 
-Stato: M2 (dominio e replay). L'app espone `GET /health` e, in replay, `GET /replay/checkout/{order_id}`
-(pagamento simulato). I cinque casi d'uso (`create_intent`, `get_proposal`, `reject_proposal`,
-`accept_proposal`, `get_order_status`) vivono in `vela/domain/usecases.py` e arrivano su MCP (M3) e REST (M4).
+Stato: M3 e M4 (superfici MCP e REST). L'app espone `GET /health`, la superficie MCP su `/mcp`
+(vedi "Collegare Claude"), la superficie REST sotto `/v1` (bearer `VELA_API_TOKEN`, contratto e
+comandi `curl` in `docs/rest.md`) e, in replay, `GET /replay/checkout/{order_id}` (pagamento
+simulato). I cinque casi d'uso (`create_intent`, `get_proposal`, `reject_proposal`,
+`accept_proposal`, `get_order_status`) vivono in `vela/domain/usecases.py`.
 
 ## Requisiti
 
@@ -65,7 +67,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
 | `STRIPE_SECRET_KEY` | in `live` | Chiave segreta Stripe (account di test). |
 | `STRIPE_WEBHOOK_SECRET` | in `live` | Segreto per verificare la firma dei webhook Stripe. |
-| `VELA_API_TOKEN` | da M4 | Bearer token statico delle superfici REST e MCP. |
+| `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
 | `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku per gli intenti non capiti dal parser. |
 
@@ -90,7 +92,8 @@ errore esplicito.
 3. Inserire nella dashboard le variabili marcate `sync: false` che servono alla modalità in uso
    (per M0 basta `VELA_UPSTREAM_MODE=replay`, già nel file).
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
-5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok"}`.
+5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok","catalog":{...},"quota":null}`
+   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota` arriva con M5).
 
 Il piano free spegne il servizio dopo inattività: la prima richiesta può richiedere
 qualche decina di secondi. Il Postgres free scade dopo 30 giorni.
@@ -121,7 +124,7 @@ l'interpretazione del motivo del rifiuto arriva con M9.
 vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2)
 vela/ports      HofJPort, PaymentsPort, repository (M2)
 vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto, runner (M2); HofJ HTTP (M5), Stripe (M6)
-vela/surfaces   health.py, replay.py (M2), mcp.py (M3), REST (M4), webhook (M6)
+vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), webhook (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per la modalità replay (M1)
