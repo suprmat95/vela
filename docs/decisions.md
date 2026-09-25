@@ -229,3 +229,13 @@ Origine: intervista sulla macro task M4, piano in `docs/plans/2026-09-25-m4-supe
 | OpenAPI | `/docs` e `/openapi.json` restano pubblici e includono lo schema Bearer | Utili a chi integra; non espongono dati |
 | Endpoint sincroni | `def`, non `async def` | Il dominio è sincrono; FastAPI li esegue nel threadpool |
 | Nessuna route per modalità | Il router REST è montato sempre, in replay e in live | La superficie non dipende dall'upstream |
+## 2026-09-25 — M4: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m4-superficie-rest.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Test Postgres di `last_fetched_at` | Non eseguiti in M4: il worktree `task-m4` non ha un `.env` e `DATABASE_URL` non è nell'ambiente, quindi i test Postgres sono saltati | Il `.env` non va cercato né aperto altrove. L'implementazione è una `SELECT MAX(fetched_at)`; da eseguire con `set -a; . ./.env; set +a; uv run python -m unittest discover -s tests` dove il file esiste |
+| Guardie di regressione | `test_health_needs_no_token` e `test_health_and_replay_need_no_token` passavano già prima del codice nuovo | Non verificano codice nuovo ma impediscono che il router `/v1` o gli handler 7807 proteggano per errore `/health` e `/replay` |
+| Flusso `curl` di `docs/rest.md` | Non eseguito in locale: senza Postgres il dominio non esiste (SQLite non supporta l'upsert Postgres dei repository). Il flusso è coperto dal test `FullFlowTest` sull'app vera con repository in memoria e verrà eseguito su Render dopo il merge | Nessun Postgres locale disponibile in questo worktree |
+| Suite finale | 319 test, 12 saltati (Postgres), verde (erano 271 a inizio M4) | — |

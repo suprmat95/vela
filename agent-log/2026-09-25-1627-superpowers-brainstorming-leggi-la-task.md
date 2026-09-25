@@ -290,3 +290,21 @@ Tutto verde, anche l'intera suite. Committo il Task 4.
 Tutti rossi perché le tre route mancano. Per gli id sconosciuti la risposta è già un 404, ma arriva dalla route inesistente e non nomina la risorsa. Fase GREEN:
 
 - 🔧 Bash: Add remaining endpoints and run tests
+
+Verde: 31 test REST, suite intera ok. Controllo che l'output sia pulito e committo il Task 5.
+
+- 🔧 Bash: Check output and commit Task 5
+
+**Task 6**: documentazione. Leggo le parti del README da aggiornare.
+
+- 🔧 Bash: Read README status and deploy sections
+
+- 🔧 Bash: Update README for M4
+
+Ora `docs/rest.md`:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/docs/rest.md
+
+Registro in `docs/decisions.md` le decisioni prese durante l'esecuzione, poi faccio la verifica finale.
+
+- 🔧 Bash: Record execution decisions and run final verification
