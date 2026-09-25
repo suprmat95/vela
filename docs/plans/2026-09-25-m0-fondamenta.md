@@ -195,6 +195,15 @@ messaggio indicato. Comando test: `python3 -m unittest discover -s tests` nel ve
   verifica manuale `git log --follow --oneline agent-log/ | head` mostra la storia;
   `python3 scripts/agents_log.py --help`-style docstring aggiornata; lo script gira ancora col 3.7
   (`/usr/local/bin/python3 -m unittest tests.test_agents_log`).
+- Difetto trovato durante la stesura del piano, da correggere qui perché si tocca lo script:
+  una sessione avviata con uno slash command (primo messaggio `<command-message>...` con
+  `<command-args>`) e proseguita solo con risposte ad `AskUserQuestion` (tool_result, non
+  testo) non ha alcun messaggio utente "puro": `session_filename` restituisce `None` e il
+  commit non produce nessun log (è successo alla sessione di brainstorm di M0, commit
+  `95da837`). Correzione: in `parse_transcript`, se il messaggio inizia con
+  `<command-message>`/`<command-name>` ma contiene `<command-args>...</command-args>`, usare
+  quel contenuto come testo utente (`/nome-skill: args`). Test: fixture con un messaggio di
+  slash command con args → entry utente e nome file con lo slug degli args.
 - Commit: `Rename agents-log to agent-log and update script, docs and tests`.
 
 ### T3 — Configurazione da ambiente
