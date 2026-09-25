@@ -2761,3 +2761,104 @@ Falliscono tutti per la ragione attesa: funzioni e parametri non esistono ancora
 - 🔧 Bash: Implement new say phrases
 
 - 🔧 Bash: Run suite and commit Task 9
+
+Task 9 fatto (commit `f4a10be`): la suite passa da 593 a **602 test, verde**.
+
+**Frasi nuove, tutte in italiano e inglese** (`vela/domain/say.py`):
+
+| Caso | Frase italiana |
+|---|---|
+| In coda (RF-45) | «Ti ho messo in coda: tra circa 12 minuti il link di pagamento sarà pronto. Chiedimi a che punto è quando vuoi.» (con 1: «tra circa un minuto») |
+| In coda, ma già in lavorazione | «Sto preparando il pagamento con il fornitore: chiedimi di nuovo tra poco.» |
+| Da pagare, con importo diverso (RF-16) | «Il totale reale è 720 euro, non i 700 stimati. L'ordine è in attesa del pagamento di 720 euro: usa il link che ti ho mandato.» |
+| Sostituito (RF-17) | «Quel viaggio non è più prenotabile, ti propongo un'alternativa.» seguita dalla proposta normale. Non nomina l'errore |
+| Annullato (RF-49) | «Ho annullato l'ordine.», seguita dalla proposta successiva |
+| Fallito (RF-25, RF-46) | «Non sono riuscito a preparare il pagamento: il fornitore non ha risposto dopo tre tentativi. Se vuoi, riproviamo con una nuova proposta.» |
+
+**Motivi di fallimento:** `failure_reason(codice, lingua)` con quattro codici:
+- `upstream`: il fornitore non risponde;
+- `config`: chiave o permessi sbagliati;
+- `no_alternative`: prodotto non prenotabile e nessuna alternativa;
+- `payments`: Stripe non risponde.
+
+Il testo viene salvato sull'ordine nella lingua dell'intento.
+
+**`say_status`** accetta ora `minutes` e `price_from_total`, facoltativi: le chiamate esistenti restano valide.
+
+**Test:** 9 test nuovi, visti fallire prima di implementare:
+- entrambe le lingue;
+- la differenza di prezzo detta prima del link;
+- nessuna parola come «errore», «502» o «HofJ» nella sostituzione;
+- nessun URL, markdown o backtick in nessuna frase.
+
+**Cosa ho deciso:**
+- **Con lo stesso importo resta la frase di M6 senza modifiche.** Così il test di lingua di M9 continua a valere.
+- **Ho aggiunto il caso «in lavorazione».** Il piano non lo prevedeva, ma un ordine `queued` il cui job è già partito non ha più una posizione in coda: dire «tra circa N minuti» sarebbe sbagliato.
+
+**Dubbi:**
+- **Frase di attesa del pagamento:** dice «usa il link che ti ho mandato», che è la frase di M6. Con MCP il link compare in chat. Va bene così, oppure preferisci «il link è in chat»?
+- **Riprova dopo un fallimento:** la frase propone di «riprovare con una nuova proposta», ma per ora non c'è un modo automatico di farlo. Il viaggiatore deve chiedere una nuova proposta.
+
+Il prossimo è il **Task 10**, il cuore del cambio di contratto:
+- `accept_proposal` diventa asincrono: crea l'ordine `queued`, accoda il job d'acquisto, risponde con posizione e attesa, senza chiamare HofJ né Stripe;
+- rinuncia che annulla l'ordine;
+- `get_order_status` con i campi nuovi.
+
+Cambia la risposta pubblica di MCP e REST, come deciso nell'intervista: le superfici le adatto nel Task 17. Vado?
+
+## Utente 21:00
+
+vai
+
+## Agente 21:00
+
+- 🔧 Bash: Find tests depending on synchronous accept
+
+Prima di iniziare il Task 10 c'è un problema di sequenza da sottoporti.
+
+**Il problema.** Appena `accept_proposal` diventa asincrono, **nessuno produce più il link di pagamento**: il job d'acquisto arriva nel Task 11, il processore nel 13, il worker con `drain` nel 14. Circa 45 punti di test in 5 file danno per scontato il link subito dopo l'accettazione (`test_usecases`, `test_mcp_tools`, `test_mcp_http`, `test_rest`, `test_app_replay`). Tra questi ci sono i flussi completi «accetta → paga → confermato». Dal Task 10 al Task 14 la suite resterebbe rossa, oppure dovrei disattivare quei test.
+
+**Proposta: stesso contenuto, ordine diverso**, così ogni commit resta verde.
+
+| Nuovo ordine | Task | Perché regge da solo |
+|---|---|---|
+| 1 | **11** `PurchaseJob` | lo testo creando a mano ordini `queued` e job, senza toccare l'accettazione |
+| 2 | **12** `BookingJob` e `mark_paid` che accoda | `mark_paid` accoda il booking, e `BookingRunner` resta finché non arriva il worker |
+| 3 | **13** `JobProcessor` | lavora solo sui job in coda |
+| 4 | **13b** verifica del pagamento | stessa cosa |
+| 5 | **14** `Worker` con `drain` e cablaggio dell'app | qui spariscono `BookingRunner` e `runner.submit` |
+| 6 | **10 + 17 insieme** | accettazione asincrona, rinuncia, stato, **e** superfici MCP/REST. I test dei flussi usano `drain` del worker per far avanzare i job |
+
+Il contenuto dei task e i loro test restano quelli del piano. Cambia solo l'ordine, e il Task 10 si fonde con il 17 in un unico commit (o due commit consecutivi). Annoterei il cambio nel piano.
+
+Due alternative, che sconsiglio:
+- tenere l'ordine attuale, con la suite rossa dal Task 10 al Task 14;
+- disattivare temporaneamente i test dei flussi.
+
+Procedo con il nuovo ordine, partendo dal Task 11?
+
+## Utente 21:01
+
+si
+
+## Agente 21:01
+
+Parto. Annoto prima il nuovo ordine nel piano, poi il Task 11.
+
+- 🔧 Bash: Note reorder and read propose helpers
+
+Scrivo i test del job d'acquisto. Uso ordini `queued` e job creati a mano, senza toccare l'accettazione.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/tests/test_purchase_job.py
+
+- 🔧 Bash: Check helpers and see tests fail
+
+Il test fallisce perché il modulo non esiste. Lo scrivo.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/vela/domain/purchase.py
+
+- 🔧 Bash: Run purchase job tests
+
+I 20 test passano. Rilancio la suite completa e faccio il commit.
+
+- 🔧 Bash: Run suite and commit Task 11

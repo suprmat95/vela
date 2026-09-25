@@ -163,6 +163,13 @@ Nessun webhook: un job controlla lo stato delle Checkout Session degli ordini `a
 
 - [ ] TDD, poi commit «Check Stripe sessions for payment instead of a webhook».
 
+## Ordine di esecuzione (deciso con l'utente il 2026-09-25, dopo il Task 9)
+
+Per tenere la suite verde a ogni commit: 11 → 12 → 13 → 13b → 14 → **10 + 17 insieme** → 15 → 16
+→ 18 → 19. Il contenuto dei task non cambia. Con l'accettazione asincrona nessuno produce il
+link finché job, processore e worker (`drain`) non esistono, e i test dei flussi di MCP e REST
+lo richiedono.
+
 ## Global Constraints
 
 - Nessuna dipendenza nuova in `pyproject.toml` e nessuna modifica a `uv.lock`. Nessuna variabile d'ambiente nuova (spec §6).
