@@ -3118,3 +3118,15 @@ I 27 test passano. Faccio il commit del Task 15.
 - 🔧 Bash: Implement live mode wiring and run tests
 
 - 🔧 Bash: Commit Task 16
+
+Task 16 fatto. Passo al **Task 18**: il flusso completo e lo scenario del lancio (200 accettazioni) in replay, con quota simulata a 120 al minuto e orologio manuale.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/tests/test_queue_flow.py
+
+- 🔧 Bash: Run launch burst and end-to-end tests
+
+- 🔧 Bash: Space accepts in time and rerun
+
+I 6 test passano in circa un secondo. Faccio il commit del Task 18.
+
+- 🔧 Bash: Run suite and commit Task 18
