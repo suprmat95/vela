@@ -23,6 +23,7 @@ from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.models import Product
 from vela.domain.usecases import Vela
+from vela.surfaces.checkout_pages import router as checkout_router
 from vela.surfaces.health import router as health_router
 from vela.surfaces.mcp import build_mcp, mcp_routes
 from vela.surfaces.problems import install_problem_handlers
@@ -81,6 +82,7 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     install_problem_handlers(app)
     app.include_router(rest_router)
     app.include_router(webhooks_router)
+    app.include_router(checkout_router)
     if settings.vela_upstream_mode == REPLAY:
         app.include_router(replay_router)
     app.router.routes.extend(mcp_routes(app.state.mcp, settings.vela_public_url))

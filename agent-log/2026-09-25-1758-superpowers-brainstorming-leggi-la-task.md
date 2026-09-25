@@ -275,3 +275,13 @@ Quel test verifica proprio che il runner non muoia in silenzio. Lo avvolgo in `a
 L'output ora è pulito, a parte INFO e deprecazione di Alembic che c'erano già. Faccio due commit: la correzione del logging di Alembic e il webhook.
 
 - 🔧 Bash: git add alembic/env.py tests/test_migrations.py tests/test_orders.py && git comm…
+
+**Task 6** — pagine di ritorno. Fase RED:
+
+- 🔧 Bash: cat > tests/test_checkout_pages.py <<'EOF' """Pagine statiche di ritorno dal Che…
+
+RED confermato (404). Nel test uso i path letterali, così verifica anche che le pagine coincidano con i `success_url`/`cancel_url` del Task 2. Fase GREEN:
+
+- 🔧 Bash: uv run python - <<'EOF' p="docs/plans/2026-09-25-m6-stripe.md"; s=open(p).read()…
+
+- 🔧 Bash: git add vela/surfaces/checkout_pages.py vela/app.py tests/test_checkout_pages.py…
