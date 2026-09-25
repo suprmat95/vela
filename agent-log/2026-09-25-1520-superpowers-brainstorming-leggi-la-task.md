@@ -247,3 +247,7 @@ Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il c
 **Task 2 (catalogo)** e **Task 3 (dizionario geografico)**: per ognuno il test fallisce, poi scrivo l'implementazione e la suite torna verde.
 
 - 🔧 Bash: TDD Task 2 and Task 3, commit each
+
+**Task 4 (parser)** e **Task 5 (chooser v1, con le prime due funzioni di `say.py`)**.
+
+- 🔧 Bash: TDD Task 4 and Task 5, commit each
