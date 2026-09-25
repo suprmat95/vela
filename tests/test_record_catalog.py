@@ -76,12 +76,14 @@ class FakeHofj:
     `list_status` diverso da 200 fa fallire la lista.
     """
 
-    def __init__(self, products, limit=120, page_size=100, broken_ids=(), list_status=200):
+    def __init__(self, products, limit=120, page_size=100, broken_ids=(), list_status=200,
+                 repeat_cursor=False):
         self.products = products
         self.limit = limit
         self.page_size = page_size
         self.broken_ids = set(broken_ids)
         self.list_status = list_status
+        self.repeat_cursor = repeat_cursor
         self.calls = []            # (path, query dict, headers dict)
         self.window_used = 0
         self.max_window_used = 0
@@ -102,6 +104,9 @@ class FakeHofj:
         if url.path == "/v1/products":
             if self.list_status != 200:
                 return FakeResponse(self.list_status, {"title": "bad request"})
+            if self.repeat_cursor:
+                return FakeResponse(200, {"data": self.products[:self.page_size],
+                                          "meta": {"nextCursor": "loop"}})
             page = int(query.get("cursor", "p1")[1:])
             start = (page - 1) * self.page_size
             chunk = self.products[start:start + self.page_size]
@@ -127,11 +132,17 @@ def make_client(raw_dir, server, logs, cap=90):
                               sleep=server.new_window, log=logs.append)
 
 
-def record_pages_and_details(client, products, locale="it"):
+def record_pages_and_details(client, products, locale="it", brand=None):
     """Simula a mano una registrazione: una pagina di lista e i dettagli indicati."""
-    client.get("/v1/products", {"limit": 100, "locale": locale})
+    list_params = {"limit": 100, "locale": locale}
+    if brand is not None:
+        list_params["brand"] = brand
+    client.get("/v1/products", list_params)
     for pid in products:
-        client.get("/v1/products/%s" % pid, {"extended": "true", "locale": locale})
+        detail_params = {"extended": "true", "locale": locale}
+        if brand is not None:
+            detail_params["brand"] = brand
+        client.get("/v1/products/%s" % pid, detail_params)
 
 
 class StripMediaTest(unittest.TestCase):
@@ -191,11 +202,32 @@ class BuildCatalogTest(unittest.TestCase):
         self.assertRegex(catalog["recorded_at"], r"^\d{4}-\d{2}-\d{2}T")
         self.assertIn("description", catalog["products"][0])  # item della lista integrale
 
-    def test_brand_is_written_as_given(self):
+    def test_brand_comes_from_recorded_pages(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, self.logs), ["1"],
+                                 brand="weebora.com")
+        catalog = record_catalog.build_catalog(self.raw, brand=None)
+        self.assertEqual(catalog["brand"], "weebora.com")
+
+    def test_brand_mismatch_raises(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, self.logs), ["1"],
+                                 brand="weebora.com")
+        with self.assertRaises(record_catalog.BuildError) as ctx:
+            record_catalog.build_catalog(self.raw, brand="altro")
+        self.assertIn("altro", str(ctx.exception))
+
+    def test_brand_null_when_recorded_without_brand(self):
         server = FakeHofj([item(1)])
         record_pages_and_details(make_client(self.raw, server, self.logs), ["1"])
-        self.assertEqual(record_catalog.build_catalog(self.raw, brand="weebora.com")["brand"],
-                         "weebora.com")
+        catalog = record_catalog.build_catalog(self.raw, brand=None)
+        self.assertIsNone(catalog["brand"])
+
+    def test_raw_dir_not_a_directory_raises(self):
+        missing = os.path.join(self.raw, "non-esiste")
+        with self.assertRaises(record_catalog.BuildError) as ctx:
+            record_catalog.build_catalog(missing)
+        self.assertIn(missing, str(ctx.exception))
 
     def test_ignores_other_locales_and_failed_calls(self):
         server = FakeHofj([item(1)], broken_ids=["1"])
@@ -305,6 +337,14 @@ class RecordTest(unittest.TestCase):
         self.assertIn("400", str(ctx.exception))
         self.assertEqual([p for p, _, _ in server.calls if p.startswith("/v1/products/")], [])
 
+    def test_repeated_cursor_raises(self):
+        server = FakeHofj([item(1), item(2)], repeat_cursor=True)
+        with self.assertRaises(RuntimeError) as ctx:
+            record_catalog.record(make_client(self.raw, server, self.logs))
+        self.assertIn("cursore ripetuto", str(ctx.exception))
+        lists = [p for p, _, _ in server.calls if p == "/v1/products"]
+        self.assertLessEqual(len(lists), 3)
+
     def test_dry_run_plans_from_expected_counts(self):
         server = FakeHofj([])
         client = api_explore.Client(self.raw, api_explore.QuotaGuard(), "", base_url="https://api.test",
@@ -362,6 +402,22 @@ class MainTest(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", server):
             run_main(["--raw-dir", self.raw, "--out", self.out], {"API_BEAR_KEY": "SECRET-KEY"})
         self.assertEqual(server.calls[1][2]["Authorization"], "Bearer SECRET-KEY")
+
+    def test_dry_run_and_build_only_are_mutually_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                run_main(["--raw-dir", self.raw, "--out", self.out,
+                         "--dry-run", "--build-only"], {})
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_network_error_exits_with_stop(self):
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=urllib.error.URLError("rete giù")):
+            with self.assertRaises(SystemExit) as ctx:
+                run_main(["--raw-dir", self.raw, "--out", self.out],
+                         {"HOFJ_API_KEY": "SECRET-KEY"})
+        self.assertIn("STOP", str(ctx.exception))
+        self.assertFalse(os.path.exists(self.out))
 
     def test_non_empty_raw_dir_is_refused(self):
         os.makedirs(self.raw)

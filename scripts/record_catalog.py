@@ -74,8 +74,15 @@ def build_catalog(raw_dir, locale=LOCALE, brand=None):
 
     Lista: tutti gli item (anche archiviati), l'ultimo record vince a parità di id.
     Dettagli: solo i prodotti non archiviati; se ne manca uno solleva BuildError.
+    Il `brand` della fixture è quello letto da `params["brand"]` delle pagine di
+    lista registrate (path /v1/products, status 200, locale corrispondente), non
+    l'argomento `brand`: se le pagine registrano brand diversi tra loro solleva
+    BuildError. L'argomento `brand`, se non None, è solo un controllo incrociato:
+    se differisce da quello registrato solleva BuildError.
     """
-    products, details, stamps = {}, {}, []
+    if not os.path.isdir(raw_dir):
+        raise BuildError("cartella grezza inesistente: %s" % raw_dir)
+    products, details, stamps, brands = {}, {}, [], set()
     for record in api_explore.load_records(raw_dir):
         body = record["body"] if isinstance(record["body"], dict) else {}
         if record["params"].get("locale") != locale:
@@ -84,10 +91,14 @@ def build_catalog(raw_dir, locale=LOCALE, brand=None):
             for product in body.get("data") or []:
                 products[str(product["id"])] = product
             stamps.append(record["requestedAt"])
+            brands.add(record["params"].get("brand"))
         pid = detail_id(record)
         if pid and isinstance(body.get("data"), dict):
             details[pid] = body["data"]
             stamps.append(record["requestedAt"])
+    if len(brands) > 1:
+        raise BuildError("brand incoerente tra le pagine registrate: %s"
+                         % ", ".join(repr(b) for b in sorted(brands, key=lambda b: b or "")))
     if not products:
         raise BuildError("nessuna pagina di /v1/products (locale %s) in %s" % (locale, raw_dir))
     active = [pid for pid, product in products.items() if not product.get("archived")]
@@ -95,10 +106,13 @@ def build_catalog(raw_dir, locale=LOCALE, brand=None):
     if missing:
         raise BuildError("dettaglio mancante per %d prodotti non archiviati: %s"
                          % (len(missing), ", ".join(missing)))
+    recorded_brand = next(iter(brands)) if brands else None
+    if brand is not None and brand != recorded_brand:
+        raise BuildError("brand %r diverso da quello registrato %r" % (brand, recorded_brand))
     return {
         "recorded_at": max(stamps),
         "locale": locale,
-        "brand": brand,
+        "brand": recorded_brand,
         "base_url": api_explore.BASE_URL,
         "products": list(products.values()),
         "details": {pid: {"catalog": project_detail(details[pid]),
@@ -131,7 +145,7 @@ def record(client, locale=LOCALE, brand=None, expected=(EXPECTED_TOTAL, EXPECTED
             client.get("/v1/products/{id}", {"extended": "true", "locale": locale, "brand": brand})
         return None
 
-    cursor, products = None, []
+    cursor, products, seen_cursors = None, [], set()
     while True:
         page = client.get("/v1/products", {"limit": PAGE_LIMIT, "locale": locale,
                                            "brand": brand, "cursor": cursor})
@@ -142,6 +156,9 @@ def record(client, locale=LOCALE, brand=None, expected=(EXPECTED_TOTAL, EXPECTED
         cursor = (page["body"].get("meta") or {}).get("nextCursor")
         if not cursor:
             break
+        if cursor in seen_cursors:
+            raise RuntimeError("cursore ripetuto: %r" % cursor)
+        seen_cursors.add(cursor)
     active = [p for p in products if not p.get("archived")]
     client.log("%d prodotti in lista, %d non archiviati: scarico i dettagli"
                % (len(products), len(active)))
@@ -174,10 +191,11 @@ def main(argv=None):
                     help="cartella FUORI dal repo per le risposte grezze (nuova o vuota)")
     ap.add_argument("--out", default=DEFAULT_OUT,
                     help="fixture da scrivere (default fixtures/catalog.json)")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="stampa le chiamate previste senza eseguirle")
-    ap.add_argument("--build-only", action="store_true",
-                    help="ricostruisce la fixture da --raw-dir senza chiamate")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true",
+                      help="stampa le chiamate previste senza eseguirle")
+    mode.add_argument("--build-only", action="store_true",
+                      help="ricostruisce la fixture da --raw-dir senza chiamate")
     args = ap.parse_args(argv)
     brand = os.environ.get(BRAND_ENV) or None
 
@@ -202,7 +220,7 @@ def main(argv=None):
             return
         try:
             record(client, brand=brand)
-        except RuntimeError as e:   # QuotaExceededError o lista fallita
+        except (RuntimeError, OSError) as e:   # QuotaExceededError, lista fallita o errore di rete
             sys.exit("STOP: %s (risposte parziali in %s)" % (e, args.raw_dir))
         print("richieste autenticate eseguite: %d" % client.guard.total_requests)
 
