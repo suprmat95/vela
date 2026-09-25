@@ -1,5 +1,6 @@
 """Repository in memoria: test del dominio (RNF-09) e app nei test delle superfici."""
 import threading
+from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import Intent, Order, OrderStatus, Product, Proposal, Rejection
@@ -22,6 +23,9 @@ class MemoryProducts:
 
     def get(self, product_id: str) -> Optional[Product]:
         return self._items.get(product_id)
+
+    def last_fetched_at(self) -> Optional[datetime]:
+        return max((p.fetched_at for p in self._items.values()), default=None)
 
 
 class MemoryIntents:

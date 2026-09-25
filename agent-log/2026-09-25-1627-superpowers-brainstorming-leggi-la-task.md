@@ -206,3 +206,19 @@ Eseguo il piano in TDD, task per task. Prima leggo le regole sui test richieste 
 **Task 0**: registro le decisioni e committo il piano.
 
 - 🔧 Bash: Record decisions and commit plan
+
+**Task 1**, fase RED: aggiungo il test del contratto per `last_fetched_at`.
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m4/tests/repo_contract.py
+
+- 🔧 Bash: Run new test to see it fail
+
+- 🔧 Bash: Show failure reason
+
+Fallisce per il motivo atteso. Fase GREEN:
+
+- 🔧 Bash: Implement last_fetched_at and run repo tests
+
+Verde in memoria. Eseguo il contratto anche su Postgres, nello schema `vela_test`, caricando l'ambiente senza stamparlo:
+
+- 🔧 Bash: Run Postgres repository contract tests

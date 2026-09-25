@@ -1,5 +1,5 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
-from datetime import date
+from datetime import date, datetime
 from typing import Iterable, List, Optional, Set
 
 from sqlalchemy import func, select, update
@@ -74,6 +74,10 @@ class PostgresProducts:
         with self.engine.connect() as conn:
             m = conn.execute(select(products_t).where(products_t.c.id == product_id)).mappings().first()
         return None if m is None else _product(m, m["raw"])
+
+    def last_fetched_at(self) -> Optional[datetime]:
+        with self.engine.connect() as conn:
+            return conn.execute(select(func.max(products_t.c.fetched_at))).scalar_one()
 
 
 class PostgresIntents:

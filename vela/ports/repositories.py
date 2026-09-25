@@ -1,4 +1,5 @@
 """Repository del dominio (RNF-01): intenti, proposte, ordini, rifiuti e catalogo stanno fuori dal processo."""
+from datetime import datetime
 from typing import Iterable, List, Optional, Protocol, Set
 
 from vela.domain.models import Intent, Order, OrderStatus, Product, Proposal, Rejection
@@ -13,6 +14,7 @@ class ProductRepository(Protocol):
     def count(self) -> int: ...
     def list_all(self) -> List[Product]: ...
     def get(self, product_id: str) -> Optional[Product]: ...
+    def last_fetched_at(self) -> Optional[datetime]: ...
 
 
 class IntentRepository(Protocol):
