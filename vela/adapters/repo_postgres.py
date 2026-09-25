@@ -8,8 +8,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from vela.adapters.schema import intents_t, orders_t, products_t, proposals_t, rejections_t
-from vela.domain.models import (Availability, Intent, Order, OrderStatus, Product, Proposal,
-                                Rejection, criteria_from_dict, criteria_to_dict,
+from vela.domain.models import (Availability, Criteria, Intent, Order, OrderStatus, Product,
+                                Proposal, Rejection, criteria_from_dict, criteria_to_dict,
                                 profile_from_dict, profile_to_dict)
 from vela.ports.repositories import DuplicateOrder
 
@@ -98,6 +98,11 @@ class PostgresIntents:
             return None
         return Intent(m["id"], m["text"], criteria_from_dict(m["criteria"]),
                       profile_from_dict(m["profile"]), m["created_at"])
+
+    def update_criteria(self, intent_id: str, criteria: Criteria) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(intents_t.update().where(intents_t.c.id == intent_id).values(
+                criteria=criteria_to_dict(criteria), language=criteria.language))
 
 
 def _proposal(m) -> Proposal:
