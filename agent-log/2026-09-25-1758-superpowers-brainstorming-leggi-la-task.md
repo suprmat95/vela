@@ -1,0 +1,151 @@
+# /superpowers:brainstorming Leggi la task m6 in docs/roadmap.md. Obiettivo: inter
+
+- Sessione: `d7b58c06-bfff-4dce-9d1b-c886b7417b93`
+- Inizio: 2026-09-25 17:58
+
+## Utente 17:58
+
+/superpowers:brainstorming Leggi la task m6 in docs/roadmap.md. Obiettivo: intervistami e scrivi il
+          piano di esecuzione in un file in docs/plans/ Il piano dovrà indicare i microtask e i test che
+      coprono il codice prodotto. Dopodiché lancerò l'esecuzione del piano
+
+## Agente 17:58
+
+- 🔧 Skill superpowers:brainstorming
+
+- 🔧 Bash: ls && ls docs docs/plans 2>/dev/null && grep -n -i "m6" docs/roadmap.md | head -…
+
+- 🔧 Bash: sed -n 1,80p docs/roadmap.md && sed -n 280,330p docs/roadmap.md && sed -n 570,62…
+
+- 🔧 Bash: git log --oneline -25 && find vela tests -name "*.py" | sort && wc -l docs/*.md …
+
+- 🔧 Bash: grep -n "^#" docs/spec.md && awk '/^### 4.4/,/^### 4.5/' docs/spec.md && grep -n…
+
+- 🔧 Bash: cat docs/decisions.md
+
+- 🔧 Bash: cat vela/ports/payments.py vela/adapters/stripe_fake.py vela/domain/orders.py ve…
+
+- 🔧 Bash: cat vela/domain/usecases.py vela/app.py vela/surfaces/replay.py vela/ports/repos…
+
+- 🔧 Bash: grep -n -i "stripe\|pagament\|webhook\|payment\|expired\|scad" docs/decisions.md…
+
+Sto leggendo il codice esistente (porte pagamento, ordini, runner, superfici) per preparare le domande sull'M6.
+
+- 🔧 Bash: grep -n "class OrderStatus" -A12 vela/domain/models.py; grep -n "class Order\b\|…
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+Ho le risposte che mi servivano. Prima di presentare il design controllo come sono fatti repository, problem handler e superficie MCP.
+
+- 🔧 Bash: sed -n 1,40p vela/adapters/repo_memory.py; grep -n "class\|def " vela/adapters/r…
+
+Ho tutto quello che mi serve. Ecco il design, in tre sezioni.
+
+## Sezione 1 — Componenti
+
+- **`vela/adapters/stripe_links.py` → `StripePayments`** (implementa `PaymentsPort`)
+  - Riceve un client iniettabile: nei test è un fake, in produzione è `stripe.StripeClient(api_key)`.
+  - Crea una Checkout Session con questi parametri:
+    - `mode=payment`, `payment_method_types=["card"]`
+    - un line item `price_data` in EUR, con `unit_amount = total` in centesimi e quantità 1
+    - `metadata={order_id, itinerary_id}`, ripetuto su `payment_intent_data.metadata`
+    - `expires_at = now + 24h`, meno un margine di 60 s, perché Stripe rifiuta oltre le 24 h
+    - `success_url` e `cancel_url` sotto `VELA_PUBLIC_URL`, `idempotency_key=order.id`
+  - Restituisce `PaymentLink(url, expires_at, reference=session.id)`.
+  - Gli errori di Stripe diventano `PaymentsError`, una nuova eccezione nella porta.
+  - Il nome del line item viene dal titolo del prodotto. Per averlo aggiungo `product_title` alla firma di `create_payment_link(order, title)`. È una modifica interna della porta, non pubblica: la adatto anche `FakePayments`.
+- **`vela/surfaces/webhooks.py`** → `POST /webhooks/stripe`, pubblico e senza bearer.
+- **`vela/surfaces/checkout_pages.py`** → `GET /checkout/success` e `GET /checkout/cancel`: due pagine HTML statiche e minime, in italiano, senza JS e senza accesso al DB.
+- **Dominio** (`orders.py`)
+  - Nuova transizione `expire(order_id)`: `awaiting_payment → expired`, idempotente.
+  - `mark_paid` resta com'è. Diventa `payment_ref = payment_intent` al posto dell'id della sessione.
+  - `accept_proposal`: se trova un ordine esistente senza `payment_url`, ricrea il link.
+  - `OrderStatusResponse` guadagna `payment_url`, `total` e `currency`. La frase `say` per `awaiting_payment` dice l'importo, mai l'URL.
+- **Porta `WebhookEventRepository`**
+  - `claim(event_id, type) -> bool` e `release(event_id)`.
+  - Implementazioni: memoria e Postgres (INSERT con PK: un conflitto vale `False`).
+  - Tabella `stripe_events(id PK, type, received_at)` con la migrazione `0003`.
+- **`app.py`**
+  - Se `STRIPE_SECRET_KEY` è impostata, usa `StripePayments`. Se manca `STRIPE_WEBHOOK_SECRET` fallisce all'avvio con un messaggio chiaro.
+  - Altrimenti usa `FakePayments`, invariato.
+  - Il webhook e le pagine sono sempre montati. Senza secret il webhook risponde 503.
+
+Ti torna questa sezione?
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 Skill superpowers:writing-plans
+
+Sto usando la skill writing-plans per scrivere il piano. Prima raccolgo i dettagli del codice che mi servono per scrivere codice esatto.
+
+- 🔧 Bash: sed -n 1,60p docs/plans/2026-09-25-m4-superficie-rest.md; sed -n 40,200p vela/ad…
+
+- 🔧 Bash: sed -n 1,16p vela/adapters/repo_postgres.py; sed -n 128,240p vela/adapters/repo_…
+
+- 🔧 Bash: cat vela/surfaces/rest.py; sed -n 80,140p vela/surfaces/problems.py; sed -n 1,14…
+
+- 🔧 Bash: sed -n 1,112p vela/domain/say.py; sed -n 300,360p vela/domain/models.py; sed -n …
+
+- 🔧 Bash: sed -n 1,80p tests/test_rest.py; grep -n "def test\|class \|def setUp\|def _" te…
+
+- 🔧 Bash: sed -n 1,40p tests/repo_contract.py; grep -n "def test" tests/repo_contract.py |…
+
+- 🔧 Bash: sed -n 1,36p tests/test_usecases.py; sed -n 150,240p tests/test_usecases.py; sed…
+
+- 🔧 Bash: sed -n 1,47p tests/test_app_replay.py; sed -n 108,140p tests/test_app_replay.py;…
+
+Ora verifico l'API dell'SDK Stripe installato (solo introspezione locale, nessuna chiamata di rete) ed eseguo la suite di base.
+
+- 🔧 Bash: cat > /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m6/…
+
+- 🔧 Bash: P=/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m6/d7b5…
+
+- 🔧 Bash: uv run python - <<'EOF' 2>&1 | grep -v hint import inspect, stripe print(inspect…
+
+- 🔧 Bash: sed -n 318,334p docs/spec.md; cat docs/rest.md | sed -n 1,91p | grep -n "orders\…
+
+- 🔧 Bash: grep -rn "create_payment_link\|say_status\|OrderStatusResponse(" --include=*.py …
+
+- 🔧 Bash: sed -n 1,60p tests/test_repo_postgres.py; sed -n 59,80p tests/test_migrations.py…
+
+Ho raccolto tutto il contesto e verificato l'API dell'SDK Stripe 15.6.1 solo in locale, senza chiamate. Ora scrivo il piano.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+Il piano è scritto. Faccio la self-review: prima sistemo il test del runner inline nel Task 5, dove avevo lasciato una bozza con una nota correttiva, poi verifico alcuni riferimenti.
+
+- 🔧 Bash: sed -n 136,153p tests/test_usecases.py; grep -n "money_str" -A5 vela/domain/mode…
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m6/docs/plans/2026-09-25-m6-stripe.md
+
+Ora eseguo il Task 0 (decisioni in `docs/decisions.md` e deroga in spec §6) e committo insieme al piano, come per M4. Così il piano parte già con le decisioni registrate.
+
+- 🔧 Bash: P=docs/plans/2026-09-25-m6-stripe.md && uv run python - <<'EOF' import re p = "d…
+
+- 🔧 Bash: git add docs/plans/2026-09-25-m6-stripe.md docs/decisions.md docs/spec.md && git…

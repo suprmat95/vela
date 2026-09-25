@@ -323,7 +323,9 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
 - Prodotto: solo padel o tennis con hotel. Voli, transfer, auto e altri componenti sono
   esclusi e costerebbero punti.
 - Nessuna interfaccia utente propria: niente pagine di ricerca, liste, filtri, griglie,
-  confronti. La sola pagina web coinvolta è il Checkout di Stripe.
+  confronti. Le sole pagine web coinvolte sono il Checkout di Stripe e le due pagine statiche
+  di ritorno servite da Vela (`/checkout/success`, `/checkout/cancel`; decisione M6), che non
+  mostrano dati dell'ordine.
 - Lingue degli intenti: italiano e inglese. Catalogo HofJ in locale `it`.
 - Dati personali: solo quelli di RF-12.
 - Variabili d'ambiente: `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND`, `DATABASE_URL`,
