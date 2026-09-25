@@ -2521,3 +2521,70 @@ Aspetto il risultato del giro in corso; mi arriva una notifica quando termina.
 - 🔧 Bash: Run suite without and with Postgres
 
 - 🔧 Bash: Commit Task 5
+
+Task 5 fatto (commit `34f99c1`): il contatore condiviso della quota esiste, in memoria e su Postgres, e la suite è verde.
+
+**Test.** La suite passa da 528 a **551 test** ed è verde anche su Postgres, con lo schema isolato `vela_test`.
+- **Contratto comune:** 11 test, identici per memoria e Postgres:
+  - blocco "tutto o niente";
+  - riserva `booking` intatta a finestra piena;
+  - finestra che avanza ogni 60 s restando allineata a quella di HofJ, anche dopo una pausa;
+  - `sync` solo senza acquisti in coda;
+  - un 429 azzera il budget;
+  - allineamento a `/v1/quota`;
+  - richiesta di rilettura prima della prima sincronizzazione e dopo un 429.
+- **Concorrenza su Postgres:** 8 thread sullo stesso contatore ottengono **esattamente 87** chiamate `purchase`, mai di più. L'ho eseguito prima con 1600 tentativi, poi con 200.
+- Ho visto fallire i test prima dell'implementazione.
+
+**Cosa ho fatto:**
+- **Porta `QuotaStore`** (`vela/ports/quota.py`) con `acquire`, `on_429`, `needs_refresh`, `sync_from_snapshot`, `snapshot` e `next_window_start`.
+- **Regole della finestra come funzioni pure** in `vela/domain/quota.py`. I due adapter si limitano a leggere e salvare lo stato, così memoria e Postgres non possono comportarsi in modo diverso.
+- **Postgres:** una sola riga, bloccata con `SELECT … FOR UPDATE` per tutta la decisione.
+
+**Cosa ho deciso:**
+- **Postgres: lock sulla riga invece di un singolo `UPDATE`,** come invece diceva il piano. È atomico lo stesso e riusa le regole pure. Con 120 chiamate al minuto il lock non pesa.
+- **Prima della prima lettura di `/v1/quota`:** la finestra parte dalla prima richiesta, con limite 120, e segnala che va sincronizzata.
+- **Dopo un 429:** `used` sale al limite effettivo. Neanche la classe `booking` può chiamare fino alla finestra successiva, come chiede RF-38.
+
+**Dubbi:**
+- **Lentezza dei test Postgres da qui.** Ogni prenotazione fa tre passaggi di rete verso Francoforte, e la suite con Postgres dura quasi 6 minuti. In produzione, dentro Render, la latenza è molto più bassa. Per ora non ottimizzo. Se diventa un problema, la prenotazione si può ridurre a un solo passaggio.
+- **I test Postgres sono di più.** Senza `DATABASE_URL` ora ne vengono saltati 26 invece di 14, perché si aggiungono i 12 della quota.
+
+Il prossimo è il **Task 6**, la coda dei job (`JobRepository`):
+- prelievo con `FOR UPDATE SKIP LOCKED`, prima i `booking` e poi gli acquisti in ordine di arrivo;
+- lease di 2 minuti;
+- posizione in coda.
+
+Vado?
+
+## Utente 20:37
+
+vai task 6
+
+## Agente 20:37
+
+- 🔧 Bash: Read contract helpers and memory repos
+
+Scrivo la porta e i test di contratto dei job. Stanno nel contratto dei repository, perché i job fanno riferimento agli ordini (foreign key su Postgres).
+
+- 🔧 Bash: Write JobRepository port and contract tests
+
+Tutti e 12 i test falliscono perché la coda non esiste ancora. Implemento.
+
+- 🔧 Bash: Implement MemoryJobs and wire repositories
+
+- 🔧 Bash: Locate syntax error
+
+Il mio script ha inserito l'import in mezzo a un import su più righe. Correggo.
+
+- 🔧 Bash: Fix import and rerun memory contract
+
+In memoria il contratto passa. Ora `PostgresJobs`, con il prelievo `FOR UPDATE SKIP LOCKED`, e un test apposito su Postgres: due sessioni che prelevano insieme ottengono job diversi.
+
+- 🔧 Bash: Implement PostgresJobs and run contract on Postgres
+
+Il contratto passa su Postgres, compreso il test `SKIP LOCKED`. Lancio la suite completa, senza e con Postgres.
+
+- 🔧 Bash: Run full suite without and with Postgres
+
+- 🔧 Bash: Commit Task 6

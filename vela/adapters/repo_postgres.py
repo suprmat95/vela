@@ -1,16 +1,16 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Iterable, List, Optional, Set
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from vela.adapters.schema import (intents_t, orders_t, products_t, proposals_t, quota_window_t,
-                                  rejections_t)
-from vela.domain.models import (Availability, Criteria, Intent, Order, OrderStatus, Product,
-                                Proposal, QuotaClass, Rejection, criteria_from_dict,
+from vela.adapters.schema import (intents_t, jobs_t, orders_t, products_t, proposals_t,
+                                  quota_window_t, rejections_t)
+from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, JobStatus, Order,
+                                OrderStatus, Product, Proposal, QuotaClass, Rejection, criteria_from_dict,
                                 criteria_to_dict, profile_from_dict, profile_to_dict)
 from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
                                rolled, try_acquire)
@@ -221,6 +221,86 @@ class PostgresRejections:
         return {r[0] for r in rows}
 
 
+def _job_row(j: Job) -> dict:
+    return {"id": j.id, "kind": j.kind.value, "order_id": j.order_id, "status": j.status.value,
+            "step": j.step, "attempts": j.attempts, "enqueued_at": j.enqueued_at,
+            "run_after": j.run_after, "locked_at": j.locked_at, "last_error": j.last_error}
+
+
+def _job(m) -> Job:
+    return Job(m["id"], JobKind(m["kind"]), m["order_id"], JobStatus(m["status"]), m["enqueued_at"],
+               m["run_after"], step=m["step"], attempts=m["attempts"], locked_at=m["locked_at"],
+               last_error=m["last_error"])
+
+
+ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value)
+CLAIM_PRIORITY = case({JobKind.BOOKING.value: 0, JobKind.PAYMENT_CHECK.value: 1},
+                      value=jobs_t.c.kind, else_=2)
+
+
+class PostgresJobs:
+    """Coda dei job (RF-50): ogni worker preleva con `FOR UPDATE SKIP LOCKED`, così due
+    istanze non prendono mai lo stesso job e non si aspettano a vicenda."""
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def enqueue(self, job: Job) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(jobs_t.insert().values(**_job_row(job)))
+
+    def get(self, job_id: str) -> Optional[Job]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(jobs_t).where(jobs_t.c.id == job_id)).mappings().first()
+        return None if m is None else _job(m)
+
+    def save(self, job: Job) -> None:
+        values = {k: v for k, v in _job_row(job).items() if k != "id"}
+        with self.engine.begin() as conn:
+            conn.execute(update(jobs_t).where(jobs_t.c.id == job.id).values(**values))
+
+    def claim(self, now: datetime, lease_seconds: int) -> Optional[Job]:
+        stale = now - timedelta(seconds=lease_seconds)
+        ready = or_(and_(jobs_t.c.status == JobStatus.PENDING.value, jobs_t.c.run_after <= now),
+                    and_(jobs_t.c.status == JobStatus.RUNNING.value, jobs_t.c.locked_at <= stale))
+        pick = (select(jobs_t.c.id).where(ready)
+                .order_by(CLAIM_PRIORITY, jobs_t.c.enqueued_at, jobs_t.c.id)
+                .limit(1).with_for_update(skip_locked=True))
+        with self.engine.begin() as conn:
+            job_id = conn.execute(pick).scalar()
+            if job_id is None:
+                return None
+            m = conn.execute(update(jobs_t).where(jobs_t.c.id == job_id)
+                             .values(status=JobStatus.RUNNING.value, locked_at=now)
+                             .returning(*jobs_t.c)).mappings().one()
+        return _job(m)
+
+    def active_for_order(self, order_id: str, kind: JobKind) -> Optional[Job]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(jobs_t).where(jobs_t.c.order_id == order_id,
+                                                  jobs_t.c.kind == kind.value,
+                                                  jobs_t.c.status.in_(ACTIVE))).mappings().first()
+        return None if m is None else _job(m)
+
+    def queued_purchase_position(self, order_id: str) -> Optional[int]:
+        pending = and_(jobs_t.c.kind == JobKind.PURCHASE.value,
+                       jobs_t.c.status == JobStatus.PENDING.value)
+        with self.engine.connect() as conn:
+            mine = conn.execute(select(jobs_t.c.enqueued_at, jobs_t.c.id)
+                                .where(pending, jobs_t.c.order_id == order_id)).first()
+            if mine is None:
+                return None
+            ahead = conn.execute(select(func.count()).select_from(jobs_t).where(
+                pending, or_(jobs_t.c.enqueued_at < mine.enqueued_at,
+                             and_(jobs_t.c.enqueued_at == mine.enqueued_at, jobs_t.c.id < mine.id)))).scalar()
+        return ahead + 1
+
+    def purchase_waiting(self) -> bool:
+        with self.engine.connect() as conn:
+            return conn.execute(select(jobs_t.c.id).where(jobs_t.c.kind == JobKind.PURCHASE.value,
+                                                          jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
+
+
 QUOTA_ROW = 1
 
 
@@ -299,3 +379,5 @@ class PostgresRepositories:
         self.proposals = PostgresProposals(engine)
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
+        self.jobs = PostgresJobs(engine)
+        self.quota = PostgresQuota(engine)

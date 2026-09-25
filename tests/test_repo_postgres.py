@@ -65,3 +65,21 @@ class PostgresRepositoriesTest(RepositoryContract, unittest.TestCase):
         self.repos.proposals.add(proposal("p9"))
         self.repos.orders.add(order("o3", "p9"))   # altra proposta: la connessione è pulita
         self.assertEqual(self.repos.orders.get_by_proposal("p9").id, "o3")
+
+    def test_skip_locked_two_sessions_get_different_jobs(self):
+        """Mentre una transazione tiene bloccato il primo job, un secondo worker prende il successivo."""
+        from datetime import timedelta
+        from sqlalchemy import select
+        from repo_contract import LEASE, job
+        from support import NOW
+        from vela.adapters.schema import jobs_t
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(job("j1", "o1", enqueued_at=NOW - timedelta(seconds=10)))
+        self.repos.jobs.enqueue(job("j2", "o2"))
+        with self.engine.begin() as other:
+            held = other.execute(select(jobs_t.c.id).where(jobs_t.c.id == "j1").with_for_update()).scalar()
+            self.assertEqual(held, "j1")
+            self.assertEqual(self.repos.jobs.claim(NOW, LEASE).id, "j2")
+            self.assertIsNone(self.repos.jobs.claim(NOW, LEASE))
+        self.assertEqual(self.repos.jobs.claim(NOW, LEASE).id, "j1")
+

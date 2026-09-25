@@ -4,6 +4,8 @@ from typing import Iterable, List, Optional, Protocol, Set
 
 from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
                                 Rejection)
+from vela.ports.jobs import JobRepository
+from vela.ports.quota import QuotaStore
 
 
 class DuplicateOrder(Exception):
@@ -50,3 +52,5 @@ class Repositories(Protocol):
     proposals: ProposalRepository
     orders: OrderRepository
     rejections: RejectionRepository
+    jobs: JobRepository
+    quota: QuotaStore

@@ -4,8 +4,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, make_product
-from vela.domain.models import (Area, Criteria, Intent, Order, OrderStatus, Participant,
-                                Period, Proposal, Rejection, TravelerProfile)
+from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
+                                OrderStatus, Participant, Period, Proposal, Rejection,
+                                TravelerProfile)
 from vela.ports.repositories import DuplicateOrder
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
@@ -25,6 +26,13 @@ def proposal(pid="p1", iid="i1", product_id="1", created_at=NOW):
 def order(oid="o1", pid="p1"):
     return Order(oid, pid, "i1", "1", OrderStatus.AWAITING_PAYMENT, 2, Decimal("500"),
                  Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1")
+
+
+def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):
+    return Job(jid, kind, oid, JobStatus.PENDING, enqueued_at, run_after, **kw)
+
+
+LEASE = 120
 
 
 class RepositoryContract:
@@ -128,6 +136,112 @@ class RepositoryContract:
         self.repos.orders.save(replaced)
         self.assertEqual(self.repos.orders.get("o1"), replaced)
         self.assertEqual(self.repos.orders.ids_with_status(OrderStatus.REPLACED), ["o1"])
+
+    # job (RF-27, RF-50)
+    def seed_orders(self, n):
+        self.seed()
+        for i in range(1, n + 1):
+            self.repos.proposals.add(proposal("p%d" % i))
+            self.repos.orders.add(order("o%d" % i, "p%d" % i))
+
+    def test_job_roundtrip(self):
+        self.seed_orders(1)
+        j = job("j1", "o1", step=2, attempts=1, last_error="timeout")
+        self.repos.jobs.enqueue(j)
+        self.assertEqual(self.repos.jobs.get("j1"), j)
+        done = replace(j, status=JobStatus.DONE, step=5, locked_at=NOW)
+        self.repos.jobs.save(done)
+        self.assertEqual(self.repos.jobs.get("j1"), done)
+        self.assertIsNone(self.repos.jobs.get("nope"))
+
+    def test_claim_marks_running_with_lock_time(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(job("j1", "o1"))
+        claimed = self.repos.jobs.claim(NOW, LEASE)
+        self.assertEqual((claimed.id, claimed.status, claimed.locked_at), ("j1", JobStatus.RUNNING, NOW))
+        self.assertEqual(self.repos.jobs.get("j1"), claimed)
+
+    def test_claim_prefers_booking_then_payment_check_then_purchase(self):
+        self.seed_orders(3)
+        self.repos.jobs.enqueue(job("j-p", "o1", enqueued_at=NOW - timedelta(minutes=9)))
+        self.repos.jobs.enqueue(job("j-c", "o2", JobKind.PAYMENT_CHECK, enqueued_at=NOW - timedelta(minutes=5)))
+        self.repos.jobs.enqueue(job("j-b", "o3", JobKind.BOOKING))
+        order_of_claims = [self.repos.jobs.claim(NOW, LEASE).id for _ in range(3)]
+        self.assertEqual(order_of_claims, ["j-b", "j-c", "j-p"])
+        self.assertIsNone(self.repos.jobs.claim(NOW, LEASE))
+
+    def test_claim_purchase_fifo_by_enqueued_at(self):
+        self.seed_orders(3)
+        self.repos.jobs.enqueue(job("j2", "o2", enqueued_at=NOW - timedelta(seconds=10)))
+        self.repos.jobs.enqueue(job("j3", "o3", enqueued_at=NOW - timedelta(seconds=5)))
+        self.repos.jobs.enqueue(job("j1", "o1", enqueued_at=NOW - timedelta(seconds=30)))
+        self.assertEqual([self.repos.jobs.claim(NOW, LEASE).id for _ in range(3)], ["j1", "j2", "j3"])
+
+    def test_claim_respects_run_after(self):
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(job("j1", "o1", enqueued_at=NOW - timedelta(minutes=1),
+                                    run_after=NOW + timedelta(seconds=30)))
+        self.repos.jobs.enqueue(job("j2", "o2"))
+        self.assertEqual(self.repos.jobs.claim(NOW, LEASE).id, "j2")
+        self.assertIsNone(self.repos.jobs.claim(NOW, LEASE))
+        self.assertEqual(self.repos.jobs.claim(NOW + timedelta(seconds=30), LEASE).id, "j1")
+
+    def test_claimed_job_not_claimed_twice(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(job("j1", "o1"))
+        self.assertIsNotNone(self.repos.jobs.claim(NOW, LEASE))
+        self.assertIsNone(self.repos.jobs.claim(NOW + timedelta(seconds=LEASE - 1), LEASE))
+
+    def test_expired_lease_is_reclaimed(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(job("j1", "o1", step=3))
+        self.repos.jobs.claim(NOW, LEASE)
+        later = NOW + timedelta(seconds=LEASE)
+        again = self.repos.jobs.claim(later, LEASE)
+        self.assertEqual((again.id, again.step, again.locked_at), ("j1", 3, later))
+
+    def test_done_and_dead_jobs_are_never_claimed(self):
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(replace(job("j1", "o1"), status=JobStatus.DONE))
+        self.repos.jobs.enqueue(replace(job("j2", "o2"), status=JobStatus.DEAD))
+        self.assertIsNone(self.repos.jobs.claim(NOW + timedelta(hours=1), LEASE))
+
+    def test_active_for_order(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(replace(job("j0", "o1"), status=JobStatus.DONE))
+        self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.PURCHASE))
+        self.repos.jobs.enqueue(job("j1", "o1"))
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.PURCHASE).id, "j1")
+        self.repos.jobs.claim(NOW, LEASE)
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.PURCHASE).id, "j1")
+        self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.BOOKING))
+
+    def test_position_counts_only_pending_purchases_before(self):
+        self.seed_orders(4)
+        self.repos.jobs.enqueue(job("j1", "o1", enqueued_at=NOW - timedelta(seconds=40)))
+        self.repos.jobs.enqueue(job("j2", "o2", enqueued_at=NOW - timedelta(seconds=30)))
+        self.repos.jobs.enqueue(job("j3", "o3", enqueued_at=NOW - timedelta(seconds=20)))
+        self.repos.jobs.enqueue(job("jb", "o4", JobKind.BOOKING, enqueued_at=NOW - timedelta(minutes=5)))
+        self.assertEqual(self.repos.jobs.queued_purchase_position("o3"), 3)
+        self.repos.jobs.claim(NOW, LEASE)                    # booking
+        self.repos.jobs.claim(NOW, LEASE)                    # j1 in lavorazione: non conta più
+        self.assertEqual(self.repos.jobs.queued_purchase_position("o3"), 2)
+        self.assertEqual(self.repos.jobs.queued_purchase_position("o2"), 1)
+
+    def test_position_none_when_not_queued(self):
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(job("j1", "o1"))
+        self.repos.jobs.claim(NOW, LEASE)
+        self.assertIsNone(self.repos.jobs.queued_purchase_position("o1"))    # in lavorazione
+        self.assertIsNone(self.repos.jobs.queued_purchase_position("o2"))    # nessun job
+
+    def test_purchase_waiting(self):
+        self.seed_orders(2)
+        self.assertFalse(self.repos.jobs.purchase_waiting())
+        self.repos.jobs.enqueue(job("jb", "o2", JobKind.BOOKING))
+        self.assertFalse(self.repos.jobs.purchase_waiting())
+        self.repos.jobs.enqueue(job("j1", "o1", run_after=NOW + timedelta(minutes=1)))
+        self.assertTrue(self.repos.jobs.purchase_waiting())
 
     # rifiuti
     def test_rejections(self):

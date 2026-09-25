@@ -4,8 +4,8 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
 
-from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
-                                QuotaClass, Rejection)
+from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
+                                Product, Proposal, QuotaClass, Rejection)
 from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
                                rolled, try_acquire)
 from vela.ports.hofj import QuotaSnapshot
@@ -107,6 +107,58 @@ class MemoryRejections:
         return {r.proposal_id for r in self._items.values() if r.intent_id == intent_id}
 
 
+ACTIVE = (JobStatus.PENDING, JobStatus.RUNNING)
+CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.PURCHASE: 2}
+
+
+def claimable(j: Job, now: datetime, lease_seconds: int) -> bool:
+    if j.status == JobStatus.PENDING:
+        return j.run_after <= now
+    return (j.status == JobStatus.RUNNING and j.locked_at is not None
+            and (now - j.locked_at).total_seconds() >= lease_seconds)
+
+
+class MemoryJobs:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._jobs: Dict[str, Job] = {}
+
+    def enqueue(self, job: Job) -> None:
+        with self._lock:
+            self._jobs[job.id] = job
+
+    def get(self, job_id: str) -> Optional[Job]:
+        return self._jobs.get(job_id)
+
+    def save(self, job: Job) -> None:
+        with self._lock:
+            self._jobs[job.id] = job
+
+    def claim(self, now: datetime, lease_seconds: int) -> Optional[Job]:
+        with self._lock:
+            ready = [j for j in self._jobs.values() if claimable(j, now, lease_seconds)]
+            if not ready:
+                return None
+            best = min(ready, key=lambda j: (CLAIM_PRIORITY[j.kind], j.enqueued_at, j.id))
+            claimed = replace(best, status=JobStatus.RUNNING, locked_at=now)
+            self._jobs[claimed.id] = claimed
+            return claimed
+
+    def active_for_order(self, order_id: str, kind: JobKind) -> Optional[Job]:
+        return next((j for j in self._jobs.values()
+                     if j.order_id == order_id and j.kind == kind and j.status in ACTIVE), None)
+
+    def queued_purchase_position(self, order_id: str) -> Optional[int]:
+        pending = sorted((j for j in self._jobs.values()
+                          if j.kind == JobKind.PURCHASE and j.status == JobStatus.PENDING),
+                         key=lambda j: (j.enqueued_at, j.id))
+        ids = [j.order_id for j in pending]
+        return ids.index(order_id) + 1 if order_id in ids else None
+
+    def purchase_waiting(self) -> bool:
+        return any(j.kind == JobKind.PURCHASE and j.status in ACTIVE for j in self._jobs.values())
+
+
 class MemoryRepositories:
     def __init__(self):
         self.clear()
@@ -117,6 +169,8 @@ class MemoryRepositories:
         self.proposals = MemoryProposals()
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
+        self.jobs = MemoryJobs()
+        self.quota = MemoryQuota()
 
 
 class MemoryQuota:
