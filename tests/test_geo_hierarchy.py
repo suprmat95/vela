@@ -67,3 +67,30 @@ class FixtureHierarchyTest(unittest.TestCase):
                 continue
             chain = ancestors(find_area(title))
             self.assertEqual(chain[-1], Area("country", COUNTRIES[country], country), title)
+
+
+class M9RegionsTest(unittest.TestCase):
+    """Le regioni aggiunte da M9 contengono le città del catalogo e hanno la preposizione giusta."""
+
+    def test_catalog_cities_sit_in_their_region(self):
+        cases = [("Malaga", "Andalusia"), ("Estepona", "Costa del Sol"), ("Siviglia", "Andalusia"),
+                 ("Barcellona", "Catalogna"), ("Tarragona", "Catalogna"),
+                 ("Valencia", "Comunità Valenciana"), ("Dénia", "Comunità Valenciana"),
+                 ("Milano", "Lombardia"), ("Venezia", "Veneto"), ("Riccione", "Emilia-Romagna"),
+                 ("Cap d'Agde", "Occitania")]
+        for city, region in cases:
+            with self.subTest(city=city):
+                names = [a.name for a in ancestors(find_area(city))]
+                self.assertIn(region, names)
+                self.assertEqual(names[-1], COUNTRIES[find_area(city).country_code])
+
+    def test_region_prepositions(self):
+        self.assertEqual(where(Area("region", "Andalusia", "ES")), "in Andalusia")
+        self.assertEqual(where(Area("region", "Costa del Sol", "ES")), "sulla Costa del Sol")
+        self.assertEqual(where(Area("region", "Comunità Valenciana", "ES")),
+                         "nella Comunità Valenciana")
+        self.assertEqual(where(Area("region", "Emilia-Romagna", "IT")), "in Emilia-Romagna")
+        self.assertEqual(where(Area("region", "Costa del Sol", "ES"), "en"), "on the Costa del Sol")
+        self.assertEqual(where(Area("region", "Comunità Valenciana", "ES"), "en"),
+                         "in the Valencian Community")
+

@@ -254,6 +254,12 @@ class ReasonTest(unittest.TestCase):
         r = choose([p], crit(), set(), TODAY)
         self.assertIn("Parte l'8 ottobre 2026", r.reason)
 
+    def test_m9_region_contains_its_cities(self):
+        p = make_product(1, price=300, destination="Malaga")
+        self.assertEqual(area_score(p, Area("region", "Andalusia", "ES")), INSIDE)
+        r = choose([p], crit(area=Area("region", "Andalusia", "ES")), set(), TODAY)
+        self.assertTrue(r.reason.startswith("È a Malaga, in Andalusia come hai chiesto."), r.reason)
+
     def test_reason_in_english(self):
         en = dict(language="en")
         self.assertTrue(self.reason(crit(**en)).startswith(

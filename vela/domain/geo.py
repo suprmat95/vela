@@ -62,12 +62,26 @@ PARENTS = {
     "Lanzarote": "Canarie", "Tenerife": "Canarie", "Fuerteventura": "Canarie",
     "Palma de Mallorca": "Maiorca", "Maiorca": "Baleari", "Minorca": "Baleari", "Ibiza": "Baleari",
     "Firenze": "Toscana", "Pietrasanta": "Toscana",
+    # regioni di M9
+    "Malaga": "Costa del Sol", "Estepona": "Costa del Sol", "Torre del Mar": "Costa del Sol",
+    "Costa del Sol": "Andalusia", "Siviglia": "Andalusia",
+    "Barcellona": "Catalogna", "Lloret de Mar": "Catalogna", "Tarragona": "Catalogna",
+    "Valencia": "Comunità Valenciana", "Alicante": "Comunità Valenciana",
+    "Dénia": "Comunità Valenciana",
+    "Milano": "Lombardia", "Venezia": "Veneto", "Riccione": "Emilia-Romagna",
+    "Cap d'Agde": "Occitania",
 }
 
 # complemento di luogo quando "in <paese>" / "a <luogo>" non suona italiano
 _LOCATIVE = {"Canarie": "alle Canarie", "Baleari": "alle Baleari", "Toscana": "in Toscana",
-             "Sardegna": "in Sardegna"}
-_LOCATIVE_EN = {"Canarie": "in the Canary Islands", "Baleari": "in the Balearic Islands"}
+             "Sardegna": "in Sardegna", "Andalusia": "in Andalusia", "Catalogna": "in Catalogna",
+             "Costa del Sol": "sulla Costa del Sol",
+             "Comunità Valenciana": "nella Comunità Valenciana", "Lombardia": "in Lombardia",
+             "Veneto": "in Veneto", "Emilia-Romagna": "in Emilia-Romagna",
+             "Occitania": "in Occitania"}
+_LOCATIVE_EN = {"Canarie": "in the Canary Islands", "Baleari": "in the Balearic Islands",
+                "Costa del Sol": "on the Costa del Sol",
+                "Comunità Valenciana": "in the Valencian Community"}
 
 _BY_NAME = {place[0]: Area(place[1], place[0], place[2]) for place in PLACES}
 
