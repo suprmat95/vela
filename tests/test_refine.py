@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from support import NOW, TODAY
 from vela.domain.models import Area, Criteria, Period, Proposal
-from vela.domain.refine import refine
+from vela.domain.refine import is_price_reason, refine
 
 SPAIN = Area("country", "Spagna", "ES")
 VALENCIA = Area("city", "Valencia", "ES")
@@ -18,6 +18,21 @@ PROPOSAL = Proposal("p1", "i1", "1", date(2026, 10, 1), date(2026, 10, 4), 2, De
 
 def refined(reason, criteria=CRIT, area=VALENCIA):
     return refine(criteria, reason, PROPOSAL, area, TODAY)
+
+
+class PriceReasonTest(unittest.TestCase):
+    """Decisione M7: un motivo di prezzo mette un tetto al totale delle proposte successive."""
+
+    def test_price_words_and_figures_are_price_reasons(self):
+        for reason in ("troppo caro", "Troppo cara!", "vorrei qualcosa di più economico",
+                       "too expensive", "something cheaper", "massimo 500 euro", "max 400€"):
+            with self.subTest(reason):
+                self.assertTrue(is_price_reason(reason))
+
+    def test_other_reasons_are_not_price_reasons(self):
+        for reason in ("più a sud", "a novembre", "siamo in 3", "no", "", None):
+            with self.subTest(reason):
+                self.assertFalse(is_price_reason(reason))
 
 
 class PriceTest(unittest.TestCase):

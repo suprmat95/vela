@@ -121,6 +121,9 @@ class MemoryRejections:
     def proposal_ids_for_intent(self, intent_id: str) -> Set[str]:
         return {r.proposal_id for r in self._items.values() if r.intent_id == intent_id}
 
+    def list_for_intent(self, intent_id: str) -> List[Rejection]:
+        return [r for r in self._items.values() if r.intent_id == intent_id]
+
 
 ACTIVE = (JobStatus.PENDING, JobStatus.RUNNING)
 CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.PURCHASE: 2}

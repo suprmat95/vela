@@ -326,3 +326,156 @@ Rossi per i motivi attesi: manca il metodo, manca la chiave `catalog_archived`, 
 - 🔧 Bash: Read README catalog paragraph
 
 - 🔧 Bash: Read rest of README live paragraph
+
+Aggiorno il README con il nuovo comportamento del catalogo, poi faccio il commit del Task 5.
+
+- 🔧 Bash: Update README and commit Task 5
+
+Task 5 è fatto: commit `2eaed9f`, suite verde con 738 test e 42 saltati.
+
+**Cosa ho fatto**
+- Nuovo metodo `archive_missing(keep_ids)` sulla porta `ProductRepository`, implementato in memoria e su Postgres. Su Postgres è un `UPDATE ... SET archived = true`, mai un DELETE.
+- `bootstrap` ora chiama `realign_catalog`. Se i prodotti attivi del DB sono diversi da quelli della fixture, carica la fixture e archivia gli altri. Se sono uguali non tocca nulla. Il risultato del boot riporta anche `catalog_archived`.
+- Test scritti prima del codice, tutti rossi prima dell'implementazione:
+  - 2 test del contratto in `tests/repo_contract.py`;
+  - 4 test del riallineo in `tests/test_app_replay.py`: cambio di catalogo, proposte sui prodotti archiviati ancora leggibili, `bookable=false` conservato quando il catalogo non cambia, ritorno al catalogo di produzione.
+- Ho aggiornato il README e la docstring di `vela/app.py`, che parlavano ancora di "carica se la tabella è vuota".
+- `/health` è rimasto com'era: conta anche gli archiviati. Nel Task 8 il riallineo si verifica dal log di boot.
+
+**Cosa non è verificato**
+- Il contratto di `archive_missing` su Postgres, compreso il ramo con `keep_ids` vuoto, non è stato eseguito: qui manca `DATABASE_URL`, e sono i 2 test saltati in più. Va lanciato dove l'URL è disponibile, con `PGOPTIONS=-csearch_path=vela_test`, prima del merge del Task 8.
+- Il riallineo verso staging archivierà i 77 prodotti attivi di produzione nel DB di Render. Il ritorno a replay, per M13, li riattiva col riallineo opposto. Questo è verificato solo in memoria.
+
+**Proposta per il Task 6 (`scripts/rest_flow.py`), aspetto il tuo OK:**
+- **Struttura:** modellata su `scripts/mcp_smoke.py`, eseguita con `uv run` e `httpx`. Tutto passa da una funzione `run_flow(client, intent, traveler, open_url, tick, clock, poll, timeout, trap=False)` che restituisce un dizionario con esito, id dell'ordine, codice e tempi. Il `main` legge `VELA_API_TOKEN` solo dall'ambiente, esce con un messaggio se manca, e non lo stampa mai.
+- **Flusso normale:**
+  1. `POST /v1/intents`, poi la proposta;
+  2. rifiuto con "troppo caro": la nuova proposta deve avere un totale minore, altrimenti il flusso fallisce;
+  3. accept, che deve rispondere `202 order_queued`;
+  4. polling di `GET /v1/orders/{id}` finché compare `payment_url`, che viene stampato e passato a `open_url`. Contro Render `open_url` stampa soltanto: paghi tu;
+  5. polling fino a `confirmed` con `booking_code`, entro il timeout.
+- **Flusso `--trap`:** dopo l'accept aspetta un ordine `replaced` o una `proposal_changed` con un prodotto diverso. Verifica che nessun `say` contenga parole di errore tecnico (`errore`, `error`, `502`, `HofJ`). Poi rifiuta la proposta per annullare l'ordine e si ferma.
+- **Controlli e output:** a ogni risposta al massimo un prodotto, con `count_products` importato da `mcp_smoke`. Alla fine stampa una tabella Markdown dei tempi (intento, proposta, rifiuto, accept, accept→link, link→confirmed, totale) con id dell'ordine e codice.
+- **Test** in un nuovo `tests/test_rest_flow.py`, contro l'app replay in-process con `TestClient`, repository in memoria e orologio finto per il timeout:
+  - flusso completo fino a `confirmed`;
+  - token assente → uscita senza chiamate;
+  - token assente dall'output;
+  - due prodotti in una risposta → fallimento;
+  - proposta dopo il rifiuto non più economica → fallimento;
+  - timeout → fallimento chiaro;
+  - `--trap` con una HofJ di replay che solleva `ProductError` sull'id trappola → proposta sostitutiva diversa e ordine `cancelled`.
+- **Frasi di prova:** `INTENT_FLOW` e `INTENT_TRAP` restano provvisorie (la frase di §10.1) fino al Task 7.
+- **Da verificare prima di scrivere i test:** i nomi esatti degli stati e dei campi (`replaced`, `proposal_changed`, `proposal`) nel contratto REST di M5. Se differiscono da quanto scritto qui, mi adeguo al contratto esistente senza cambiarlo.
+
+## Utente 21:56
+
+ok, procedi con il Task 6
+
+## Agente 21:56
+
+Parto dal contratto REST di M5 e da `mcp_smoke.py`, da cui prendo la struttura.
+
+- 🔧 Bash: Read REST contract docs
+
+- 🔧 Bash: Read mcp_smoke flow and its tests
+
+- 🔧 Bash: Check proposal dict shape and price fields
+
+- 🔧 Bash: Read REST test setup and helpers
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_rest_flow.py
+
+- 🔧 Bash: Run rest_flow tests, expect red
+
+- 🔧 Bash: Show import error reason
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_rest_flow.py
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m7/scripts/rest_flow.py
+
+- 🔧 Bash: Run rest_flow tests
+
+- 🔧 Bash: Show traceback of full flow test error
+
+Stessa causa per entrambi i test. Verifico l'ipotesi: nel chooser v2 di M11 area e budget sono criteri d'ordinamento, e l'area coincidente viene prima del budget.
+
+- 🔧 Bash: Probe reject "troppo caro" behaviour on production fixture
+
+- 🔧 AskUserQuestion
+
+Scelta registrata: tetto di prezzo dopo il rifiuto, come nuovo Task 6b. Prima di proporti come implementarlo guardo come M9 e M11 gestiscono "troppo caro" e l'ordinamento.
+
+- 🔧 Bash: Find reject reason handling and chooser ordering
+
+- 🔧 Bash: Read refine, choose, Criteria, reject use case
+
+- 🔧 Bash: Read rejection repo, _propose, say_no_match
+
+- 🔧 Bash: Check whether criteria are exposed and no-match phrases
+
+Ho la forma del cambio. Non lo scrivo prima del tuo OK: è una modifica al dominio, e il working agreement lo chiede.
+
+**Proposta per il Task 6b (tetto di prezzo dopo "troppo caro"):**
+- **Dove vive il tetto.** Non nei `Criteria`: finiscono nella risposta pubblica `intent_created` e aggiungere un campo cambierebbe l'interfaccia. Il tetto si ricava dai rifiuti. È il totale più basso tra le proposte dell'intento rifiutate con un motivo di prezzo: "troppo caro", "più economico", "too expensive", oppure una cifra nel motivo. Nessuna migrazione, niente di nuovo nelle risposte.
+- **`vela/domain/refine.py`.** Nuova funzione pura `is_price_reason(reason)`, che riusa la regex `_PRICE` e `parse_budget` già usate da `refine`. Una sola definizione di "motivo di prezzo".
+- **Porta dei rifiuti.** Nuovo metodo interno `RejectionRepository.list_for_intent(intent_id)` che restituisce i `Rejection` con il motivo, in memoria e su Postgres. Oggi la porta dà solo gli id.
+- **`vela/domain/chooser.py`.** `choose(..., max_total=None)` con un nuovo filtro `"price"` subito prima di `"rejected"`: resta chi ha un totale strettamente minore del tetto. L'ordinamento non cambia: tra i più economici l'area viene ancora prima, e se il prodotto è in un altro paese la frase lo dichiara già ("Non ho partenze compatibili in Spagna: questa è a …"). Se non resta niente → `NoChoice("price")`.
+- **`vela/domain/usecases.py` `_propose`.** Calcola il tetto e lo passa a `choose`.
+- **`vela/domain/say.py`.** Frase di `no_match` per `price`, in it e en: "Non ho niente di più economico per la tua richiesta: prova a cambiare periodo o destinazione."
+- **Test prima del codice:**
+  - chooser: stesso totale escluso (tetto stretto); area ancora prima tra i più economici; niente di più economico → `NoChoice("price")`; tutti i più economici già rifiutati → `rejected`;
+  - `is_price_reason`: casi it, en, con cifra, e motivo non di prezzo;
+  - contratto di `list_for_intent`;
+  - casi d'uso:
+    - l'esempio reale (558 → prima 600 in Spagna) ora dà una proposta sotto 558;
+    - due "troppo caro" di fila → totali decrescenti;
+    - niente di più economico → `no_match` `price` con la frase;
+    - "più a sud" non mette alcun tetto;
+  - `say`.
+- **Rischio.** Qualche test di M9 o M11 che fissa il comportamento attuale di "troppo caro" potrebbe cambiare. Se succede li aggiorno solo dove il cambio è proprio questa decisione, e li elenco nel resoconto.
+- **Ordine di lavoro.** `scripts/rest_flow.py` e `tests/test_rest_flow.py` (Task 6) restano non tracciati e non committati mentre faccio il 6b. Nel frattempo i due test del flusso completo restano rossi nella suite: sono il criterio d'accettazione del 6b. Dopo il 6b chiudo il Task 6.
+- **Decisioni.** La decisione va in `docs/decisions.md`, sezione "M7: decisioni prese durante l'esecuzione".
+
+## Utente 22:01
+
+ok, procedi con il Task 6b
+
+## Agente 22:01
+
+- 🔧 Bash: Find troppo-caro tests and rejection repo impls
+
+- 🔧 Bash: Read usecase, chooser and refine test setups
+
+Parto dai test. Guardo i test esistenti che usano "troppo caro" e fissano un risultato preciso:
+
+- 🔧 Bash: Read other troppo-caro tests
+
+- 🔧 Bash: Read say no-match coverage test
+
+Scrivo i test rossi: refine, chooser, repository, casi d'uso e frasi.
+
+- 🔧 Bash: Read english no-match test and chooser filter tests
+
+- 🔧 Bash: Write failing 6b tests and run suite
+
+- 🔧 Bash: Fix repeated-reject test expectation
+
+Ora l'implementazione:
+
+- 🔧 Bash: Implement ceiling in refine, chooser, repos, usecases
+
+- 🔧 Bash: Check imports needed
+
+- 🔧 Bash: Add Decimal import to usecases, check chooser
+
+Aggiungo l'import mancante nel chooser e le frasi `price` in `say.py`:
+
+- 🔧 Bash: Add import and phrases, run suite
+
+- 🔧 Bash: Update old expectation and docstring, run suite
+
+- 🔧 Bash: Find docs listing failed criteria
+
+- 🔧 Bash: Read RF-08 text
+
+- 🔧 Bash: Record decisions and commit Task 6b

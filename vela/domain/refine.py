@@ -27,6 +27,13 @@ _NORTH = re.compile(r"\b(?:più a nord|più al nord|più su|further north|farthe
                     r"more to the north)\b")
 
 
+def is_price_reason(reason: Optional[str]) -> bool:
+    """Il motivo parla di prezzo (parole di RF-08 o una cifra): dopo un rifiuto così le proposte
+    successive devono costare meno di quella rifiutata (decisione M7, spec §10.1)."""
+    low = (reason or "").lower()
+    return bool(_PRICE.search(low)) or parse_budget(low) is not None
+
+
 def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
            product_area: Optional[Area], today: date) -> Criteria:
     low = (reason or "").lower()

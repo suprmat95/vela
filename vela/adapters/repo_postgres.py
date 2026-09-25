@@ -239,6 +239,13 @@ class PostgresRejections:
                                 .where(rejections_t.c.intent_id == intent_id)).all()
         return {r[0] for r in rows}
 
+    def list_for_intent(self, intent_id: str) -> List[Rejection]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(rejections_t).where(rejections_t.c.intent_id == intent_id)
+                                .order_by(rejections_t.c.created_at)).mappings().all()
+        return [Rejection(m["intent_id"], m["proposal_id"], m["product_id"], m["reason"],
+                          m["created_at"]) for m in rows]
+
 
 def _job_row(j: Job) -> dict:
     return {"id": j.id, "kind": j.kind.value, "order_id": j.order_id, "status": j.status.value,

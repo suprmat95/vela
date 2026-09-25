@@ -1,7 +1,7 @@
 """Chooser v2 (RF-06, RF-07, RF-09): una sola scelta deterministica.
 
-Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, rifiutati
-(ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
+Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, prezzo
+(dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
 restanti ordina per aderenza all'area (dentro l'area 3, stessa regione 2, stesso paese 1),
 totale entro budget, prezzo crescente, id. Area e budget non escludono mai: se non sono
 rispettati la motivazione lo dichiara. Se un filtro azzera i candidati, `NoChoice` porta il
@@ -9,6 +9,7 @@ nome di quel filtro (RF-09).
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Iterable, Optional, Set, Tuple, Union
 
 from vela.domain import geo
@@ -16,7 +17,7 @@ from vela.domain.catalog import is_trip
 from vela.domain.models import Area, Criteria, Period, Product
 from vela.domain.say import fmt_money, on_date
 
-FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rejected")
+FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "price", "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
 
@@ -179,7 +180,9 @@ def bookable(product: Product, now: Optional[datetime]) -> bool:
 
 
 def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
-           today: date, now: Optional[datetime] = None) -> Union[Choice, NoChoice]:
+           today: date, now: Optional[datetime] = None,
+           max_total: Optional[Decimal] = None) -> Union[Choice, NoChoice]:
+    """`max_total`: tetto dopo un rifiuto per prezzo (decisione M7), totale strettamente minore."""
     candidates = list(products)
     steps = (
         ("archived", lambda p: not p.archived),
@@ -188,6 +191,7 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         ("sport", lambda p: criteria.sport is None or p.sport == criteria.sport),
         ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
+        ("price", lambda p: max_total is None or _total(p, criteria) < max_total),
         ("rejected", lambda p: p.id not in rejected_ids),
     )
     for name, keep in steps:

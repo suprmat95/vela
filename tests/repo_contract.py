@@ -285,3 +285,6 @@ class RepositoryContract:
         self.assertEqual(self.repos.rejections.product_ids_for_intent("i1"), {"1", "2"})
         self.assertEqual(self.repos.rejections.proposal_ids_for_intent("i1"), {"p1", "p2"})
         self.assertEqual(self.repos.rejections.product_ids_for_intent("other"), set())
+        reasons = {r.proposal_id: r.reason for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual(reasons, {"p1": "troppo caro", "p2": ""})   # il primo motivo resta
+        self.assertEqual(self.repos.rejections.list_for_intent("other"), [])
