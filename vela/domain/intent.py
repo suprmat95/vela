@@ -45,28 +45,46 @@ MAX_PAX = 20
 
 IT_MARKERS = {"un", "una", "di", "del", "della", "per", "siamo", "con", "massimo", "vorrei",
               "voglio", "noi", "persone", "giorni", "il", "la", "viaggio", "vacanza", "due",
-              "tre", "quattro", "fine", "settimana", "euro", "e"}
+              "tre", "quattro", "fine", "settimana", "euro", "e", "dal", "al", "tra", "fra",
+              "coppia", "coppie", "io", "mia", "mio", "moglie", "marito", "prossimo", "mese",
+              "sotto", "testa", "solo", "sola", "famiglia", "gruppo", "metà", "inizio",
+              "vorremmo", "giocare"}
 EN_MARKERS = {"the", "of", "for", "we", "are", "with", "max", "want", "would", "like", "people",
               "under", "and", "two", "three", "four", "our", "my", "trip", "holiday", "us",
-              "euros", "next", "camp"}
+              "euros", "next", "camp", "from", "to", "between", "month", "couple", "couples",
+              "each", "just", "early", "late", "mid", "family", "group", "alone", "players",
+              "adults", "wife", "husband", "friends", "below"}
 
+# (pattern, moltiplicatore): il numero catturato × moltiplicatore; i numeri espliciti vincono
 _PAX_PATTERNS = [
-    re.compile(r"\bsiamo in (\w+)"),
-    re.compile(r"\bwe are (\w+)"),
-    re.compile(r"\bwe're (\w+)"),
-    re.compile(r"\b(\w+)\s+(?:persone|adulti|giocatori|amici|people|adults|players|friends|pax)\b"),
-    re.compile(r"\b(\w+)\s+of us\b"),
-    re.compile(r"\b(?:per|for)\s+(\w+)\b"),
-    re.compile(r"\bx\s?(\d+)\b"),
-    re.compile(r"\bin\s+(\d+)\b"),
+    (re.compile(r"\b(\w+)\s+(?:coppie|couples)\b"), 2),
+    (re.compile(r"\bsiamo in (\w+)"), 1),
+    (re.compile(r"\bwe are (\w+)"), 1),
+    (re.compile(r"\bwe're (\w+)"), 1),
+    (re.compile(r"\b(\w+)\s+(?:persone|adulti|giocatori|amici|people|adults|players|friends|pax)\b"), 1),
+    (re.compile(r"\b(\w+)\s+of us\b"), 1),
+    (re.compile(r"\b(?:famiglia|gruppo|family|group)\s+(?:di|of)\s+(\w+)"), 1),
+    (re.compile(r"\b(?:per|for)\s+(\w+)\b"), 1),
+    (re.compile(r"\bx\s?(\d+)\b"), 1),
+    (re.compile(r"\bin\s+(\d+)\b"), 1),
 ]
+_PAX_PHRASES = [
+    (re.compile(r"\b(?:in coppia|una coppia|as a couple|a couple\b(?! of)|"
+                r"io e (?:mia|mio|il mio|la mia|un|una)\b|me and my\b|"
+                r"my (?:wife|husband|partner|girlfriend|boyfriend|friend) and i\b)"), 2),
+    (re.compile(r"\b(?:da sol[oa]|solo io|io solo|just me|only me|on my own|by myself|alone)\b"), 1),
+]
+_NOT_MONEY_AFTER = (r"(?!\s*(?:persone|persona|adulti|giocatori|amici|people|persons|adults|"
+                    r"players|friends|pax|notti|nights|giorni|days|stelle|stars))")
 _BUDGET_PATTERNS = [
-    re.compile(r"(?:al massimo|massimo|max|budget|under|up to|fino a|entro|non più di|"
-               r"no more than|not more than|less than|meno di)\s*(?:di\s+)?(?:€|eur|euro|euros)?"
-               r"\s*(\d[\d.,]*)"),
-    re.compile(r"(\d[\d.,]*)\s*(?:€|euros?\b|eur\b)"),
-    re.compile(r"€\s*(\d[\d.,]*)"),
+    re.compile(r"(?:al massimo|massimo|max|budget|under|up to|fino a|entro|non più di|non oltre|"
+               r"no more than|not more than|less than|meno di|sotto(?: i| ai| a)?|below|at most|"
+               r"tetto(?: di)?)\s*(?:di\s+)?(?:€|eur|euro|euros)?\s*(\d[\d.,]*+)" + _NOT_MONEY_AFTER),
+    re.compile(r"(\d[\d.,]*+)\s*(?:€|euros?\b|eur\b)"),
+    re.compile(r"€\s*(\d[\d.,]*+)"),
 ]
+_THOUSANDS_K = re.compile(r"(\d+(?:[.,]\d+)?)\s*k\b")
+_PER_PERSON = re.compile(r"\b(?:a testa|a persona|per persona|each|per person|per head|pp)\b")
 
 
 @dataclass(frozen=True)
@@ -268,11 +286,14 @@ def _to_int(token: str) -> Optional[int]:
 
 def parse_pax(text: str) -> Optional[int]:
     low = text.lower()
-    for pattern in _PAX_PATTERNS:
+    for pattern, factor in _PAX_PATTERNS:
         for m in pattern.finditer(low):
             value = _to_int(m.group(1))
-            if value is not None and 1 <= value <= MAX_PAX:
-                return value
+            if value is not None and 1 <= value * factor <= MAX_PAX:
+                return value * factor
+    for pattern, value in _PAX_PHRASES:
+        if pattern.search(low):
+            return value
     return None
 
 
@@ -285,8 +306,15 @@ def _to_money(token: str) -> Optional[Decimal]:
         return None
 
 
+def _expand_thousands(low: str) -> str:
+    """'2k' → '2000', '1,5k' → '1500'."""
+    return _THOUSANDS_K.sub(
+        lambda m: format((Decimal(m.group(1).replace(",", ".")) * 1000).quantize(Decimal(1)), "f"),
+        low)
+
+
 def parse_budget(text: str) -> Optional[Decimal]:
-    low = text.lower()
+    low = _expand_thousands(text.lower())
     for pattern in _BUDGET_PATTERNS:
         m = pattern.search(low)
         if m:
@@ -296,16 +324,24 @@ def parse_budget(text: str) -> Optional[Decimal]:
     return None
 
 
+def is_per_person(text: str) -> bool:
+    return _PER_PERSON.search(text.lower()) is not None
+
+
 def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
                  today: Optional[date] = None) -> ParseResult:
     today = today or date.today()
     profile = profile or TravelerProfile()
+    pax = parse_pax(text) or profile.pax
+    budget = parse_budget(text)
+    if budget is not None and pax and is_per_person(text):
+        budget = budget * pax
     criteria = Criteria(
         sport=parse_sport(text),
         area=geo.find_area(text),
         period=parse_period(text, today),
-        pax=parse_pax(text) or profile.pax,
-        budget=parse_budget(text),
+        pax=pax,
+        budget=budget,
         language=detect_language(text),
     )
     question = None
