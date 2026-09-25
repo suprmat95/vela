@@ -7,10 +7,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from vela.adapters.schema import intents_t, orders_t, products_t, proposals_t, rejections_t
+from vela.adapters.schema import (intents_t, orders_t, products_t, proposals_t, quota_window_t,
+                                  rejections_t)
 from vela.domain.models import (Availability, Criteria, Intent, Order, OrderStatus, Product,
-                                Proposal, Rejection, criteria_from_dict, criteria_to_dict,
-                                profile_from_dict, profile_to_dict)
+                                Proposal, QuotaClass, Rejection, criteria_from_dict,
+                                criteria_to_dict, profile_from_dict, profile_to_dict)
+from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
+                               rolled, try_acquire)
+from vela.ports.hofj import QuotaSnapshot
+from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder
 
 
@@ -214,6 +219,76 @@ class PostgresRejections:
             rows = conn.execute(select(rejections_t.c.proposal_id)
                                 .where(rejections_t.c.intent_id == intent_id)).all()
         return {r[0] for r in rows}
+
+
+QUOTA_ROW = 1
+
+
+def _window_row(w: QuotaWindow) -> dict:
+    return {"window_start": w.window_start, "window_end": w.window_end,
+            "limit_per_minute": w.limit_per_minute, "used": w.used, "needs_refresh": w.needs_refresh}
+
+
+def _window(m) -> QuotaWindow:
+    return QuotaWindow(m["window_start"], m["window_end"], m["limit_per_minute"], m["used"],
+                       m["needs_refresh"])
+
+
+class PostgresQuota:
+    """Contatore di quota condiviso tra istanze (RF-36, RF-47): una riga, bloccata con
+    `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prenotano sullo
+    stesso stato. Le regole sono quelle pure di `vela.domain.quota`."""
+
+    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20):
+        self.engine = engine
+        self.margin, self.reserve = margin, reserve
+
+    def _locked(self, conn, now: datetime) -> QuotaWindow:
+        conn.execute(pg_insert(quota_window_t).values(
+            id=QUOTA_ROW, **_window_row(fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)))
+            .on_conflict_do_nothing(index_elements=[quota_window_t.c.id]))
+        m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)
+                         .with_for_update()).mappings().one()
+        return _window(m)
+
+    def _read(self, now: datetime) -> Optional[QuotaWindow]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)).mappings().first()
+        return None if m is None else _window(m)
+
+    def _save(self, conn, w: QuotaWindow) -> None:
+        conn.execute(update(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW).values(**_window_row(w)))
+
+    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+        with self.engine.begin() as conn:
+            new = try_acquire(self._locked(conn, now), cls, n, now, self.margin, self.reserve,
+                              purchase_waiting)
+            if new is not None:
+                self._save(conn, new)
+            return new is not None
+
+    def on_429(self, now: datetime) -> None:
+        with self.engine.begin() as conn:
+            self._save(conn, after_429(self._locked(conn, now), now, self.margin, self.reserve))
+
+    def needs_refresh(self, now: datetime) -> bool:
+        w = self._read(now)
+        return w is None or w.needs_refresh
+
+    def sync_from_snapshot(self, snapshot: QuotaSnapshot) -> None:
+        w = from_snapshot(snapshot.limit_per_minute, snapshot.used_in_window,
+                          snapshot.window_started_at, snapshot.window_ends_at)
+        with self.engine.begin() as conn:
+            conn.execute(pg_insert(quota_window_t).values(id=QUOTA_ROW, **_window_row(w))
+                         .on_conflict_do_update(index_elements=[quota_window_t.c.id], set_=_window_row(w)))
+
+    def snapshot(self, now: datetime) -> dict:
+        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
+        return describe(w, now, self.margin, self.reserve)
+
+    def next_window_start(self, now: datetime) -> datetime:
+        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
+        return rolled(w, now).window_end
 
 
 class PostgresRepositories:

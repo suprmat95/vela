@@ -5,7 +5,11 @@ from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
-                                Rejection)
+                                QuotaClass, Rejection)
+from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
+                               rolled, try_acquire)
+from vela.ports.hofj import QuotaSnapshot
+from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder
 
 
@@ -113,3 +117,44 @@ class MemoryRepositories:
         self.proposals = MemoryProposals()
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
+
+
+class MemoryQuota:
+    """Contatore di quota in memoria (test e replay): stesse regole di Postgres, lock di processo."""
+
+    def __init__(self, margin: float = 0.10, reserve: float = 0.20):
+        self.margin, self.reserve = margin, reserve
+        self._lock = threading.Lock()
+        self._window: Optional[QuotaWindow] = None
+
+    def _current(self, now: datetime) -> QuotaWindow:
+        return self._window or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
+
+    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+        with self._lock:
+            new = try_acquire(self._current(now), cls, n, now, self.margin, self.reserve, purchase_waiting)
+            if new is not None:
+                self._window = new
+            return new is not None
+
+    def on_429(self, now: datetime) -> None:
+        with self._lock:
+            self._window = after_429(self._current(now), now, self.margin, self.reserve)
+
+    def needs_refresh(self, now: datetime) -> bool:
+        with self._lock:
+            return self._window is None or self._window.needs_refresh
+
+    def sync_from_snapshot(self, snapshot: QuotaSnapshot) -> None:
+        with self._lock:
+            self._window = from_snapshot(snapshot.limit_per_minute, snapshot.used_in_window,
+                                         snapshot.window_started_at, snapshot.window_ends_at)
+
+    def snapshot(self, now: datetime) -> dict:
+        with self._lock:
+            return describe(self._current(now), now, self.margin, self.reserve)
+
+    def next_window_start(self, now: datetime) -> datetime:
+        with self._lock:
+            return rolled(self._current(now), now).window_end
+

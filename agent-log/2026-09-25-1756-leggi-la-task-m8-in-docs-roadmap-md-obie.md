@@ -2463,3 +2463,61 @@ Tutti i 528 test passano, **nessuno saltato**, compresi i test Postgres della mi
 - 🔧 Bash: Confirm app schema version untouched
 
 - 🔧 Bash: Document isolated Postgres test run in plan
+
+Con l'URL esterno la suite completa è verde **anche su Postgres**: **528 test, nessuno saltato**. Quindi la migrazione `0005` e il salvataggio degli ordini in coda sono verificati anche su Postgres, non solo in memoria e su SQLite.
+
+**Come l'ho eseguita:**
+- Al processo dei test ho passato **solo** `DATABASE_URL`, senza le chiavi HofJ e Stripe.
+- Ho isolato lo schema con `PGOPTIONS="-csearch_path=vela_test"`. Il primo tentativo, con lo schema aggiunto nell'URL, è fallito perché un test aggiunge già lo stesso parametro e il valore finiva duplicato.
+- **Controllo finale:** lo schema dell'app (`public`) è ancora alla `0004`, senza la tabella `jobs`. Le migrazioni di M5 sono solo in `vela_test`. Il deploy di `master` non è toccato.
+- Ho scritto il comando esatto nel piano (commit `51df673`), per usarlo nei task successivi.
+
+Il prossimo è il **Task 5**, il contatore della quota condiviso (`QuotaStore`), in memoria e su Postgres. Ora posso eseguire davvero anche il test di concorrenza: 8 thread che prenotano chiamate sulla stessa finestra senza mai superare 87. Vado?
+
+## Utente 20:20
+
+si
+
+## Agente 20:21
+
+- 🔧 Bash: Read repo wiring and postgres test setup
+
+- 🔧 Bash: Write QuotaStore port and contract tests
+
+- 🔧 Bash: Add pure quota window functions to the domain
+
+- 🔧 Bash: Add MemoryQuota adapter
+
+- 🔧 Bash: Wire imports and run memory quota contract
+
+Il contratto passa in memoria. Ora l'adapter Postgres: la riga unica si blocca con `SELECT … FOR UPDATE`, così due istanze non possono prenotare sullo stesso stato.
+
+- 🔧 Bash: Add PostgresQuota and run quota tests on Postgres
+
+- 🔧 Bash: Reduce concurrency test attempts
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m5/4e77c5e2-1cbd-49a4-a46b-71f152659842/tasks/be2zoqg9h.output
+
+Aspetto che finisca il primo giro, ancora con 200 tentativi per thread, per vedere se il limite regge. Poi rilancio con la versione ridotta.
+
+- 🔧 ToolSearch
+
+Aspetto il risultato del giro in corso; mi arriva una notifica quando termina.
+
+## Utente 20:30
+
+<task-notification>
+<task-id>be2zoqg9h</task-id>
+<tool-use-id>toolu_01GQTLEj7ANJLH8zcT991iL4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m5/4e77c5e2-1cbd-49a4-a46b-71f152659842/tasks/be2zoqg9h.output</output-file>
+<status>completed</status>
+<summary>Background command "Add PostgresQuota and run quota tests on Postgres" completed (exit code 0)</summary>
+</task-notification>
+
+## Agente 20:30
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m5/4e77c5e2-1cbd-49a4-a46b-71f152659842/tasks/be2zoqg9h.output
+
+- 🔧 Bash: Run suite without and with Postgres
+
+- 🔧 Bash: Commit Task 5
