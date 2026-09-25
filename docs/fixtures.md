@@ -36,5 +36,19 @@ fino a `windowEndsAt` + 2 s, stop immediato su 429 (`scripts/api_explore.py`).
 
 ## Ultima registrazione
 
-Da compilare al Task 6: data, prodotti totali, non archiviati, chiamate eseguite,
-dimensione del file.
+| Voce | Valore |
+|---|---|
+| `recorded_at` | 2026-09-25T12:53:14Z |
+| Prodotti totali (lista) | 110 |
+| Non archiviati (dettagli scaricati) | 77 |
+| Archiviati | 33 |
+| Chiamate autenticate eseguite | 80 (2 liste + 77 dettagli + 1 sync quota) |
+| Finestre da 60 s usate | 1 (il pacing ne aveva preventivate 2 sulla stima; il conteggio reale è
+  rientrato in una sola finestra da 90 chiamate) |
+| Dimensione file | 1 434 730 byte |
+
+Differenze rispetto alla stima `en` (`docs/api/counts.md`, 123 prodotti / 92 non archiviati):
+il catalogo `it` ne conta 110 in lista e 77 non archiviati, cioè meno prodotti totali (-13) e
+meno prodotti attivi (-15) rispetto alla stima usata per pianificare le chiamate. Di
+conseguenza la registrazione reale ha richiesto solo 80 chiamate autenticate in una finestra,
+contro le ~96 in 2 finestre dichiarate prima della corsa (nessun 429, nessuno STOP).

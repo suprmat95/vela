@@ -491,3 +491,66 @@ Nel frattempo, verifiche di ambiente per il Task 6 che non dipendono dal Task 5:
 - 🔧 Bash: Check .env existence (not content), Python version and TLS CA paths for the real recording
 
 - 🔧 Bash: Locate the main checkout, check .env existence there, and TLS CA file availability
+
+- 🔧 Bash: Build task 5 review diff and record environment rulings for task 6
+
+- 🔧 Agent: Review Task 5 (spec + quality)
+
+In attesa dell'esito della review del Task 5. Il Task 6 (registrazione reale, ≈96 chiamate GET dichiarate nel piano approvato, tetto 110) partirà subito dopo con le due correzioni d'ambiente già registrate nel ledger.
+
+## Utente 14:49
+
+<task-notification>
+<task-id>a3f395465bfa2885e</task-id>
+<tool-use-id>toolu_01V9hnrCqsNsD3M48uE1KWYw</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a3f395465bfa2885e.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 5 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Only the two files were created, matching the brief exactly. The report's claim of "61 tests passed" is plausible but doesn't need re-running per the review instructions — no doubt is raised by reading the code that existing tests would be affected, since no other file changed.
+
+Now finalizing the review.
+
+### Spec Compliance
+- ✅ Spec compliant
+- Verified byte-for-byte: `tests/test_catalog_fixture.py` (diff lines 61–139) matches brief step 1 code block (brief lines 14–92) exactly — `diff` of extracted text shows zero differences.
+- Verified byte-for-byte: `docs/fixtures.md` (diff lines 15–54) matches brief step 3 content (brief lines 103–142) exactly — `diff` of extracted text shows zero differences.
+- Skip mechanism: `tests/test_catalog_fixture.py:34-36` uses `@unittest.skipUnless(os.path.exists(FIXTURE), "fixtures/catalog.json assente: eseguire scripts/record_catalog.py")` — matches the mandated skip message verbatim, and `fixtures/catalog.json` does not exist yet in this diff (only Task 6 will add it), so the class is correctly skipped, not run.
+- Credentials test (`tests/test_catalog_fixture.py:79-85`, `test_no_credentials`): never puts the key value into an assertion message — `self.assertFalse(key in self.text, "%s presente nella fixture" % env)` only interpolates the env var *name* (`env`), never `key`. Complies with "mai stampare la chiave."
+- Named cross-file risk checked: whether `build_catalog` in `scripts/record_catalog.py` (untouched by this diff, from a prior task) actually produces the shape this test assumes.
+  - `scripts/record_catalog.py:98-106` — `build_catalog` returns `recorded_at, locale, brand, base_url, products, details` with `details[pid] = {"catalog": project_detail(...), "raw": strip_media(...)}` — matches test's `catalog`/`raw` keys and `MEDIA_KEYS` stripped recursively (`strip_media`, line 40-46, matches `has_key` traversal semantics).
+  - `project_detail` (`scripts/record_catalog.py:49-57`) sets `catalog["hotels"] = strip_media(raw_attributes.get("hotels"))` from `rawAttributes.hotels`, and `raw` keeps `rawAttributes` intact (minus media keys, which don't include `hotels`) — satisfies `test_details_have_rf28_fields_and_no_media`'s `self.assertIn("hotels", raw.get("rawAttributes") or {}, pid)`.
+  - `base_url` = `api_explore.BASE_URL` which defaults to `"https://api.hofj.com"` (`scripts/api_explore.py:26`) — satisfies `test_header`'s `startswith("https://")`.
+  - No mismatch found between test expectations and the fixture-building code.
+- Only two files created (`docs/fixtures.md`, `tests/test_catalog_fixture.py`); diff stat confirms nothing else touched.
+
+### Strengths
+- Exact verbatim transcription of brief-specified content for both files — zero drift, easily verified by diffing the brief's code blocks against the diff.
+- `test_no_credentials` correctly avoids ever including the secret value in any assertion message, satisfying the "mai stampare la chiave" constraint precisely.
+- Cross-checked against the actual `build_catalog` implementation (from an earlier, already-merged task) and the fixture format the test expects lines up correctly — no latent mismatch that would only surface after Task 6 runs the recorder.
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- The report's "Test Command and Output" section (implementer report lines 61-66) shows two slightly different run counts (0.627s vs 0.563s) without explanation — cosmetic inconsistency in the report, not in the code, and not worth blocking on since these are just wall-clock timing differences across repeated runs.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** Both files are byte-for-byte identical to what the brief mandated, the skip behavior and credential-safety requirement are correctly implemented, and the test's assumptions about the fixture format were independently checked against the actual `build_catalog` code and found consistent — no gaps found.</result>
+<usage><subagent_tokens>56125</subagent_tokens><tool_uses>8</tool_uses><duration_ms>118446</duration_ms></usage>
+</task-notification>
+
+## Agente 14:50
+
+Task 5 approvato. Ledger, poi il Task 6: la registrazione reale. Chiamate dichiarate: circa 96 GET autenticate verso `api.hofj.com` in 2 finestre da 60 secondi, tetto 110, come da piano approvato.
+
+- 🔧 Bash: Record task 5 completion and task 6 rulings in the ledger
+
+- 🔧 Agent: Implement Task 6: registrazione reale
+
+Task 6 in esecuzione: dry-run, registrazione reale (2-3 minuti con un'attesa di finestra), validazione, controllo segreti, commit. Attendo la notifica.
