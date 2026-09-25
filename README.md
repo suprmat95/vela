@@ -97,13 +97,31 @@ qualche decina di secondi. Il Postgres free scade dopo 30 giorni.
 
 URL live: https://vela-n506.onrender.com (`GET /health`, deploy M0 verificato il 2026-09-25).
 
+## Collegare Claude (connector MCP)
+
+La superficie MCP è su `https://<servizio>.onrender.com/mcp` (Streamable HTTP, stateless, senza
+autenticazione fino a M8). Su Render `VELA_PUBLIC_URL` deve essere l'URL pubblico del servizio:
+serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri ricevono 421).
+
+1. Verifica il servizio: `curl https://<servizio>.onrender.com/health`.
+2. Smoke test del flusso di spec §10.1 (solo replay, nessuna chiamata a HofJ o Stripe; lascia un
+   ordine di prova nel DB):
+   `uv run python scripts/mcp_smoke.py https://<servizio>.onrender.com/mcp`
+3. In claude.ai: Settings → Connectors → Add custom connector, nome `Vela`, URL
+   `https://<servizio>.onrender.com/mcp`, nessuna autenticazione.
+4. In una chat nuova, con il connector attivo: "Vorrei un weekend di padel in Spagna a ottobre,
+   siamo in due, massimo 800 euro". Il pagamento in replay si simula aprendo il link ricevuto.
+
+In replay "troppo caro" produce una proposta diversa ma non necessariamente più economica:
+l'interpretazione del motivo del rifiuto arriva con M9.
+
 ## Struttura
 
 ```
 vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2)
 vela/ports      HofJPort, PaymentsPort, repository (M2)
 vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto, runner (M2); HofJ HTTP (M5), Stripe (M6)
-vela/surfaces   health.py, replay.py (M2), MCP (M3), REST (M4), webhook (M6)
+vela/surfaces   health.py, replay.py (M2), mcp.py (M3), REST (M4), webhook (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per la modalità replay (M1)

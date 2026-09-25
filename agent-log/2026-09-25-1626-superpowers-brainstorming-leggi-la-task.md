@@ -305,3 +305,11 @@ Aggiungo prima il test di regressione in `tests/test_mcp_tools.py`, poi la corre
 - 🔧 Bash: Set MCP log level to WARNING and rerun suites
 
 - 🔧 Bash: Commit smoke script, then the logging fix with docs
+
+Task 5: `docs/acceptance.md` e la sezione del README, prese dal piano.
+
+- 🔧 Bash: Write acceptance.md and README section; run suite
+
+- 🔧 Bash: Retry writing docs with correct markers
+
+- 🔧 Bash: Commit task 5 and run the final suite
