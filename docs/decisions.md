@@ -286,3 +286,13 @@ Origine: intervista sulla macro task M9, piano in `docs/plans/2026-09-25-m9-pars
 | Frasi inglesi | `say_*`, domande di RF-04 e motivazione del chooser in it/en secondo `criteria.language` | Rimandate da M2 a M9 |
 | Regioni | Aggiunte a mano (Andalusia, Catalogna, Costa del Sol, Comunità Valenciana, Lombardia, Veneto, Emilia-Romagna, Occitania); nel chooser v1 valgono come corrispondenza di paese | Il catalogo ha città; M11 raffina |
 | Documenti | Design e microtask in un solo file in `docs/plans/`, senza spec separata | Scelta dell'utente, come M0-M2 |
+
+## 2026-09-25 — M9: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Versione SDK | `anthropic>=1.8.0` (installata 1.8.0, basata su `httpx2`); i test costruiscono le eccezioni con un `Request` di `httpx2` | Nessuna deviazione dal piano; l'SDK 1.x non usa più `httpx` |
+| Test Postgres di `update_criteria` | Non eseguiti in questo worktree: `DATABASE_URL` non disponibile, test saltato come da RNF-09; il contratto gira sul repository in memoria | Da eseguire con `DATABASE_URL` prima del merge |
+| Prova reale di Haiku | Non eseguita: `scripts/try_haiku.py` richiede l'OK dell'utente per 1 chiamata | Regola del repo sulle chiamate a servizi a pagamento |
