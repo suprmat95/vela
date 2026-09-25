@@ -47,7 +47,7 @@ from decimal import Decimal as _Decimal
 from datetime import timedelta as _timedelta
 
 from vela.ports.hofj import Itinerary, Pax
-from vela.ports.payments import PaymentLink
+from vela.ports.payments import PaymentLink, PaymentsError
 
 
 class FakeHofJ:
@@ -96,12 +96,30 @@ class StubPayments:
     def __init__(self, base="http://pay.test"):
         self.base = base
         self.links = []
+        self.descriptions = []
 
-    def create_payment_link(self, order):
+    def create_payment_link(self, order, description):
+        self.descriptions.append(description)
         link = PaymentLink("%s/%s" % (self.base, order.id), NOW + _timedelta(hours=24),
                            "pi_%s" % order.id)
         self.links.append(link)
         return link
+
+
+class FlakyPayments(StubPayments):
+    """Fallisce le prime `failures` chiamate con PaymentsError, poi si comporta come StubPayments."""
+
+    def __init__(self, failures=1, base="http://pay.test"):
+        super().__init__(base)
+        self.failures = failures
+        self.attempts = 0
+
+    def create_payment_link(self, order, description):
+        self.attempts += 1
+        if self.failures:
+            self.failures -= 1
+            raise PaymentsError("fornitore non raggiungibile")
+        return super().create_payment_link(order, description)
 
 
 PROBLEM_JSON = "application/problem+json"

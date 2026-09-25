@@ -15,6 +15,6 @@ class FakePayments:
         self.base = (public_url or DEFAULT_PUBLIC_URL).rstrip("/")
         self.now = now or (lambda: datetime.now(timezone.utc))
 
-    def create_payment_link(self, order: Order) -> PaymentLink:
+    def create_payment_link(self, order: Order, description: str) -> PaymentLink:
         return PaymentLink("%s/replay/checkout/%s" % (self.base, order.id), self.now() + LINK_TTL,
                            "pi_replay_%s" % order.id)

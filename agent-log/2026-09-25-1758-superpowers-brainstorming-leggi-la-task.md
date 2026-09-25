@@ -149,3 +149,47 @@ Ora eseguo il Task 0 (decisioni in `docs/decisions.md` e deroga in spec §6) e c
 - 🔧 Bash: P=docs/plans/2026-09-25-m6-stripe.md && uv run python - <<'EOF' import re p = "d…
 
 - 🔧 Bash: git add docs/plans/2026-09-25-m6-stripe.md docs/decisions.md docs/spec.md && git…
+
+Il piano è pronto e committato (`86237ad`): `docs/plans/2026-09-25-m6-stripe.md`. Nello stesso commit ho già fatto il Task 0: le decisioni dell'intervista sono in `docs/decisions.md` e la spec §6 ora permette le due pagine di ritorno.
+
+**Microtask da eseguire** (TDD, un commit ciascuno):
+
+| # | Cosa | Test principali |
+|---|---|---|
+| 1 | Porta dei pagamenti: `PaymentsError`, conversione in centesimi, titolo del prodotto nel link; un nuovo accept ricrea il link se manca | `test_usecases.py`: dopo un errore di Stripe il secondo accept crea il link una sola volta |
+| 2 | `StripePayments`: una Checkout Session che scade 24 h meno 1 min dopo la creazione dell'ordine, metadata, chiave di idempotenza, solo EUR | `test_stripe_links.py`, con un client Stripe finto e nessuna chiamata di rete |
+| 3 | Ordine `expire`; lo stato dell'ordine restituisce `total`, `currency` e `payment_url`, e la frase dice l'importo | `test_orders.py`, `test_usecases.py`, `test_say.py` |
+| 4 | Tabella `stripe_events` (migrazione `0003`) con la presa in carico degli eventi, in memoria e su Postgres | contratto dei repository, `test_migrations.py` |
+| 5 | Webhook `POST /webhooks/stripe` | `test_webhooks.py`: pagato, duplicato, firma errata, vecchia o manomessa, scaduto, importo o valuta diversi, errore → 500 con presa in carico rilasciata |
+| 6 | Pagine statiche `/checkout/success` e `/checkout/cancel` | `test_checkout_pages.py` |
+| 7 | Scelta di Stripe dalla chiave all'avvio; errore di pagamento → 503 su REST e frase su MCP | `test_app_replay.py`, `test_rest.py`, `test_mcp_tools.py` |
+| 8 | Documentazione: `docs/stripe.md` con setup e test manuale, `rest.md`, README, `acceptance.md` | suite completa |
+| 9 | Verifica finale, controllo che non ci siano chiavi nel diff, decisioni prese in esecuzione | — |
+
+Ho sistemato due punti che l'intervista non copriva:
+- **Stessi parametri a ogni tentativo verso Stripe:** la scadenza della sessione è calcolata dalla creazione dell'ordine, non dall'ora corrente. Stripe rifiuta la stessa chiave di idempotenza con parametri diversi: se la scadenza cambiasse, dopo un errore di rete l'ordine resterebbe senza link.
+- **Webhook e SDK:** l'SDK Stripe 15 restituisce l'evento come un oggetto che non si comporta da dizionario. Il webhook quindi verifica la firma sul corpo grezzo e poi lo legge come JSON normale.
+
+Il test manuale con la carta `4242…` su Render resta a te, seguendo `docs/stripe.md`. Né io né l'esecuzione del piano chiamiamo mai Stripe.
+
+Rileggi il piano e dimmi se corrisponde a quello che vuoi. Per l'esecuzione consiglio la modalità **subagent-driven**: i task 5 e 7 dipendono dalle interfacce dei task 1-4, e un errore sul pagamento costa caro, quindi conviene che un revisore controlli ogni task.
+
+## Utente 18:33
+
+/superpowers:test-driven-development: docs/plans/2026-09-25-m6-stripe.md.
+
+## Agente 18:33
+
+Eseguo il piano M6 in TDD, un task alla volta (il Task 0 è già fatto). Prima leggo le regole della skill sui test.
+
+- 🔧 Bash: cat /Users/matteodospina/.claude/plugins/cache/claude-plugins-official/superpowe…
+
+Inizio il **Task 1**. Fase RED: scrivo i test.
+
+- 🔧 Bash: uv run python - <<'EOF' p="tests/support.py"; s=open(p).read() old_imp="from vel…
+
+- 🔧 Bash: uv run python -m unittest discover -s tests -p "test_usecases.py" 2>&1 | grep -E…
+
+RED confermato: il test fallisce perché `PaymentsError` non esiste. Fase GREEN:
+
+- 🔧 Bash: cat > vela/ports/payments.py <<'EOF' """Porta verso il pagamento (RF-18, RF-19, …
