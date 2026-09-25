@@ -83,3 +83,14 @@ class LoadFixtureTest(unittest.TestCase):
         self.assertTrue(all(p.fetched_at == NOW for p in products))
         by_id = {p.id: p for p in products}
         self.assertEqual(by_id["181"].hotel, "THB Lanzarote Beach")
+
+
+class IsTripTest(unittest.TestCase):
+    def test_brand_destination_and_gift_card_slug_are_not_trips(self):
+        from dataclasses import replace
+        from support import make_product
+        from vela.domain.catalog import is_trip
+        self.assertTrue(is_trip(make_product(1)))
+        self.assertFalse(is_trip(make_product(2, destination="Weebora", country="IT")))
+        self.assertFalse(is_trip(replace(make_product(3), slug="weebora-gift-card")))
+        self.assertTrue(is_trip(make_product(4, destination=None, country=None)))

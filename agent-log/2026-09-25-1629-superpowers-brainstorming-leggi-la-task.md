@@ -320,3 +320,7 @@ Falliscono tutti per i motivi attesi. Ora il codice in `say.py` e `usecases.py`.
 - 🔧 Bash: Implement say changes and run full suite
 
 - 🔧 Bash: Commit task 2
+
+Task 3: `is_trip`.
+
+- 🔧 Bash: Add is_trip test and watch it fail

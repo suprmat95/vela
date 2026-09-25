@@ -90,3 +90,12 @@ def load_fixture(path, fetched_at: Optional[datetime] = None) -> list:
             products.append(product_from_entry(item, archived=bool(item.get("archived")),
                                                raw=item, fetched_at=fetched_at))
     return products
+
+
+BRAND_DESTINATIONS = ("Weebora",)
+
+
+def is_trip(product: Product) -> bool:
+    """Falso per i prodotti del catalogo che non sono viaggi: la destinazione è il brand
+    (Weebora Gift Card) o lo slug è quello di una gift card (decisione M11)."""
+    return product.destination not in BRAND_DESTINATIONS and "gift-card" not in product.slug
