@@ -694,3 +694,305 @@ Ora la documentazione: `docs/rest.md`, `docs/stripe.md` e il README.
 - 🔧 Bash: Read README deploy section
 
 - 🔧 Bash: Update docs, run suite, commit Task 8 code part
+
+Punto 2: i test Postgres. Controllo che il `.env` abbia `DATABASE_URL`, senza stamparlo, e che punti all'host esterno di Render (solo il suffisso dell'host):
+
+- 🔧 Bash: Check DATABASE_URL presence and host kind, no values printed
+
+L'URL è quello esterno. Lancio la suite passando al processo solo `DATABASE_URL` (non le altre variabili del `.env`), con lo schema isolato `vela_test` come in M5:
+
+- 🔧 Bash: Run full suite with Postgres in vela_test schema
+
+Fermo la suite completa.
+
+- 🔧 ToolSearch
+
+- 🔧 TaskStop
+
+Fermata. I test Postgres non sono stati eseguiti e lo registro come non verificato. Proseguo con il merge; prima controllo lo stato di `master` e del remoto:
+
+- 🔧 Bash: Check remote, master state and main worktree cleanliness
+
+Il merge è pronto, ma prima ti servono due conferme. Nel frattempo non tocco né `master` né il remoto.
+
+**Stato**
+- Il codice del Task 8 è committato (`54ba5d8`):
+  - `render.yaml` è in `live`, con il suo test aggiornato prima in rosso;
+  - README, `docs/rest.md` e `docs/stripe.md` sono aggiornati.
+- **I test Postgres non sono stati eseguiti:** li ho fermati come hai chiesto. I contratti di `archive_missing` e `list_for_intent` su Postgres restano non verificati; la suite locale, senza DB, è verde con 772 test e 42 saltati. L'esecuzione interrotta usava solo lo schema `vela_test`, quindi i dati dell'app non sono toccati.
+
+**Cosa ho trovato sul remoto**
+- `origin/master` è ancora a `de0fd25` (M6). Il merge di M5 (`141293c`) esiste solo nel `master` locale.
+- Quindi il push manda su GitHub e su Render **M5 e M7 insieme**, e con M5 arriva la migrazione `0005_jobs_quota`, che sul DB di Render girerà al boot.
+- `task/m7` è 11 commit avanti a `master` e `master` non ha nulla in più: il merge non ha conflitti.
+
+**Cosa propongo**
+1. **Tu** imposti su Render dalla dashboard, prima del push:
+   - `HOFJ_API_KEY`;
+   - `HOFJ_BASE_URL=https://staging.api.hofj.com`;
+   - `HOFJ_BRAND=staging.weebora.com`;
+   - `STRIPE_SECRET_KEY` (la `rk_test`);
+   - `VELA_PUBLIC_URL=https://vela-n506.onrender.com`;
+   - `VELA_API_TOKEN`, da verificare che ci sia.
+
+   Senza queste variabili il deploy in live fallisce e Render resta sulla versione vecchia.
+2. **Io**, con il tuo OK:
+   - `git merge --no-ff task/m7` nel worktree di `master` (`/Users/matteodospina/orca/vela`, pulito), come per le altre task;
+   - poi `git push origin master`, che fa partire l'autodeploy.
+3. **Poi** verifico `/health` con `curl`, senza token. Dopo `/health` passo al Task 9.
+
+Dimmi quando le variabili sono impostate e se posso fare merge e push.
+
+## Utente 22:21
+
+variabili impostate vai
+
+## Agente 22:21
+
+- 🔧 Bash: Merge task/m7 into master and push to origin
+
+Il merge locale è fatto (`d31e51e`), ma il push si è interrotto: "the remote end hung up unexpectedly". Controllo cosa è arrivato sul remoto:
+
+- 🔧 Bash: Check what reached origin/master
+
+- 🔧 Bash: Retry push with larger HTTP post buffer
+
+Il push è riuscito: `origin/master` è a `d31e51e`, e Render parte con l'autodeploy di M5 e M7. Aspetto che `/health` risponda con il catalogo di staging, senza token:
+
+- 🔧 ToolSearch
+
+- 🔧 Bash: Wait for Render deploy with staging catalog on /health
+
+Aspetto il deploy: interrogo `/health` ogni 15 s per al massimo 20 minuti, e il controllo mi avvisa quando compare il catalogo di staging. Nel frattempo annoto cosa registrerò nelle decisioni alla chiusura:
+- M5 e M7 sono arrivati sul remoto con lo stesso push;
+- il push ha richiesto un buffer HTTP più grande;
+- i test Postgres non sono stati eseguiti, su tua richiesta.
+
+## Utente 22:23
+
+deploy fallitto 
+
+<pasted_content id="a778">
+  File "/app/.venv/lib/python3.12/site-packages/click/core.py", line 1631, in __call__
+    return self.main(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/click/core.py", line 1552, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/click/core.py", line 1415, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/click/core.py", line 910, in invoke
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/main.py", line 448, in main
+    run(
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/main.py", line 620, in run
+    config.load_app()
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/config.py", line 434, in load_app
+    return import_from_string(self.app)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/.venv/lib/python3.12/site-packages/uvicorn/importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/importlib/__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/app/vela/app.py", line 178, in <module>
+    app = create_app()
+          ^^^^^^^^^^^^
+  File "/app/vela/app.py", line 147, in create_app
+    vela, catalog_loader = build_vela(settings, engine)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/vela/app.py", line 89, in build_vela
+    hofj, catalog_loader = build_hofj(settings)
+                           ^^^^^^^^^^^^^^^^^^^^
+  File "/app/vela/app.py", line 82, in build_hofj
+    fixture = select_fixture(FIXTURES_DIR, settings.hofj_base_url)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/vela/domain/catalog.py", line 116, in select_fixture
+    raise RuntimeError("nessuna fixture del catalogo registrata su %s; trovate: %s"
+RuntimeError: nessuna fixture del catalogo registrata su api.hofj.com/v1; trovate: https://staging.api.hofj.com (catalog-staging.json), https://api.hofj.com (catalog.json)
+==> Exited with status 1
+</pasted_content id="a778">
+
+## Agente 22:24
+
+- 🔧 TaskStop
+
+Il deploy si è fermato per una variabile, non per il codice. Su Render `HOFJ_BASE_URL` vale `api.hofj.com/v1`, un valore diverso da quello da impostare, e la scelta della fixture l'ha rifiutato all'avvio. Il controllo aggiunto nel Task 3 ha fatto il suo lavoro: con quel valore Vela avrebbe chiamato l'host di **produzione**, e l'app non è partita. Ho fermato il controllo su `/health`.
+
+**Cosa correggere in dashboard:** `HOFJ_BASE_URL` = `https://staging.api.hofj.com`
+- con `https://`;
+- senza `/v1` finale, perché l'adapter aggiunge già `/v1/...` a ogni chiamata;
+- senza lo `/` finale, anche se quello verrebbe comunque tollerato.
+
+Controlla anche che `HOFJ_BRAND` sia `staging.weebora.com`. Poi basta un **Manual Deploy → Deploy latest commit**: non serve un nuovo push.
+
+**Un effetto collaterale da sapere:** l'entrypoint esegue `alembic upgrade head` prima di avviare l'app. La migrazione `0005` di M5 è quindi già stata applicata al DB di Render. Intanto Render tiene in piedi la versione precedente (M6, replay), che ora gira su uno schema più nuovo del suo. Finché il nuovo deploy non parte, quella versione può dare errori sugli ordini. Si risolve da sé col deploy corretto.
+
+Quando hai rilanciato il deploy, avvisami e riprendo il controllo di `/health`.
+
+## Utente 22:25
+
+deploy finito
+
+## Agente 22:25
+
+- 🔧 Bash: Check Render health after deploy
+
+`/health` risponde: DB ok, 197 prodotti, quota letta al boot (1 chiamata usata su 108 disponibili). Mi aspettavo 198 righe, quindi verifico offline se un id è in comune tra i due cataloghi:
+
+- 🔧 Bash: Count id overlap between production and staging fixtures
+
+Il deploy di M5 e M7 in live su staging funziona, e il Task 8 è chiuso.
+
+**Verifica di `/health`**
+- `status ok`, `db ok`;
+- 197 prodotti, caricati 21 secondi prima;
+- quota letta al boot: limite 120, effettivo 108, riserva 21, 1 chiamata usata.
+
+**Perché 197 e non 198.** I due cataloghi hanno un solo id in comune, `886`. Il riallineo ha sovrascritto quella riga di produzione con il prodotto di staging (un "TEST GROUP TRIP" a Monte Carlo), quindi 110 + 88 − 1 = 197. È previsto dall'upsert. Tornando in replay, la fixture di produzione ripristina la riga. Le vecchie proposte di replay su quel prodotto ora puntano al contenuto di staging, e per dati di prova va bene.
+
+**Cosa non ho potuto verificare:** i log di boot con `catalog_loaded` e `catalog_archived` li vedi solo tu dalla dashboard di Render. Se vuoi controllare, dovrebbero dire 88 caricati e 76 archiviati: i 77 attivi di produzione meno l'886, che ora è attivo come prodotto di staging.
+
+**Da registrare nelle decisioni alla chiusura**
+- M5 e M7 sono arrivati sul remoto con lo stesso push.
+- Il push è riuscito solo con `http.postBuffer` più grande.
+- Il primo deploy è fallito per `HOFJ_BASE_URL=api.hofj.com/v1`, bloccato dal controllo sulla fixture.
+- I test Postgres non sono stati eseguiti.
+
+**Proposta per il Task 9 (criterio 3 in live), aspetto il tuo OK:**
+- **Chiamate.**
+  - Verso Vela: intento, proposta, rifiuto, accept e interrogazioni dello stato ogni 5 s.
+  - Vela chiama HofJ staging 6 volte (5 per l'acquisto, 1 per la prenotazione) e Stripe per 1 Checkout Session. Poi legge la sessione a ogni interrogazione dello stato finché non paghi: circa 10–30 letture.
+- **Chi lancia.** Lo lancio io in background, passando allo script solo `VELA_API_TOKEN` preso dal `.env`, come per la chiave: il token non viene mai stampato. Prima controllo che la variabile ci sia.
+  - In alternativa lo lanci tu dal tuo terminale: `uv run python scripts/rest_flow.py https://vela-n506.onrender.com`, con il token nell'ambiente.
+- **Il pagamento lo fai tu.** Quando lo script stampa il link Stripe, te lo riporto. Lo apri e paghi con `4242 4242 4242 4242`, una data futura e un CVC qualsiasi. Lo script aspetta `confirmed` fino a 15 minuti.
+- **Cosa registro.** Esito, id dell'ordine, codice di prenotazione (l'`itineraryId` di staging) e la tabella dei tempi. Li scrivo in `docs/acceptance.md` nel Task 13.
+
+## Utente 22:26
+
+ok
+
+## Agente 22:26
+
+- 🔧 Bash: Check VELA_API_TOKEN presence without printing it
+
+Nel `.env` non c'è `VELA_API_TOKEN`, quindi non posso lanciare lo script io. Ci sono due strade:
+
+1. **Aggiungi `VELA_API_TOKEN` al `.env`**: lo stesso valore impostato su Render. Poi mi scrivi "fatto" e lo lancio io in background, riportandoti il link di pagamento.
+2. **Lo lanci tu dal tuo terminale:**
+   ```bash
+   cd /Users/matteodospina/orca/workspaces/vela/task-m7
+   read -rs VELA_API_TOKEN && export VELA_API_TOKEN      # incolli il token, non viene mostrato
+   uv run python scripts/rest_flow.py https://vela-n506.onrender.com
+   ```
+   Quando compare il link lo apri e paghi con `4242 4242 4242 4242`. Alla fine mi incolli l'output: contiene id dell'ordine, prodotti, codice e tabella dei tempi, mai il token.
+
+Non usare `!` con il valore scritto nel comando, perché finirebbe in `agent-log/`.
+
+## Utente 22:27
+
+aggiunta
+
+## Agente 22:27
+
+- 🔧 Monitor
+
+Ho lanciato il flusso REST contro Render passando allo script solo `VELA_API_TOKEN`. Appena lo script stampa il link di pagamento Stripe te lo riporto qui: poi lo apri e paghi con `4242 4242 4242 4242`, una data futura e un CVC qualsiasi.
+
+## Utente 22:27
+
+<task-notification>
+<task-id>bdrujs6w2</task-id>
+<tool-use-id>toolu_013j4t1ThDvzQG9wm4sdZYa6</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m7/0f8e2ad1-77e4-410b-bfc7-128e50cc461d/tasks/bdrujs6w2.output</output-file>
+<status>completed</status>
+<summary>Monitor "criterio 3 REST live: link di pagamento ed esito" stream ended</summary>
+<event>FALLITO: ordine 6b590046-3641-45a7-bbb7-d4231e08974b in replaced invece di awaiting_payment: Quel viaggio non è più prenotabile, ti propongo un'alternativa. Ti propongo Premier Padel® Milan 2026 | Package Ticket + Hotel, dal 15 ottobre 2026 al 16 ottobre 2026 per 2 persone, a partire da 185 euro a persona. Non ho partenze compatibili in Spagna: questa è a Milano, in Italia. Parte il 15 ottobre 2026, nel periodo che hai chiesto, e costa 370 euro in totale, oltre il tuo budget di 318,40 euro. Ti v...(truncated)
+USCITA 1</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+## Agente 22:27
+
+Il criterio 3 non è passato, ma il flusso si è fermato in un punto che dice qualcosa:
+- La seconda proposta era il prodotto 867 ("Costa Blanca", registrato a Nicosia). Dopo l'accept, il suo carrello è fallito su HofJ.
+- Vela ha sostituito l'ordine (`replaced`) con il 14, il Premier Padel di Milano, senza mostrare errori. È il comportamento del criterio 4, avvenuto da solo.
+- Non è nato nessun link, quindi non c'è nulla da pagare: nessuna Checkout Session creata.
+
+Seguo il Task 12 con il debugging sistematico, per capire se il 867 è davvero non prenotabile su staging o se l'errore è di Vela.
+
+- 🔧 Skill superpowers:systematic-debugging
+
+- 🔧 Bash: Read-only query of the failed purchase job on Render DB
+
+**Causa trovata.** Non è un errore di Vela: il prodotto 867 è configurato male su HofJ staging. Il `last_error` del job d'acquisto riporta la risposta di HofJ:
+
+> `502 Brand "staging.weebora.com" POST /itinerary returned 500: "Prodotto con acceptsCompanions attivo ma il template Nezasa non espone le due activity di sistema attese (Player Fixed + Companion Optional)", code CONFIGURATION_ERROR`
+
+È un errore di configurazione del prodotto lato fornitore (template Nezasa), coerente con i dati sporchi che avevamo già visto sul 867. Vela si è comportata come previsto:
+- ha riconosciuto un errore di prodotto (502 con upstream 500, non un timeout) e non ha ripetuto il tentativo;
+- ha marcato il 867 `bookable = false` fino a domani, per 24 ore (RF-33);
+- ha sostituito l'ordine con il prodotto 14 senza mostrare l'errore al viaggiatore. È di fatto una prima prova naturale del criterio 4.
+
+**Costo della prova:** 1 chiamata HofJ (il `POST /v1/itineraries` fallito) e nessuna chiamata Stripe.
+
+**Cosa succede se riprovo.** Con il 867 escluso per 24 ore, lo stesso intento dà:
+- prima proposta: il 28, Marbella, 398 €;
+- dopo "troppo caro": l'unico prodotto più economico rimasto, il **14** (Premier Padel Milano, pacchetto biglietto + hotel, 15-16 ottobre, 370 € in due), dichiarato fuori dalla Spagna.
+
+Non sappiamo se il carrello del 14 funzioni su HofJ. Se fallisce anche lui, l'ordine verrebbe di nuovo sostituito e dopo "troppo caro" non resterebbe niente di più economico.
+
+**Serve una tua decisione.** Tre possibilità:
+1. **Rilancio `rest_flow.py` così com'è.** Costo: altre 6 chiamate HofJ e 1 Checkout Session se il 14 funziona. Se il 14 fallisce, ti propongo la strada 2.
+2. **Cambio l'intento del criterio 3** verso prodotti con partenze regolari e più probabilmente configurati bene, per esempio Tarragona (115, 360 €) o Madrid (113, 750 €). La frase di §10.1 resterebbe solo per il criterio 1 in claude.ai, che però ha lo stesso problema.
+3. **Chiedo a HofJ** di sistemare il 867, o quali prodotti di staging sono prenotabili, e intanto andiamo avanti col criterio 4.
+
+Io proverei la 1. Registrerò comunque in `docs/acceptance.md` il fallimento del 867 come esecuzione naturale del criterio 4.
+
+## Utente 22:29
+
+2
+
+## Agente 22:30
+
+Scelgo l'intento per il criterio 3. Il vincolo, già visto nel 6b: dopo "troppo caro" la seconda proposta è la più economica del gruppo d'area successivo. Simulo alcune città spagnole sulla fixture di staging, con il 867 non prenotabile come adesso su Render:
+
+- 🔧 Bash: Simulate candidate city intents on staging fixture
+
+- 🔧 Bash: Simulate Barcelona intent chain and phrases
+
+La scelta migliore è Barcellona. La sequenza è stabile oggi, domani e al 2 ottobre, con o senza il 867, e resta in Catalogna con due prodotti a partenza settimanale:
+
+- **Frase:** "un weekend di padel a Barcellona a ottobre, siamo in due, massimo 1500 euro". Ha la stessa forma di quella di §10.1, con città e budget diversi.
+- **Prima proposta:** 158, "Training weekend at Bela Padel Center", 2–4 ottobre, 1390 € in due, dentro il budget.
+- **Dopo "troppo caro":** 115, "The weekend Padel Boost", Tarragona, 2 ottobre, 720 € in due. Vela dichiara: "Non ho partenze compatibili a Barcellona: questa è a Tarragona, in Catalogna."
+- **Dopo un secondo "troppo caro":** il 28, Marbella, 398 €. Serve solo come riserva.
+
+Il prodotto da prenotare sarebbe quindi il 115. Se HofJ ha configurato male anche questo, lo scopriamo alla prima chiamata del job d'acquisto. Costo: 1 chiamata HofJ, nessuna Checkout Session. Una sonda separata costerebbe lo stesso, quindi non la propongo.
+
+**Proposta, aspetto il tuo OK:**
+1. In TDD, `INTENT_FLOW` in `scripts/rest_flow.py` passa alla frase su Barcellona. Aggiorno prima gli scenari in `tests/test_staging_fixture.py`, che devono fallire con la frase vecchia: 158 → 115 dichiarato in Catalogna → 28.
+2. La stessa frase vale per il criterio 1 in claude.ai. In `docs/acceptance.md` dichiaro che su staging la frase di §10.1 è sostituita, e perché: il 867 ha un errore di configurazione HofJ e la Spagna non ha altri prodotti più economici del 28.
+3. Commit su `task/m7`. Lo script gira in locale, quindi per il criterio 3 non serve un nuovo deploy: la frase la passa lo script. Il merge su `master` lo faccio a fine M7.
+4. Rilancio `rest_flow.py` contro Render in background e ti riporto il link di pagamento.
+
+## Utente 22:30
+
+vai
+
+## Agente 22:31
+
+- 🔧 Bash: Update staging scenarios for Barcelona intent, expect red
+
+Rossi per il motivo giusto. Cambio la frase:
+
+- 🔧 Bash: Change INTENT_FLOW, run suite, commit
