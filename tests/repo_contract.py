@@ -115,6 +115,20 @@ class RepositoryContract:
         self.assertEqual(self.repos.orders.ids_with_status(OrderStatus.AWAITING_PAYMENT), [])
         self.assertIsNone(self.repos.orders.get_by_proposal("nope"))
 
+    def test_order_roundtrip_with_queue_fields(self):
+        """Ordine in coda (M5): totale ancora ignoto, posizione e sostituzione salvate."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        queued = replace(order(), status=OrderStatus.QUEUED, total=None, itinerary_id=None,
+                         enqueued_at=NOW - timedelta(minutes=3), replacement_proposal_id=None)
+        self.repos.orders.add(queued)
+        self.assertEqual(self.repos.orders.get("o1"), queued)
+        replaced = replace(queued, status=OrderStatus.REPLACED, replacement_proposal_id="p9",
+                           failure_reason="prodotto non prenotabile")
+        self.repos.orders.save(replaced)
+        self.assertEqual(self.repos.orders.get("o1"), replaced)
+        self.assertEqual(self.repos.orders.ids_with_status(OrderStatus.REPLACED), ["o1"])
+
     # rifiuti
     def test_rejections(self):
         self.seed()

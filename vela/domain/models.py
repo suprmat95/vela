@@ -196,9 +196,14 @@ class Proposal:
 
 
 class OrderStatus(str, Enum):
+    """Stati dell'ordine nell'ordine di RF-25."""
+    QUEUED = "queued"                  # RF-45: accettato, in attesa del job d'acquisto
     AWAITING_PAYMENT = "awaiting_payment"
     PAID_PENDING_BOOKING = "paid_pending_booking"
     CONFIRMED = "confirmed"
+    REPLACED = "replaced"              # RF-17: prodotto non prenotabile, proposta sostitutiva
+    CANCELLED = "cancelled"            # RF-49: il viaggiatore ha rinunciato
+    FAILED = "failed"                  # RF-46: job d'acquisto fallito dopo i tentativi
     BOOKING_FAILED = "booking_failed"
     EXPIRED = "expired"
 
@@ -212,7 +217,7 @@ class Order:
     status: OrderStatus
     pax: int
     price_from: Decimal        # per persona, dalla proposta
-    total: Decimal             # totale reale dell'itinerario
+    total: Optional[Decimal]   # importo reale da HofJ (openAmount); None finché l'ordine è in coda
     currency: str
     traveler: TravelerProfile
     created_at: datetime
@@ -223,6 +228,43 @@ class Order:
     booking_code: Optional[str] = None
     failure_reason: Optional[str] = None
     paid_at: Optional[datetime] = None
+    enqueued_at: Optional[datetime] = None            # posizione FIFO (RF-48); ereditata in RF-17
+    replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
+
+
+class JobKind(str, Enum):
+    PURCHASE = "purchase"              # RF-46
+    BOOKING = "booking"                # RF-23, RF-51
+    PAYMENT_CHECK = "payment_check"    # RF-20
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    DEAD = "dead"
+
+
+class QuotaClass(str, Enum):
+    """Classi dello scheduler della quota HofJ (RF-47)."""
+    BOOKING = "booking"
+    PURCHASE = "purchase"
+    SYNC = "sync"
+
+
+@dataclass(frozen=True)
+class Job:
+    """Un'unità di lavoro del worker (RF-50), ripartibile dal passo salvato (RF-27)."""
+    id: str
+    kind: JobKind
+    order_id: str
+    status: JobStatus
+    enqueued_at: datetime
+    run_after: datetime
+    step: int = 0
+    attempts: int = 0
+    locked_at: Optional[datetime] = None
+    last_error: Optional[str] = None
 
 
 @dataclass(frozen=True)

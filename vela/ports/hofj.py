@@ -1,6 +1,6 @@
 """Porta verso House of Journeys (spec §2 "Porta", RF-14, RF-23). Implementazioni: replay (M2), HTTP (M5)."""
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Protocol
 
@@ -48,6 +48,15 @@ class Pax:
     ref_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class QuotaSnapshot:
+    """Risposta di `GET /v1/quota` (RF-36): finestra fissa di 60 s ancorata da HofJ."""
+    limit_per_minute: int
+    used_in_window: int
+    window_started_at: datetime
+    window_ends_at: datetime
 
 
 @dataclass(frozen=True)

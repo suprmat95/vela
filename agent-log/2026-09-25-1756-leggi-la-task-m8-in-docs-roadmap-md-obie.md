@@ -2261,3 +2261,67 @@ Il fallimento è quello atteso: i campi non esistono ancora. Adesso implemento.
 - 🔧 Bash: Add Tuple import and run tests and suite
 
 - 🔧 Bash: Confirm test count and commit Task 2
+
+Task 2 fatto (commit `984a197`): la suite passa da 513 a **516 test, verde**, con 13 saltati.
+
+**Cosa ho fatto:**
+- **Nuovi campi in `Settings` (`vela/config.py`), con i valori di default:**
+
+  | Campo | Default |
+  |---|---|
+  | `worker_concurrency` | 4 |
+  | `quota_margin` | 0,10 |
+  | `booking_reserve` | 0,20 |
+  | `purchase_max_attempts` | 3 |
+  | `booking_max_attempts` | 5 |
+  | `booking_backoff` | (5, 10, 20, 40) |
+  | `job_lease_seconds` | 120 |
+  | `payment_poll_seconds` | 60 |
+  | `replay_latency` | (0, 0) |
+  | `replay_limit` | nessuno (quota illimitata) |
+
+- **Tre test in `tests/test_config.py`:** controllano i default, che nessun campo venga letto da variabili d'ambiente, e che i valori si possano impostare da codice. Li ho visti fallire prima di scrivere il codice, per la ragione attesa: i campi non esistevano.
+
+**Cosa ho deciso:** ho aggiunto `payment_poll_seconds`, che il piano introduceva solo nel Task 13b, per tenere tutti i parametri di M5 nello stesso punto. Ogni campo ha un breve commento che rimanda al requisito.
+
+**Dubbi:** nessuno su questo task.
+
+**Una cosa da sapere:** il campo `stripe_webhook_secret` è ancora in `Settings`. M6 ha tolto il webhook ma ha lasciato la lettura della variabile. È innocuo e non lo tocco, perché esce dallo scope di M5.
+
+Il prossimo è il **Task 3**: gli stati nuovi dell'ordine, il modello `Job` e la migrazione `0005_jobs_quota`. Tocca lo schema del database, come prevede il piano approvato. Vado avanti?
+
+## Utente 20:10
+
+vai
+
+## Agente 20:10
+
+- 🔧 Bash: Read order model and schema
+
+- 🔧 Bash: Read migration style, migration tests and order mappers
+
+- 🔧 Bash: Read repo contract helpers
+
+Scrivo i test che devono fallire: head della migrazione `0005`, round-trip dell'ordine con i campi della coda, tabelle nuove.
+
+- 🔧 Bash: Read order contract test and postgres cleanup
+
+- 🔧 Bash: Write failing migration and order roundtrip tests
+
+- 🔧 Bash: Add order states, job and quota models
+
+- 🔧 Bash: Add QuotaSnapshot and schema tables/columns
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/alembic/versions/0005_jobs_quota.py
+
+- 🔧 Bash: Map new order columns and run tests
+
+I test della migrazione e dei repository passano. Nella suite completa c'è un fallimento: guardo di cosa si tratta.
+
+- 🔧 Bash: Show the failing test details
+
+- 🔧 Bash: Reorder enum per RF-25 and view old test
+
+- 🔧 Bash: Update RF-25 test and run full suite
+
+- 🔧 Bash: Commit Task 3
