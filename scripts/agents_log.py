@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trascrive un transcript JSONL di Claude Code in Markdown dentro agents-log/.
+"""Trascrive un transcript JSONL di Claude Code in Markdown dentro agent-log/.
 
 Uso:
   agents_log.py --hook                      # come hook PreToolUse (legge il JSON da stdin)
@@ -19,12 +19,15 @@ from datetime import datetime, timezone
 
 Entry = namedtuple("Entry", "role text ts")  # role: user | assistant | tool
 
+LOG_DIR = "agent-log"
 SLUG_MAX = 40
 CMD_MAX = 80
 NOISE_PREFIXES = ("<local-command-caveat>", "<command-name>", "<command-message>",
                   "<local-command-stdout>")
 SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.S)
 GIT_COMMIT_RE = re.compile(r"\bgit\b[^|;&\n]*\bcommit\b")
+COMMAND_NAME_RE = re.compile(r"<command-name>(.*?)</command-name>", re.S)
+COMMAND_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.S)
 
 
 def is_git_commit(command):
@@ -61,6 +64,19 @@ def tool_label(name, tool_input):
     if name == "Skill" and tool_input.get("skill"):
         return "Skill " + tool_input["skill"]
     return name
+
+
+def slash_command_text(text):
+    """Messaggio di uno slash command con argomenti -> "/comando: argomenti", altrimenti None.
+
+    Senza <command-args> (es. /clear) il messaggio e' rumore e non entra nel log.
+    """
+    args = COMMAND_ARGS_RE.search(text)
+    if not args or not args.group(1).strip():
+        return None
+    name = COMMAND_NAME_RE.search(text)
+    prefix = name.group(1).strip() + ": " if name else ""
+    return prefix + args.group(1).strip()
 
 
 def _user_text(content):
@@ -102,7 +118,9 @@ def parse_transcript(lines):
         if kind == "user":
             text = _user_text(content)
             if text.lstrip().startswith(NOISE_PREFIXES):
-                continue
+                text = slash_command_text(text)
+                if text is None:
+                    continue
             text = clean_text(text)
             if text:
                 entries.append(Entry("user", text, ts))
@@ -186,7 +204,7 @@ def run_hook():
         if not is_git_commit((payload.get("tool_input") or {}).get("command")):
             return
         cwd = payload.get("cwd") or os.getcwd()
-        paths = transcribe(payload["transcript_path"], os.path.join(cwd, "agents-log"))
+        paths = transcribe(payload["transcript_path"], os.path.join(cwd, LOG_DIR))
         if paths:
             subprocess.run(["git", "add", "--"] + list(paths), cwd=cwd, check=True)
     except Exception as exc:  # mai bloccare il commit
@@ -200,7 +218,7 @@ def main(argv):
     if not argv:
         sys.stderr.write(__doc__)
         return 2
-    out_dir = "agents-log"
+    out_dir = LOG_DIR
     if "--out-dir" in argv:
         out_dir = argv[argv.index("--out-dir") + 1]
     paths = transcribe(argv[0], out_dir)

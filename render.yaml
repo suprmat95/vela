@@ -1,0 +1,37 @@
+# Blueprint Render: web service Docker + Postgres gestito (spec RNF-11).
+# Le variabili con `sync: false` vanno inserite a mano nella dashboard, mai nel repo.
+services:
+  - type: web
+    name: vela
+    runtime: docker
+    region: frankfurt
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vela-db
+          property: connectionString
+      - key: VELA_UPSTREAM_MODE
+        value: replay
+      - key: HOFJ_API_KEY
+        sync: false
+      - key: HOFJ_BASE_URL
+        sync: false
+      - key: HOFJ_BRAND
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: VELA_API_TOKEN
+        sync: false
+      - key: VELA_PUBLIC_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+databases:
+  - name: vela-db
+    region: frankfurt
+    plan: free

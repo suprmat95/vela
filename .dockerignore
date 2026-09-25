@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+.env.*
+.superpowers
+agent-log
+docs
+tests
+__pycache__
+*.pyc
+*.egg-info
+loadtest
+.claude
+scripts

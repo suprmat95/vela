@@ -32,7 +32,7 @@
 
 - Everything that guides the work is saved in the repository, not only in the conversation.
 
-- agents-log/ holds Markdown transcripts of Claude Code sessions, generated automatically
+- agent-log/ holds Markdown transcripts of Claude Code sessions, generated automatically
 
   at every commit by scripts/agents_log.py (see docs/agents-log.md). Do not edit by hand.
 
