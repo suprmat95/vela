@@ -233,3 +233,13 @@ Eseguo il piano M2 un task alla volta in TDD: per ogni task scrivo prima il test
 **Task 0**: aggiungo la tabella delle decisioni dell'intervista in fondo a `docs/decisions.md`.
 
 - 🔧 Bash: Append M2 decisions to decisions.md and commit
+
+**Task 1 (modelli)**: prima i test. Li eseguo e mi aspetto che falliscano perché il modulo non esiste ancora.
+
+- 🔧 Bash: Write Task 1 tests and run them to see them fail
+
+- 🔧 Bash: Confirm failure reason, write models, rerun tests
+
+Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il commit.
+
+- 🔧 Bash: Run full suite and commit Task 1
