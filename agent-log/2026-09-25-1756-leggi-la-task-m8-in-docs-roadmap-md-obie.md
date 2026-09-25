@@ -2325,3 +2325,52 @@ I test della migrazione e dei repository passano. Nella suite completa c'è un f
 - 🔧 Bash: Update RF-25 test and run full suite
 
 - 🔧 Bash: Commit Task 3
+
+Task 3 fatto (commit `d52947d`): la suite passa da 516 a **519 test, verde**, con 14 saltati.
+
+**Cosa ho fatto:**
+- **Stati dell'ordine:** `OrderStatus` ora ha anche `queued`, `replaced`, `cancelled` e `failed`, nello stesso ordine in cui li elenca RF-25. Ho aggiornato il test esistente `test_values_are_rf25`, che elencava solo i cinque stati di M2.
+- **Campi nuovi dell'ordine:**
+  - `total` diventa opzionale, perché un ordine in coda non conosce ancora l'importo;
+  - `enqueued_at` serve per la posizione in coda;
+  - `replacement_proposal_id` lega un ordine sostituito alla proposta nuova.
+- **Tipi nuovi:**
+  - `Job`, `JobKind` (`purchase`, `booking`, `payment_check`), `JobStatus` e `QuotaClass`;
+  - `QuotaSnapshot` nella porta HofJ, cioè la risposta di `/v1/quota`.
+- **Migrazione `0005_jobs_quota`:**
+  - crea le tabelle `jobs`, con l'indice per il prelievo, e `quota_window`;
+  - aggiunge le colonne nuove a `orders`;
+  - scritta con `batch_alter_table`, così gira anche su SQLite.
+- **Postgres:** il repository salva e rilegge i campi nuovi. La pulizia dei test Postgres svuota anche le tabelle nuove.
+- **Test:**
+  - `test_order_roundtrip_with_queue_fields` è nel contratto comune, quindi gira in memoria e, quando c'è `DATABASE_URL`, anche su Postgres;
+  - `test_migrations.py` controlla la head `0005`, le tabelle e le colonne nuove, e il downgrade;
+  - i test li ho visti fallire prima di scrivere il codice.
+
+**Cosa ho deciso:**
+- **Il downgrade da `0005` cancella gli ordini senza totale** (quelli in coda), perché lo schema precedente non li può rappresentare. È una perdita di dati, ma solo su un downgrade esplicito. In alternativa si potrebbe mettere `total = 0`, ma sarebbe un importo falso.
+- `JobKind` include già `payment_check` (Task 13b), per non dover toccare l'enum più avanti.
+
+**Dubbi:**
+- **Test Postgres saltati:** senza `DATABASE_URL` la migrazione `0005` e il contratto non sono verificati su Postgres. Se mi fornisci l'External Database URL di Render, come in M9, li eseguo.
+- **Test del downgrade:** il nuovo test del downgrade da `0005` l'ho visto passare anche prima dell'implementazione, perché la `0005` non esisteva e il downgrade non faceva nulla. Ora verifica davvero che tabelle e colonne spariscano.
+
+Il prossimo è il **Task 4**: le regole pure della quota (limite effettivo 108, riserva 21, tetti per classe, attesa stimata). Vado?
+
+## Utente 20:14
+
+vai
+
+## Agente 20:14
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/tests/test_quota_rules.py
+
+- 🔧 Bash: Run failing quota rules tests
+
+Il test fallisce perché il modulo non esiste ancora. Lo creo.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/vela/domain/quota.py
+
+- 🔧 Bash: Run quota rules tests
+
+- 🔧 Bash: Confirm float pitfall, run suite, commit Task 4
