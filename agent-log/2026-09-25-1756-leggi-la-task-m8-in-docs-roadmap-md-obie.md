@@ -2936,3 +2936,21 @@ Falliscono come atteso: mancano `vela.domain.booking` e il parametro `new_id`. I
 Tutti verdi: 632 test. Faccio il commit del Task 12.
 
 - 🔧 Bash: Commit Task 12
+
+Task 13: il `JobProcessor`. Preleva un job, prenota il blocco di quota, lo esegue e gestisce il 429. Legge `/v1/quota` solo al boot e dopo un 429. Prima i test.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/tests/test_job_processor.py
+
+Riscrivo meglio due punti poco leggibili nei test appena scritti, prima di eseguirli.
+
+- 🔧 Bash: Tidy tests and see them fail
+
+Il test fallisce perché il modulo non esiste. Lo scrivo.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/vela/domain/jobs.py
+
+- 🔧 Bash: Run processor tests
+
+I 12 test passano. Faccio il commit del Task 13 e passo al 13b, la verifica del pagamento per interrogazione.
+
+- 🔧 Bash: Commit Task 13 and read payments code for 13b
