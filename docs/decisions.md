@@ -212,3 +212,20 @@ Origine: intervista sulla macro task M3, piano in `docs/plans/2026-09-25-m3-supe
 |---|---|---|
 | Log dell'SDK MCP | `MCPServer(..., log_level="WARNING")` | Il costruttore chiama `logging.basicConfig` sul root logger (INFO con `RichHandler` di default): l'app avrebbe stampato i log INFO di tutte le librerie. Con WARNING resta visibile ciò che si vedeva prima di M3; M14 riconfigura i log in JSON. Test: `RootLoggingTest` |
 | Log attesi nei test | I test che provocano rifiuti dell'SDK (argomenti non validi, Host/Origin non ammessi) li catturano con `assertLogs` e li verificano | Output dei test pulito, e il rifiuto è verificato anche dal log |
+
+## 2026-09-25 — M4: superficie REST
+
+Origine: intervista sulla macro task M4, piano in `docs/plans/2026-09-25-m4-superficie-rest.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| `VELA_API_TOKEN` assente | L'app parte; ogni `/v1/*` risponde 503 `rest-not-configured` (7807). `/health` e `/replay` restano disponibili | Fail closed senza accesso aperto per errore, diagnosi chiara su Render, i test esistenti non cambiano |
+| Esiti previsti dei casi d'uso | Sempre 2xx con `{"outcome": ..., **to_dict()}`. 201 per `intent_created` e `order` (anche al secondo accept idempotente), 200 per `question`, `proposal`, `no_match`, `missing_traveler_data`, `order_status` | Domanda, "niente di compatibile" e dati mancanti sono risposte di dominio che l'agente legge (`say`), non errori. `to_dict()` resta invariato per M3 |
+| `/health` | Nuovo `ProductRepository.last_fetched_at()` (memoria + Postgres `MAX(fetched_at)`); risposta con `catalog: {products, fetched_at, age_seconds}` (`null` senza dominio o con lettura fallita) e `quota: null` fino a M5; il codice di stato dipende solo dal DB | RNF-06 senza anticipare il guardiano della quota; il controllo di salute di Render non cambia comportamento |
+| RFC 7807 | `type` = `/problems/<slug>` (`unauthorized`, `not-found`, `method-not-allowed`, `invalid-request`, `rest-not-configured`, `domain-unavailable`, `internal-error`, `http-error`), più `title`, `status`, `detail`, `instance` e `say` in italiano. Solo sotto `/v1`; `/health`, `/replay`, `/docs` mantengono il formato predefinito | Slug leggibili da un client; `say` permette all'agente di dire qualcosa al viaggiatore anche sull'errore |
+| Test manuale §10.3 | Nessuno script: i comandi `curl` del flusso stanno in `docs/rest.md`; l'esecuzione contro Render avviene dopo il merge e l'esito va in `docs/acceptance.md` (creato se M3 non l'ha ancora creato) | Scelta dell'utente |
+| Corpi delle richieste | Modelli Pydantic; campi extra ignorati; `text` ripulito dagli spazi, lunghezza 1-1000; `pax` ≥ 1; `profile`/`traveler` con la forma di `profile_to_dict` | Un agente che manda un campo in più non riceve un errore; testo vuoto e pax 0 sono errori del client |
+| Autenticazione | `HTTPBearer(auto_error=False)` + `hmac.compare_digest`; schema `Bearer` case-insensitive; auth prima della validazione e del dominio; il token ricevuto non compare mai nella risposta | RFC 6750; niente oracle di validazione per chi non ha il token |
+| OpenAPI | `/docs` e `/openapi.json` restano pubblici e includono lo schema Bearer | Utili a chi integra; non espongono dati |
+| Endpoint sincroni | `def`, non `async def` | Il dominio è sincrono; FastAPI li esegue nel threadpool |
+| Nessuna route per modalità | Il router REST è montato sempre, in replay e in live | La superficie non dipende dall'upstream |
