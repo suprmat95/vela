@@ -338,3 +338,13 @@ Fallisce all'import, come previsto dal piano. Ora scrivo `vela/domain/chooser.py
 Tutta la suite è verde, compresi `test_usecases` e `test_app_replay` senza modifiche. Committo.
 
 - 🔧 Bash: Commit task 4
+
+Task 5: test sulla fixture, poi il controllo che le proprietà si accorgano di un errore.
+
+- 🔧 Bash: Add fixture tests, run mutation check, restore
+
+- 🔧 Bash: Recheck chooser tests after restore
+
+- 🔧 Bash: Remove stale chooser bytecode and rerun
+
+- 🔧 Bash: Commit task 5
