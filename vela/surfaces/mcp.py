@@ -66,7 +66,9 @@ DESCRIPTIONS = {
     "get_order_status": (
         "Check an order when the user says they paid or asks how it is going. Returns `status` "
         "(awaiting_payment, paid_pending_booking, confirmed, booking_failed, expired) and, when "
-        "confirmed, `booking_code`." + _VOICE),
+        "confirmed, `booking_code`. While awaiting_payment it also returns `payment_url` and "
+        "`total`: show the link in the chat again if the user lost it, never read it aloud."
+        + _VOICE),
 }
 
 

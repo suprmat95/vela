@@ -161,6 +161,8 @@ class Vela:
 
     def get_order_status(self, order_id: str) -> OrderStatusResponse:
         order = self.orders.get(order_id)
-        return OrderStatusResponse(order.id, order.status, order.booking_code,
+        payable = order.status == OrderStatus.AWAITING_PAYMENT
+        return OrderStatusResponse(order.id, order.status, order.booking_code, order.total,
+                                   order.currency, order.payment_url if payable else None,
                                    say.say_status(order.status, order.booking_code,
-                                                  order.failure_reason))
+                                                  order.failure_reason, order.total))

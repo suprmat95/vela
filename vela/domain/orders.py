@@ -1,7 +1,7 @@
 """Macchina a stati dell'ordine (RF-20, RF-23, RF-25, RF-27, RNF-03).
 
 `awaiting_payment` → `paid_pending_booking` (mark_paid) → `confirmed` | `booking_failed`
-(complete_booking); `awaiting_payment` → `expired` (M6). Ogni transizione è idempotente: uno
+(complete_booking); `awaiting_payment` → `expired` (expire, webhook di scadenza). Ogni transizione è idempotente: uno
 stato diverso da quello atteso lascia l'ordine com'è. Retry con backoff: M5.
 """
 from dataclasses import replace
@@ -39,6 +39,15 @@ class OrderService:
         now = self.now()
         order = replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref=payment_ref,
                         paid_at=now, updated_at=now)
+        self.repos.orders.save(order)
+        return order
+
+    def expire(self, order_id: str) -> Order:
+        """Link scaduto (RF-21): solo un ordine ancora da pagare passa a `expired`."""
+        order = self.get(order_id)
+        if order.status != OrderStatus.AWAITING_PAYMENT:
+            return order
+        order = replace(order, status=OrderStatus.EXPIRED, updated_at=self.now())
         self.repos.orders.save(order)
         return order
 

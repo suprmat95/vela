@@ -70,6 +70,16 @@ class SayTest(unittest.TestCase):
         self.assertIn("non è riuscita", say.say_status(OrderStatus.BOOKING_FAILED, None, "timeout"))
         self.assertIn("scaduto", say.say_status(OrderStatus.EXPIRED, None, None))
 
+    def test_status_awaiting_says_the_amount_never_the_url(self):
+        s = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, Decimal("799.9"))
+        self.assertIn("799,90 euro", s)
+        self.assertNotIn("http", s)
+
+    def test_payments_unavailable(self):
+        s = say.say_payments_unavailable()
+        self.assertIn("pagamento", s)
+        self.assertNotIn("http", s)
+
     def test_paid(self):
         self.assertIn("Pagamento", say.say_paid())
 

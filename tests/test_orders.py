@@ -46,6 +46,31 @@ class MarkPaidTest(unittest.TestCase):
             service().mark_paid("nope", "pi")
 
 
+class ExpireTest(unittest.TestCase):
+    def test_awaiting_becomes_expired(self):
+        s = service(order())
+        o = s.expire("o1")
+        self.assertEqual(o.status, OrderStatus.EXPIRED)
+        self.assertEqual(o.updated_at, NOW + timedelta(minutes=1))
+        self.assertEqual(s.get("o1").status, OrderStatus.EXPIRED)
+
+    def test_second_call_is_noop(self):
+        s = service(order())
+        first = s.expire("o1")
+        self.assertEqual(s.expire("o1"), first)
+
+    def test_paid_or_confirmed_orders_never_expire(self):
+        for status in (OrderStatus.PAID_PENDING_BOOKING, OrderStatus.CONFIRMED,
+                       OrderStatus.BOOKING_FAILED):
+            with self.subTest(status):
+                s = service(order(status=status))
+                self.assertEqual(s.expire("o1").status, status)
+
+    def test_unknown(self):
+        with self.assertRaises(NotFound):
+            service().expire("nope")
+
+
 class CompleteBookingTest(unittest.TestCase):
     def test_confirms_with_code(self):
         hofj = FakeHofJ(code="R-654321")

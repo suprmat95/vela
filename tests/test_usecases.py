@@ -258,12 +258,37 @@ class ToCentsTest(unittest.TestCase):
 class OrderStatusTest(unittest.TestCase):
     def test_awaiting_payment(self):
         vela, _, proposal = accepted_vela()
-        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
-        r = vela.get_order_status(oid)
+        accepted = vela.accept_proposal(proposal.proposal.id, FULL)
+        r = vela.get_order_status(accepted.order_id)
         self.assertIsInstance(r, OrderStatusResponse)
         self.assertEqual((r.status, r.booking_code), (OrderStatus.AWAITING_PAYMENT, None))
+        self.assertEqual((r.total, r.currency, r.payment_url),
+                         (Decimal("700"), "EUR", "http://pay.test/" + accepted.order_id))
         self.assertIn("attesa", r.say)
-        assert_single_product(self, r.to_dict())
+        self.assertIn("700 euro", r.say)
+        d = r.to_dict()
+        self.assertEqual((d["total"], d["currency"], d["payment_url"]),
+                         ("700.00", "EUR", "http://pay.test/" + accepted.order_id))
+        assert_single_product(self, d)
+
+    def test_link_is_hidden_once_not_payable(self):
+        vela, _, proposal = accepted_vela()
+        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
+        vela.orders.expire(oid)
+        r = vela.get_order_status(oid)
+        self.assertEqual(r.status, OrderStatus.EXPIRED)
+        self.assertIsNone(r.payment_url)
+        self.assertIsNone(r.to_dict()["payment_url"])
+        self.assertIn("scaduto", r.say)
+
+    def test_confirmed_keeps_total(self):
+        vela, _, proposal = accepted_vela()
+        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
+        vela.orders.mark_paid(oid, "pi_1")
+        vela.orders.complete_booking(oid)
+        r = vela.get_order_status(oid)
+        self.assertEqual((r.status, r.total, r.payment_url),
+                         (OrderStatus.CONFIRMED, Decimal("700"), None))
 
     def test_unknown(self):
         with self.assertRaises(NotFound):

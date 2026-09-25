@@ -118,10 +118,14 @@ def say_accept(total, price_from_total, total_differs: bool) -> str:
             "arriva, prenoto e ti do il codice." % fmt_money(total))
 
 
-def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str]) -> str:
+def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
+               total: Optional[Decimal] = None) -> str:
     if status == OrderStatus.CONFIRMED:
         return "La tua prenotazione è confermata, codice %s." % booking_code
     if status == OrderStatus.AWAITING_PAYMENT:
+        if total is not None:
+            return ("L'ordine è in attesa del pagamento di %s: usa il link che ti ho mandato."
+                    % fmt_money(total))
         return "L'ordine è in attesa del pagamento: usa il link che ti ho mandato."
     if status == OrderStatus.PAID_PENDING_BOOKING:
         return "Pagamento ricevuto, sto completando la prenotazione: richiedi lo stato tra qualche secondo."
@@ -153,3 +157,8 @@ def say_unavailable() -> str:
 
 def say_error() -> str:
     return "Qualcosa non ha funzionato dalla mia parte: riprova tra poco."
+
+
+def say_payments_unavailable() -> str:
+    return ("Non riesco a preparare il link di pagamento in questo momento: riprova tra poco, "
+            "la proposta resta valida.")
