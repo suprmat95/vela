@@ -287,3 +287,15 @@ Fallisce per le parti mancanti. Aggiungo `TravelerDefaults`, `DEFAULT_TRAVELER` 
 Il docstring del modulo `usecases.py` si è perso quando ho sostituito gli import. Lo rimetto e poi faccio il commit.
 
 - 🔧 Bash: Restore usecases docstring and commit Task 10
+
+**Task 11 (tabelle, migrazione `0002`, repository Postgres)**. Prima porto i test di migrazione alla revisione `0002` e li guardo fallire.
+
+- 🔧 Bash: TDD the migration 0002 and domain tables
+
+Ora il contratto dei repository su Postgres. Carico `.env` nella stessa riga del comando e filtro l'output, così nessun URL finisce nel log.
+
+- 🔧 Bash: Write Postgres repository tests and watch them fail against the real DB
+
+- 🔧 Bash: Implement Postgres repositories and run repo and migration tests with and without the DB
+
+- 🔧 Bash: Commit Task 11

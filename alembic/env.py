@@ -9,6 +9,7 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from vela.adapters.db import metadata  # noqa: E402
+import vela.adapters.schema  # noqa: E402,F401  registra le tabelle sul metadata
 from vela.config import Settings  # noqa: E402
 
 config = context.config

@@ -29,14 +29,14 @@ def versions(url):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0001"])
+        self.assertEqual(heads, ["0002"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0001", res.stdout)
+        self.assertIn("0002", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -45,7 +45,7 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0001"])
+                self.assertEqual(versions(url), ["0002"])
                 command.downgrade(alembic_config(), "base")
                 self.assertEqual(versions(url), [])
 
@@ -62,4 +62,4 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0001"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0002"])
