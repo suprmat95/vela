@@ -353,3 +353,24 @@ class FullReplayFlowTest(unittest.TestCase):
         restarted = self.make(repos)       # nuovo processo: stessi repository, nuovo ReplayHofJ
         self.assertEqual(InlineRunner(restarted.orders).resume(), [oid])
         self.assertEqual(restarted.get_order_status(oid).status, OrderStatus.CONFIRMED)
+
+
+class LanguageFlowTest(unittest.TestCase):
+    def test_english_intent_gets_english_answers(self):
+        from vela.domain.models import Participant
+        vela = make_vela()
+        created = vela.create_intent("a padel weekend in Spain in October, we are two, max 800 euros")
+        self.assertIn("Spain", created.say)
+        proposal = vela.get_proposal(created.intent_id)
+        self.assertIn("per person", proposal.say)
+        missing = vela.accept_proposal(proposal.proposal.id)
+        self.assertIn("To book", missing.say)
+        accepted = vela.accept_proposal(proposal.proposal.id, TravelerProfile(
+            "Anna", "Rossi", "a@x.it", "+39", participants=(Participant("Bo", "Bi"),)))
+        self.assertIn("payment link", accepted.say)
+        self.assertIn("waiting for payment", vela.get_order_status(accepted.order_id).say)
+
+    def test_english_no_match(self):
+        vela = make_vela([])                       # catalogo vuoto: si ferma al filtro "archived"
+        iid = vela.create_intent("tennis in October, we are two").intent_id
+        self.assertIn("try again later", vela.get_proposal(iid).say)

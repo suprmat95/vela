@@ -2,7 +2,8 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from vela.domain.intent import (QUESTION_PAX, QUESTION_SPORT_OR_PERIOD, detect_language,
+from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT_OR_PERIOD,
+                                QUESTION_SPORT_OR_PERIOD_EN, detect_language,
                                 is_per_person, parse_budget, parse_intent, parse_pax,
                                 parse_period)
 from vela.domain.models import Area, Period, TravelerProfile
@@ -308,6 +309,12 @@ class QuestionTest(unittest.TestCase):
         r = parse_intent("qualcosa a ottobre per due", today=TODAY)
         self.assertIsNone(r.question)
         self.assertIsNone(r.criteria.sport)
+
+    def test_questions_in_english(self):
+        self.assertEqual(parse_intent("a trip to Spain for the two of us", today=TODAY).question,
+                         QUESTION_SPORT_OR_PERIOD_EN)
+        self.assertEqual(parse_intent("we want padel in October", today=TODAY).question,
+                         QUESTION_PAX_EN)
 
     def test_area_and_period_objects(self):
         c = parse_intent("padel in Spagna a ottobre per due", today=TODAY).criteria

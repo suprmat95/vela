@@ -122,3 +122,65 @@ class SayM11Test(unittest.TestCase):
     def test_no_match_without_value_falls_back(self):
         self.assertIn("periodo", say.say_no_match("dates", Criteria()))
         self.assertIn("sport", say.say_no_match("sport"))
+
+
+class EnglishTest(unittest.TestCase):
+    def test_formats(self):
+        self.assertEqual(say.fmt_date(date(2026, 10, 1), "en"), "1 October 2026")
+        self.assertEqual(say.fmt_money(Decimal("800"), "en"), "800 euros")
+        self.assertEqual(say.fmt_money(Decimal("812.5"), "en"), "812.50 euros")
+
+    def test_intent_created(self):
+        c = Criteria("padel", Area("country", "Spagna", "ES"),
+                     Period(date(2026, 10, 1), date(2026, 10, 31), "october"), 2, Decimal("800"), "en")
+        s = say.say_intent_created(c)
+        for piece in ("padel", "Spain", "1 October 2026", "31 October 2026", "2 people", "800 euros"):
+            self.assertIn(piece, s)
+        self.assertNotIn("Spagna", s)
+        self.assertIn("1 person", say.say_intent_created(Criteria(pax=1, language="en")))
+
+    def test_proposal(self):
+        s = say.say_proposal(PRODUCT, PROPOSAL, "en")
+        for piece in ("Magnifico Padel a Lanzarote", "THB Lanzarote Beach", "1 October 2026",
+                      "4 October 2026", "2 people", "578 euros"):
+            self.assertIn(piece, s)
+        self.assertNotIn("http", s)
+
+    def test_no_match(self):
+        from vela.domain.chooser import FILTERS
+        en = Criteria(language="en")
+        texts = {c: say.say_no_match(c, en) for c in FILTERS}
+        self.assertEqual(len(set(texts.values())), 5)   # archived, bookable e trip condividono la frase
+        self.assertIn("period", texts["dates"])
+        self.assertNotEqual(texts["dates"], say.say_no_match("dates"))
+
+    def test_no_match_cites_the_value(self):
+        c = Criteria("tennis", None, Period(date(2026, 10, 1), date(2026, 10, 31), "october"), 8,
+                     language="en")
+        self.assertIn("any tennis trip", say.say_no_match("sport", c))
+        self.assertIn("between 1 October 2026 and 31 October 2026", say.say_no_match("dates", c))
+        self.assertIn("for 8 people", say.say_no_match("pax", c))
+
+    def test_on_date_and_places(self):
+        self.assertEqual(say.on_date(date(2026, 10, 8), "en"), "on 8 October 2026")
+        s = say.say_intent_created(Criteria("padel", Area("region", "Canarie", "ES"), language="en"))
+        self.assertIn("in the Canary Islands", s)
+
+    def test_missing(self):
+        s = say.say_missing(["email", "phone", "participants[0].last_name"], "en")
+        self.assertIn("the email", s)
+        self.assertIn("the phone number", s)
+        self.assertIn("last name of the second participant", s)
+        self.assertIn(" and ", s)
+
+    def test_accept_and_status(self):
+        self.assertIn("750 euros", say.say_accept(Decimal("750"), Decimal("700"), True, "en"))
+        for status in OrderStatus:
+            with self.subTest(status=status):
+                it = say.say_status(status, "R-1", None)
+                en = say.say_status(status, "R-1", None, "en")
+                self.assertNotEqual(it, en)
+        self.assertIn("R-1", say.say_status(OrderStatus.CONFIRMED, "R-1", None, "en"))
+
+    def test_italian_is_default(self):
+        self.assertEqual(say.say_no_match("pax"), say.say_no_match("pax", Criteria(language="it")))

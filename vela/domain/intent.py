@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 
 QUESTION_SPORT_OR_PERIOD = "Che sport ti interessa, padel o tennis, e in che periodo vuoi partire?"
 QUESTION_PAX = "In quante persone siete?"
+QUESTION_SPORT_OR_PERIOD_EN = ("Which sport are you interested in, padel or tennis, and when "
+                               "would you like to go?")
+QUESTION_PAX_EN = "How many people are travelling?"
+_QUESTIONS = {"it": (QUESTION_SPORT_OR_PERIOD, QUESTION_PAX),
+              "en": (QUESTION_SPORT_OR_PERIOD_EN, QUESTION_PAX_EN)}
 
 MONTHS = {
     "gennaio": 1, "january": 1, "febbraio": 2, "february": 2, "marzo": 3, "march": 3,
@@ -397,9 +402,10 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
     )
     if criteria.sport is None and criteria.period is None and extractor is not None:
         criteria = _with_fallback(criteria, text, today, extractor)
+    ask_sport_or_period, ask_pax = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
     question = None
     if criteria.sport is None and criteria.period is None:
-        question = QUESTION_SPORT_OR_PERIOD
+        question = ask_sport_or_period
     elif criteria.pax is None:
-        question = QUESTION_PAX
+        question = ask_pax
     return ParseResult(criteria, question)

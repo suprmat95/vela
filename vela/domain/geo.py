@@ -67,6 +67,7 @@ PARENTS = {
 # complemento di luogo quando "in <paese>" / "a <luogo>" non suona italiano
 _LOCATIVE = {"Canarie": "alle Canarie", "Baleari": "alle Baleari", "Toscana": "in Toscana",
              "Sardegna": "in Sardegna"}
+_LOCATIVE_EN = {"Canarie": "in the Canary Islands", "Baleari": "in the Balearic Islands"}
 
 _BY_NAME = {place[0]: Area(place[1], place[0], place[2]) for place in PLACES}
 
@@ -188,8 +189,11 @@ def common_region(a: Area, b: Area) -> Optional[Area]:
     return None
 
 
-def where(area: Area) -> str:
-    """Complemento di luogo: "in Spagna", "a Lanzarote", "alle Canarie"."""
+def where(area: Area, lang: str = "it") -> str:
+    """Complemento di luogo: "in Spagna", "a Lanzarote", "alle Canarie"; in inglese "in Spain",
+    "in the Canary Islands"."""
+    if lang == "en":
+        return _LOCATIVE_EN.get(area.name) or "in %s" % display_name(area, lang)
     if area.name in _LOCATIVE:
         return _LOCATIVE[area.name]
     return ("in %s" if area.kind == "country" else "a %s") % area.name

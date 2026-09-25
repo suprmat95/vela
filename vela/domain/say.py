@@ -1,4 +1,10 @@
-"""Frasi italiane pronte da leggere (RF-42): nessun markdown, nessun URL."""
+"""Frasi pronte da leggere in italiano e inglese (RF-42): nessun markdown, nessun URL.
+
+Ogni funzione riceve la lingua dell'intento (`"it"` default, `"en"`), direttamente o tramite i
+criteri. I luoghi dei criteri passano da `geo.where`; titoli, destinazioni e hotel del catalogo
+restano come sono (catalogo in locale `it`). Le frasi di errore delle superfici (`say_not_found`,
+`say_unavailable`, `say_error`) restano in italiano: non conoscono l'intento.
+"""
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -8,58 +14,86 @@ from vela.domain.models import Criteria, OrderStatus, Period, ProductSummary, Pr
 
 MONTHS_IT = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
              "settembre", "ottobre", "novembre", "dicembre"]
+MONTHS_EN = ["January", "February", "March", "April", "May", "June", "July", "August",
+             "September", "October", "November", "December"]
 
 
-def fmt_date(d: date) -> str:
-    return "%d %s %d" % (d.day, MONTHS_IT[d.month - 1], d.year)
+def fmt_date(d: date, lang: str = "it") -> str:
+    months = MONTHS_EN if lang == "en" else MONTHS_IT
+    return "%d %s %d" % (d.day, months[d.month - 1], d.year)
 
 
-def on_date(d: date) -> str:
-    """Data con l'articolo: "il 1 ottobre 2026", "l'8 ottobre 2026", "l'11 ottobre 2026"."""
+def on_date(d: date, lang: str = "it") -> str:
+    """Data con l'articolo: "il 1 ottobre 2026", "l'8 ottobre 2026"; in inglese "on 1 October 2026"."""
+    if lang == "en":
+        return "on %s" % fmt_date(d, lang)
     return ("l'%s" if d.day in (8, 11) else "il %s") % fmt_date(d)
 
 
-def fmt_money(value: Decimal) -> str:
+def fmt_money(value: Decimal, lang: str = "it") -> str:
     q = value.quantize(Decimal("0.01"))
+    unit = "euros" if lang == "en" else "euro"
     if q == q.to_integral_value():
-        return "%d euro" % int(q)
-    return format(q, "f").replace(".", ",") + " euro"
+        return "%d %s" % (int(q), unit)
+    number = format(q, "f")
+    return "%s %s" % (number if lang == "en" else number.replace(".", ","), unit)
 
 
-def _people(n: Optional[int]) -> str:
+def _people(n: Optional[int], lang: str = "it") -> str:
     if n is None:
         return ""
+    if lang == "en":
+        return "1 person" if n == 1 else "%d people" % n
     return "1 persona" if n == 1 else "%d persone" % n
 
 
-def _join(parts: list) -> str:
+def _join(parts: list, lang: str = "it") -> str:
     if len(parts) <= 1:
         return "".join(parts)
-    return ", ".join(parts[:-1]) + " e " + parts[-1]
+    return ", ".join(parts[:-1]) + (" and " if lang == "en" else " e ") + parts[-1]
 
 
-def _when(period: Period) -> str:
+def _when(period: Period, lang: str = "it") -> str:
     if period.start == period.end:
-        return on_date(period.start)
+        return on_date(period.start, lang)
+    if lang == "en":
+        return "between %s and %s" % (fmt_date(period.start, lang), fmt_date(period.end, lang))
     return "tra %s e %s" % (on_date(period.start), on_date(period.end))
 
 
 def say_intent_created(c: Criteria) -> str:
-    parts = ["un viaggio di %s" % c.sport if c.sport else "un viaggio"]
+    lang = c.language
+    en = lang == "en"
+    if en:
+        parts = ["a %s trip" % c.sport if c.sport else "a trip"]
+    else:
+        parts = ["un viaggio di %s" % c.sport if c.sport else "un viaggio"]
     if c.area:
-        parts.append(geo.where(c.area))
+        parts.append(geo.where(c.area, lang))
     if c.period:
-        parts.append(_when(c.period))
+        parts.append(_when(c.period, lang))
     if c.pax:
-        parts.append("per %s" % _people(c.pax))
+        parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if c.budget is not None:
-        parts.append("con un budget massimo di %s" % fmt_money(c.budget))
+        parts.append(("with a maximum budget of %s" if en else "con un budget massimo di %s")
+                     % fmt_money(c.budget, lang))
+    if en:
+        return "Got it: %s. I'm looking for the right proposal." % " ".join(parts)
     return "Ho capito: %s. Cerco la proposta giusta." % " ".join(parts)
 
 
-def say_proposal(product: ProductSummary, p: Proposal) -> str:
-    where = " a %s" % product.destination if product.destination else ""
+def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
     hotel = ", hotel %s" % product.hotel if product.hotel else ""
+    if lang == "en":
+        where = " in %s" % product.destination if product.destination else ""
+        if p.start_date == p.end_date:
+            when = on_date(p.start_date, lang)
+        else:
+            when = "from %s to %s" % (fmt_date(p.start_date, lang), fmt_date(p.end_date, lang))
+        return ("I suggest %s%s%s, %s for %s, starting at %s per person. %s Shall I go ahead?"
+                % (product.title, where, hotel, when, _people(p.pax, lang),
+                   fmt_money(p.price_from, lang), p.reason))
+    where = " a %s" % product.destination if product.destination else ""
     if p.start_date == p.end_date:
         when = on_date(p.start_date)
     else:
@@ -69,48 +103,86 @@ def say_proposal(product: ProductSummary, p: Proposal) -> str:
 
 
 _NO_MATCH = {
-    "archived": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
-    "bookable": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
-    "trip": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
-    "rejected": "Hai già scartato tutte le proposte compatibili con la tua richiesta: prova a riformularla.",
-    "sport": "Non trovo nessun viaggio per lo sport che hai chiesto: prova con l'altro sport o riformula la richiesta.",
-    "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
-    "pax": "Non trovo viaggi per il numero di persone indicato: prova a cambiare il numero di persone.",
+    "it": {
+        "archived": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
+        "bookable": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
+        "trip": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
+        "rejected": "Hai già scartato tutte le proposte compatibili con la tua richiesta: prova a riformularla.",
+        "sport": "Non trovo nessun viaggio per lo sport che hai chiesto: prova con l'altro sport o riformula la richiesta.",
+        "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
+        "pax": "Non trovo viaggi per il numero di persone indicato: prova a cambiare il numero di persone.",
+        None: "Non trovo nessun viaggio compatibile: prova a riformulare la richiesta.",
+        "sport_value": "Non trovo nessun viaggio di %s: prova con l'altro sport o riformula la richiesta.",
+        "dates_value": "Non trovo partenze %s: prova con un altro periodo.",
+        "pax_value": "Non trovo viaggi per %s: prova a cambiare il numero di persone.",
+    },
+    "en": {
+        "archived": "Right now I have no bookable trips: please try again later.",
+        "bookable": "Right now I have no bookable trips: please try again later.",
+        "trip": "Right now I have no bookable trips: please try again later.",
+        "rejected": "You have already turned down every proposal that matches your request: try rephrasing it.",
+        "sport": "I can't find any trip for the sport you asked for: try the other sport or rephrase the request.",
+        "dates": "I can't find departures in the period you asked for: try another period.",
+        "pax": "I can't find trips for that number of people: try changing the number of people.",
+        None: "I can't find any matching trip: try rephrasing the request.",
+        "sport_value": "I can't find any %s trip: try the other sport or rephrase the request.",
+        "dates_value": "I can't find departures %s: try another period.",
+        "pax_value": "I can't find trips for %s: try changing the number of people.",
+    },
 }
 
 
 def say_no_match(criterion: str, criteria: Optional[Criteria] = None) -> str:
-    """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore."""
+    """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
+    nella lingua dei criteri."""
     c = criteria or Criteria()
+    texts = _NO_MATCH.get(c.language, _NO_MATCH["it"])
     if criterion == "sport" and c.sport:
-        return ("Non trovo nessun viaggio di %s: prova con l'altro sport o riformula la richiesta."
-                % c.sport)
+        return texts["sport_value"] % c.sport
     if criterion == "dates" and c.period:
-        return "Non trovo partenze %s: prova con un altro periodo." % _when(c.period)
+        return texts["dates_value"] % _when(c.period, c.language)
     if criterion == "pax" and c.pax:
-        return ("Non trovo viaggi per %s: prova a cambiare il numero di persone."
-                % _people(c.pax))
-    return _NO_MATCH.get(criterion, "Non trovo nessun viaggio compatibile: prova a riformulare la richiesta.")
+        return texts["pax_value"] % _people(c.pax, c.language)
+    return texts.get(criterion, texts[None])
 
 
-_ORDINALS = ["secondo", "terzo", "quarto", "quinto", "sesto", "settimo", "ottavo", "nono", "decimo"]
-_FIELD_LABELS = {"first_name": "il nome", "last_name": "il cognome", "email": "l'email", "phone": "il telefono"}
+_ORDINALS = {
+    "it": ["secondo", "terzo", "quarto", "quinto", "sesto", "settimo", "ottavo", "nono", "decimo"],
+    "en": ["second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"],
+}
+_FIELD_LABELS = {
+    "it": {"first_name": "il nome", "last_name": "il cognome", "email": "l'email",
+           "phone": "il telefono"},
+    "en": {"first_name": "the first name", "last_name": "the last name", "email": "the email",
+           "phone": "the phone number"},
+}
 
 
-def _label(field: str) -> str:
+def _label(field: str, lang: str = "it") -> str:
+    labels = _FIELD_LABELS.get(lang, _FIELD_LABELS["it"])
     if field.startswith("participants["):
         index = int(field[len("participants["):field.index("]")])
         leaf = field.split(".")[-1]
-        ordinal = _ORDINALS[index] if index < len(_ORDINALS) else "numero %d" % (index + 2)
-        return "%s del %s partecipante" % (_FIELD_LABELS[leaf], ordinal)
-    return _FIELD_LABELS.get(field, field)
+        ordinals = _ORDINALS.get(lang, _ORDINALS["it"])
+        if lang == "en":
+            ordinal = ordinals[index] if index < len(ordinals) else "number %d" % (index + 2)
+            return "%s of the %s participant" % (labels[leaf], ordinal)
+        ordinal = ordinals[index] if index < len(ordinals) else "numero %d" % (index + 2)
+        return "%s del %s partecipante" % (labels[leaf], ordinal)
+    return labels.get(field, field)
 
 
-def say_missing(missing: list) -> str:
-    return "Per prenotare mi servono ancora: %s." % _join([_label(f) for f in missing])
+def say_missing(missing: list, lang: str = "it") -> str:
+    head = "To book I still need: %s." if lang == "en" else "Per prenotare mi servono ancora: %s."
+    return head % _join([_label(f, lang) for f in missing], lang)
 
 
-def say_accept(total, price_from_total, total_differs: bool) -> str:
+def say_accept(total, price_from_total, total_differs: bool, lang: str = "it") -> str:
+    if lang == "en":
+        head = ("The real total is %s, not the estimated %s. "
+                % (fmt_money(total, lang), fmt_money(price_from_total, lang))) if total_differs else ""
+        return (head + "The total is %s. I'm sending you the payment link by text: as soon as the "
+                "payment arrives, I'll book and give you the code." % fmt_money(total, lang))
     head = ""
     if total_differs:
         head = "Il totale reale è %s, non i %s stimati. " % (fmt_money(total), fmt_money(price_from_total))
@@ -118,17 +190,33 @@ def say_accept(total, price_from_total, total_differs: bool) -> str:
             "arriva, prenoto e ti do il codice." % fmt_money(total))
 
 
-def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str]) -> str:
-    if status == OrderStatus.CONFIRMED:
-        return "La tua prenotazione è confermata, codice %s." % booking_code
-    if status == OrderStatus.AWAITING_PAYMENT:
-        return "L'ordine è in attesa del pagamento: usa il link che ti ho mandato."
-    if status == OrderStatus.PAID_PENDING_BOOKING:
-        return "Pagamento ricevuto, sto completando la prenotazione: richiedi lo stato tra qualche secondo."
-    if status == OrderStatus.BOOKING_FAILED:
-        return ("Il pagamento è arrivato ma la prenotazione non è riuscita: riprovo io, "
-                "e se non ci riesco ti avviso.")
-    return "Il link di pagamento è scaduto: dimmi se vuoi che prepari una nuova proposta."
+_STATUS = {
+    "it": {
+        OrderStatus.CONFIRMED: "La tua prenotazione è confermata, codice %s.",
+        OrderStatus.AWAITING_PAYMENT: "L'ordine è in attesa del pagamento: usa il link che ti ho mandato.",
+        OrderStatus.PAID_PENDING_BOOKING: ("Pagamento ricevuto, sto completando la prenotazione: "
+                                           "richiedi lo stato tra qualche secondo."),
+        OrderStatus.BOOKING_FAILED: ("Il pagamento è arrivato ma la prenotazione non è riuscita: "
+                                     "riprovo io, e se non ci riesco ti avviso."),
+        None: "Il link di pagamento è scaduto: dimmi se vuoi che prepari una nuova proposta.",
+    },
+    "en": {
+        OrderStatus.CONFIRMED: "Your booking is confirmed, code %s.",
+        OrderStatus.AWAITING_PAYMENT: "The order is waiting for payment: use the link I sent you.",
+        OrderStatus.PAID_PENDING_BOOKING: ("Payment received, I'm completing the booking: ask for "
+                                           "the status again in a few seconds."),
+        OrderStatus.BOOKING_FAILED: ("The payment arrived but the booking did not go through: "
+                                     "I'll try again, and if I can't I'll let you know."),
+        None: "The payment link has expired: tell me if you want me to prepare a new proposal.",
+    },
+}
+
+
+def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
+               lang: str = "it") -> str:
+    texts = _STATUS.get(lang, _STATUS["it"])
+    text = texts.get(status, texts[None])
+    return text % booking_code if status == OrderStatus.CONFIRMED else text
 
 
 def say_paid() -> str:
