@@ -34,7 +34,8 @@ INSTRUCTIONS = (
     "and never search or suggest trips yourself. After every tool call, speak the `say` field "
     "to the user verbatim, in the user's language. Never read URLs aloud: when there is a "
     "payment link, tell the user it is in the chat. Call get_proposal right after create_intent "
-    "returns an intent_id."
+    "returns an intent_id. Accepting a proposal puts the order in a queue: the payment link comes "
+    "later from get_order_status."
 )
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
@@ -61,14 +62,17 @@ DESCRIPTIONS = {
         "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
         "first and last name of every other participant. If the result has `missing`, ask the "
         "user only for those details and call accept_proposal again with everything you have: "
-        "calling it again never creates a second order. On success the result has `order_id`, "
-        "the real `total` and `payment_url`: show `payment_url` as a clickable link in the chat "
-        "and never read it aloud." + _VOICE),
+        "calling it again never creates a second order. On success the answer is a wait, not a "
+        "link: the order is `queued` with `order_id`, `position` and `wait_seconds`. Get the "
+        "payment link with get_order_status after the stated wait, or whenever the user asks."
+        + _VOICE),
     "get_order_status": (
-        "Check an order when the user says they paid or asks how it is going. Returns `status` "
-        "(awaiting_payment, paid_pending_booking, confirmed, booking_failed, expired) and, when "
-        "confirmed, `booking_code`. While awaiting_payment it also returns `payment_url` and "
-        "`total`: show the link in the chat again if the user lost it, never read it aloud."
+        "Check an order after the wait stated by accept_proposal, when the user says they paid or "
+        "asks how it is going. Returns `status`: queued (with `position` and `wait_seconds`), "
+        "awaiting_payment (with `payment_url` and the real `total`: show the link in the chat, "
+        "never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
+        "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "
+        "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired."
         + _VOICE),
 }
 

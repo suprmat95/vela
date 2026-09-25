@@ -3,6 +3,8 @@
 Uso: uv run python scripts/mcp_smoke.py https://vela-n506.onrender.com/mcp
 
 Solo per la modalità replay: il "pagamento" è la visita del link /replay/checkout/{order_id}.
+L'accettazione mette l'ordine in coda (M5): lo script interroga `get_order_status` finché il link
+è pronto, lo visita e aspetta la conferma.
 Nessuna chiamata a HofJ né a Stripe; sul server restano un intento e un ordine di prova.
 Richiede Python 3.12 (`uv run`), non il python3 di sistema. Il rifiuto "troppo caro" produce una
 proposta diversa, non necessariamente più economica: l'interpretazione del motivo arriva con M9.
@@ -49,7 +51,10 @@ async def call(client, name: str, args: dict, need: str) -> dict:
 
 
 async def run_flow(client, open_url: Callable[[str], None], expected_base: Optional[str] = None,
-                   attempts: int = 10, delay: float = 1.0) -> dict:
+                   attempts: int = 10, delay: float = 1.0,
+                   tick: Callable[[], None] = lambda: None) -> dict:
+    """`tick` fa avanzare la coda tra un'interrogazione e l'altra: nei test è `worker.drain`,
+    contro un server vero non serve (il worker gira nei suoi thread)."""
     names = {t.name for t in (await client.list_tools()).tools}
     if names != TOOL_NAMES:
         raise SmokeFailure("tool attesi %s, trovati %s" % (sorted(TOOL_NAMES), sorted(names)))
@@ -60,22 +65,30 @@ async def run_flow(client, open_url: Callable[[str], None], expected_base: Optio
     if second["product"]["product_id"] == first["product"]["product_id"]:
         raise SmokeFailure("reject_proposal ha riproposto lo stesso prodotto")
     accepted = await call(client, "accept_proposal",
-                          dict(TRAVELER, proposal_id=second["proposal_id"]), "payment_url")
-    url = accepted["payment_url"]
+                          dict(TRAVELER, proposal_id=second["proposal_id"]), "order_id")
+    order_id = accepted["order_id"]
+    ready = await wait_for(client, order_id, {"awaiting_payment"}, attempts, delay, tick)
+    url = ready["payment_url"]
     if expected_base and not url.startswith(expected_base.rstrip("/") + "/"):
         raise SmokeFailure("il link di pagamento %s non punta a %s: VELA_PUBLIC_URL è impostata?"
                            % (url, expected_base))
     open_url(url)
+    status = await wait_for(client, order_id, {"confirmed"}, attempts, delay, tick)
+    return {"first": first["product"]["title"], "second": second["product"]["title"],
+            "order_id": order_id, "total": ready["total"], "booking_code": status["booking_code"]}
+
+
+async def wait_for(client, order_id: str, wanted: set, attempts: int, delay: float,
+                   tick: Callable[[], None]) -> dict:
     status = {}
     for _ in range(attempts):
-        status = await call(client, "get_order_status", {"order_id": accepted["order_id"]}, "status")
-        if status["status"] == "confirmed":
-            return {"first": first["product"]["title"], "second": second["product"]["title"],
-                    "order_id": accepted["order_id"], "total": accepted["total"],
-                    "booking_code": status["booking_code"]}
+        tick()
+        status = await call(client, "get_order_status", {"order_id": order_id}, "status")
+        if status["status"] in wanted:
+            return status
         await asyncio.sleep(delay)
-    raise SmokeFailure("ordine %s non confermato: stato %s"
-                       % (accepted["order_id"], status.get("status")))
+    raise SmokeFailure("ordine %s non in %s: stato %s"
+                       % (order_id, "/".join(sorted(wanted)), status.get("status")))
 
 
 def open_with_httpx(url: str) -> None:

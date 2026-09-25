@@ -55,14 +55,6 @@ class SayTest(unittest.TestCase):
         self.assertIn("il telefono", s)
         self.assertIn("cognome del secondo partecipante", s)
 
-    def test_accept(self):
-        same = say.say_accept(Decimal("1156"), Decimal("1156"), False)
-        self.assertIn("1156 euro", same)
-        self.assertNotIn("non i", same)
-        differs = say.say_accept(Decimal("1200"), Decimal("1156"), True)
-        self.assertLess(differs.index("1200 euro"), differs.index("link"))
-        self.assertIn("1156 euro", differs)
-
     def test_status(self):
         self.assertIn("R-123456", say.say_status(OrderStatus.CONFIRMED, "R-123456", None))
         self.assertIn("attesa", say.say_status(OrderStatus.AWAITING_PAYMENT, None, None))
@@ -186,8 +178,7 @@ class EnglishTest(unittest.TestCase):
         self.assertIn("last name of the second participant", s)
         self.assertIn(" and ", s)
 
-    def test_accept_and_status(self):
-        self.assertIn("750 euros", say.say_accept(Decimal("750"), Decimal("700"), True, "en"))
+    def test_status_in_both_languages(self):
         for status in OrderStatus:
             with self.subTest(status=status):
                 it = say.say_status(status, "R-1", None)

@@ -6,18 +6,19 @@ iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodo
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Tuple, Union
 
 from vela.domain import geo, say
 from vela.domain.chooser import Choice, choose
 from vela.domain.intent import parse_intent
-from vela.domain.models import (AcceptResponse, Intent, IntentCreated, IntentQuestion,
-                                MissingTravelerData, NoMatch, Order, OrderStatus,
+from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
+                                MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
                                 ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
+from vela.domain.quota import estimated_wait_seconds, purchases_per_window, wait_minutes
 from vela.domain.refine import refine
-from vela.ports.hofj import Customer, HofJPort
+from vela.ports.hofj import HofJPort
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
 from vela.ports.repositories import DuplicateOrder, Repositories
@@ -76,9 +77,22 @@ class Vela:
         if proposal is None:
             raise NotFound("proposal", proposal_id)
         intent = self.repos.intents.get(proposal.intent_id)
+        cancelled = self._cancel_unpaid_order(proposal.id)
         self.repos.rejections.add(Rejection(intent.id, proposal.id, proposal.product_id,
                                             reason or "", self.now()))
-        return self._propose(self._refined(intent, proposal, reason or ""))
+        result = self._propose(self._refined(intent, proposal, reason or ""))
+        if cancelled:   # RF-49
+            return replace(result, say=say.say_cancelled_then(result.say, intent.criteria.language))
+        return result
+
+    def _cancel_unpaid_order(self, proposal_id: str) -> bool:
+        """RF-49: un ordine in coda, in lavorazione o da pagare diventa `cancelled`; il job si
+        ferma al passo successivo. Dopo il pagamento l'ordine non si tocca."""
+        order = self.repos.orders.get_by_proposal(proposal_id)
+        if order is None or order.status not in (OrderStatus.QUEUED, OrderStatus.AWAITING_PAYMENT):
+            return False
+        self.repos.orders.save(replace(order, status=OrderStatus.CANCELLED, updated_at=self.now()))
+        return True
 
     def _refined(self, intent: Intent, proposal: Proposal, reason: str) -> Intent:
         """RF-08: il motivo aggiorna i criteri dell'intento, persistiti prima della nuova scelta."""
@@ -116,10 +130,12 @@ class Vela:
         summary = summary_of(product)
         return ProposalMade(proposal, summary, say.say_proposal(summary, proposal, lang))
 
-    # --- RF-12..16, RNF-03 ---------------------------------------------------
+    # --- RF-12, RF-13, RF-17, RF-19, RF-45, RNF-03 ------------------------------
 
     def accept_proposal(self, proposal_id: str, traveler: Optional[TravelerProfile] = None
-                        ) -> Union[AcceptResponse, MissingTravelerData]:
+                        ) -> Union[OrderQueued, OrderStatusResponse, MissingTravelerData]:
+        """RF-45: mette l'ordine in coda e risponde subito, senza chiamare HofJ né il pagamento.
+        Il carrello e il link li prepara il job d'acquisto (RF-46)."""
         proposal = self.repos.proposals.get(proposal_id)
         if proposal is None:
             raise NotFound("proposal", proposal_id)
@@ -127,54 +143,36 @@ class Vela:
         lang = intent.criteria.language
         existing = self.repos.orders.get_by_proposal(proposal_id)
         if existing is not None:
-            return self._accepted(self._ensure_link(existing), lang)
-        profile = intent.profile.merged_with(traveler or TravelerProfile())
+            return self.get_order_status(existing.id)
+        replaced = self.repos.orders.get_by_replacement(proposal_id)
+        known = intent.profile if replaced is None else intent.profile.merged_with(replaced.traveler)
+        profile = known.merged_with(traveler or TravelerProfile())   # RF-17: dati già dati
         missing = profile.missing_fields(proposal.pax)
         if missing:
             return MissingTravelerData(proposal_id, tuple(missing), say.say_missing(missing, lang))
-        product = self.repos.products.get(proposal.product_id)
-        itinerary_id = self.hofj.create_itinerary(product, proposal.start_date, proposal.pax, 1,
-                                                  proposal.currency)
-        d = self.defaults
-        self.hofj.set_customer(itinerary_id, Customer(
-            profile.first_name, profile.last_name, profile.email, profile.phone,
-            d.street1, d.postal_code, d.city, d.region, d.country_code))
-        names = [(profile.first_name, profile.last_name)] + [
-            (p.first_name, p.last_name) for p in profile.participants]
-        slots = self.hofj.get_pax(itinerary_id)
-        filled = [replace(slot, first_name=names[i][0], last_name=names[i][1])
-                  if i < len(names) else slot for i, slot in enumerate(slots)]
-        self.hofj.set_pax(itinerary_id, filled)
-        itinerary = self.hofj.get_itinerary(itinerary_id)
         now = self.now()
-        order = Order(self.new_id(), proposal.id, intent.id, product.id,
-                      OrderStatus.AWAITING_PAYMENT, proposal.pax, proposal.price_from,
-                      itinerary.total, itinerary.currency, profile, now, now,
-                      itinerary_id=itinerary.id)
+        enqueued_at = replaced.enqueued_at if replaced and replaced.enqueued_at else now   # RF-17
+        order = Order(self.new_id(), proposal.id, intent.id, proposal.product_id, OrderStatus.QUEUED,
+                      proposal.pax, proposal.price_from, None, proposal.currency, profile, now, now,
+                      enqueued_at=enqueued_at)
         try:
             self.repos.orders.add(order)
         except DuplicateOrder:
-            return self._accepted(self.repos.orders.get_by_proposal(proposal_id), lang)
-        return self._accepted(self._ensure_link(order), lang)
+            return self.get_order_status(self.repos.orders.get_by_proposal(proposal_id).id)
+        self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
+                                    enqueued_at, now))
+        position, wait = self._queue_position(order.id)
+        return OrderQueued(order.id, OrderStatus.QUEUED, position, wait,
+                           say.say_queued(wait_minutes(wait or 0), lang))
 
-    def _ensure_link(self, order: Order) -> Order:
-        """Crea il link di pagamento se manca (RF-18). Se il fornitore fallisce, `PaymentsError`
-        risale alla superficie e l'ordine resta senza link: un nuovo accept riprova."""
-        if order.payment_url or order.status != OrderStatus.AWAITING_PAYMENT:
-            return order
-        product = self.repos.products.get(order.product_id)
-        link = self.payments.create_payment_link(order, product.title)
-        order = replace(order, payment_url=link.url, payment_ref=link.reference,
-                        updated_at=self.now())
-        self.repos.orders.save(order)
-        return order
-
-    def _accepted(self, order: Order, lang: str = "it") -> AcceptResponse:
-        estimate = order.price_from * order.pax
-        differs = order.total != estimate
-        return AcceptResponse(order.id, order.status, order.total, order.currency, estimate,
-                              differs, order.payment_url or "",
-                              say.say_accept(order.total, estimate, differs, lang))
+    def _queue_position(self, order_id: str) -> Tuple[Optional[int], Optional[int]]:
+        """RF-48: posizione tra gli acquisti in attesa e attesa stimata in secondi."""
+        position = self.repos.jobs.queued_purchase_position(order_id)
+        if position is None:
+            return None, None
+        snap = self.repos.quota.snapshot(self.now())
+        per_window = purchases_per_window(snap["effective_limit"], snap["reserve"])
+        return position, estimated_wait_seconds(position, per_window)
 
     # --- RF-25, RF-26 --------------------------------------------------------
 
@@ -182,8 +180,36 @@ class Vela:
         order = self.orders.get(order_id)
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
-        payable = order.status == OrderStatus.AWAITING_PAYMENT
-        return OrderStatusResponse(order.id, order.status, order.booking_code, order.total,
-                                   order.currency, order.payment_url if payable else None,
-                                   say.say_status(order.status, order.booking_code,
-                                                  order.failure_reason, lang, order.total))
+        status = order.status
+        if status == OrderStatus.QUEUED:
+            position, wait = self._queue_position(order.id)
+            minutes = None if wait is None else wait_minutes(wait)
+            return OrderStatusResponse(order.id, status, say.say_status(status, None, None, lang,
+                                                                        minutes=minutes),
+                                       position=position, wait_seconds=wait)
+        if status == OrderStatus.REPLACED and order.replacement_proposal_id:
+            proposal = self._made(self.repos.proposals.get(order.replacement_proposal_id), lang=lang)
+            return OrderStatusResponse(order.id, status,
+                                       say.say_replaced(proposal.product, proposal.proposal, lang),
+                                       proposal=proposal)
+        estimate = order.price_from * order.pax
+        payable = status == OrderStatus.AWAITING_PAYMENT
+        if payable:
+            self._check_payment_now(order.id)
+        differs = None if order.total is None else order.total != estimate
+        return OrderStatusResponse(
+            order.id, status,
+            say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
+                           price_from_total=estimate),
+            total=order.total, currency=order.currency if order.total is not None else None,
+            price_from_total=estimate if order.total is not None else None, total_differs=differs,
+            payment_url=order.payment_url if payable else None, booking_code=order.booking_code,
+            failure_reason=order.failure_reason
+            if status in (OrderStatus.FAILED, OrderStatus.BOOKING_FAILED) else None)
+
+    def _check_payment_now(self, order_id: str) -> None:
+        """RF-20: chi chiede lo stato anticipa la verifica del pagamento (nessuna chiamata qui)."""
+        job = self.repos.jobs.active_for_order(order_id, JobKind.PAYMENT_CHECK)
+        now = self.now()
+        if job is not None and job.status == JobStatus.PENDING and job.run_after > now:
+            self.repos.jobs.save(replace(job, run_after=now))

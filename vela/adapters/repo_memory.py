@@ -90,6 +90,9 @@ class MemoryOrders:
                 return o
         return None
 
+    def get_by_replacement(self, proposal_id: str) -> Optional[Order]:
+        return next((o for o in self._items.values() if o.replacement_proposal_id == proposal_id), None)
+
     def save(self, order: Order) -> None:
         with self._lock:
             self._items[order.id] = order

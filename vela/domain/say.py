@@ -177,19 +177,6 @@ def say_missing(missing: list, lang: str = "it") -> str:
     return head % _join([_label(f, lang) for f in missing], lang)
 
 
-def say_accept(total, price_from_total, total_differs: bool, lang: str = "it") -> str:
-    if lang == "en":
-        head = ("The real total is %s, not the estimated %s. "
-                % (fmt_money(total, lang), fmt_money(price_from_total, lang))) if total_differs else ""
-        return (head + "The total is %s. I'm sending you the payment link by text: as soon as the "
-                "payment arrives, I'll book and give you the code." % fmt_money(total, lang))
-    head = ""
-    if total_differs:
-        head = "Il totale reale è %s, non i %s stimati. " % (fmt_money(total), fmt_money(price_from_total))
-    return (head + "Il totale è %s. Ti mando il link di pagamento per testo: appena il pagamento "
-            "arriva, prenoto e ti do il codice." % fmt_money(total))
-
-
 _STATUS = {
     "it": {
         OrderStatus.CONFIRMED: "La tua prenotazione è confermata, codice %s.",

@@ -3,7 +3,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from support import inline_worker, NOW, FakeHofJ, StubPayments, make_product
+from support import NOW, FakeHofJ, StubPayments, inline_worker, make_product
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.app import create_app
 from vela.config import Settings

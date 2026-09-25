@@ -189,6 +189,11 @@ class PostgresOrders:
             m = conn.execute(select(orders_t).where(orders_t.c.proposal_id == proposal_id)).mappings().first()
         return None if m is None else _order(m)
 
+    def get_by_replacement(self, proposal_id: str) -> Optional[Order]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(orders_t).where(orders_t.c.replacement_proposal_id == proposal_id)).mappings().first()
+        return None if m is None else _order(m)
+
     def save(self, order: Order) -> None:
         values = {k: v for k, v in _order_row(order).items() if k != "id"}
         with self.engine.begin() as conn:

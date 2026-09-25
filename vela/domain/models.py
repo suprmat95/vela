@@ -349,22 +349,17 @@ class NoMatch:
 
 
 @dataclass(frozen=True)
-class AcceptResponse:
+class OrderQueued:
+    """RF-45, RF-19: risposta dell'accettazione. Nessun link: arriva con `get_order_status`."""
     order_id: str
     status: OrderStatus
-    total: Decimal
-    currency: str
-    price_from_total: Decimal
-    total_differs: bool
-    payment_url: str
+    position: Optional[int]
+    wait_seconds: Optional[int]
     say: str
 
     def to_dict(self) -> dict:
-        return {"order_id": self.order_id, "status": self.status.value,
-                "total": money_str(self.total), "currency": self.currency,
-                "price_from_total": money_str(self.price_from_total),
-                "total_differs": self.total_differs, "payment_url": self.payment_url,
-                "say": self.say}
+        return {"order_id": self.order_id, "status": self.status.value, "position": self.position,
+                "wait_seconds": self.wait_seconds, "say": self.say}
 
 
 @dataclass(frozen=True)
@@ -379,16 +374,31 @@ class MissingTravelerData:
 
 @dataclass(frozen=True)
 class OrderStatusResponse:
+    """RF-25, RF-39: stessi campi per ogni stato, `None` quando non pertinenti."""
     order_id: str
     status: OrderStatus
-    booking_code: Optional[str]
-    total: Decimal
-    currency: str
-    payment_url: Optional[str]   # solo per awaiting_payment (RF-19)
     say: str
+    position: Optional[int] = None             # queued (RF-48)
+    wait_seconds: Optional[int] = None         # queued (RF-48)
+    total: Optional[Decimal] = None            # importo reale, dopo il job d'acquisto
+    currency: Optional[str] = None
+    price_from_total: Optional[Decimal] = None
+    total_differs: Optional[bool] = None       # RF-16
+    payment_url: Optional[str] = None          # solo awaiting_payment (RF-19)
+    booking_code: Optional[str] = None         # confirmed
+    failure_reason: Optional[str] = None       # failed, booking_failed
+    proposal: Optional["ProposalMade"] = None  # replaced (RF-17)
 
     def to_dict(self) -> dict:
-        return {"order_id": self.order_id, "status": self.status.value,
-                "booking_code": self.booking_code, "total": money_str(self.total),
-                "currency": self.currency, "payment_url": self.payment_url, "say": self.say}
+        return {"order_id": self.order_id, "status": self.status.value, "position": self.position,
+                "wait_seconds": self.wait_seconds,
+                "total": None if self.total is None else money_str(self.total),
+                "currency": self.currency,
+                "price_from_total": None if self.price_from_total is None else money_str(self.price_from_total),
+                "total_differs": self.total_differs, "payment_url": self.payment_url,
+                "booking_code": self.booking_code, "failure_reason": self.failure_reason,
+                "proposal_changed": self.proposal is not None,
+                "proposal": None if self.proposal is None else self.proposal.to_dict(),
+                "say": self.say}
+
 

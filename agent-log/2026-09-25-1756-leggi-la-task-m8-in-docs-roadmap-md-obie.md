@@ -3020,3 +3020,77 @@ Lo script fa già polling dello stato. Basta che il test, dopo la visita del che
 Tutto verde: 661 test. Faccio il commit del Task 14.
 
 - 🔧 Bash: Commit Task 14
+
+Passo al blocco più grande: **Task 10 + 17 insieme**. Accettazione asincrona, rinuncia che annulla, nuovo contratto di `get_order_status`, e superfici MCP/REST. Leggo il codice attuale.
+
+- 🔧 Bash: Read accept, reject, status and response models
+
+- 🔧 Bash: Read REST and MCP surfaces
+
+- 🔧 Bash: Map accept-related tests and usages
+
+- 🔧 Bash: Read accept and status tests to rewrite
+
+Riscrivo le parti dei test del caso d'uso che riguardano accettazione, rinuncia e stato secondo il nuovo contratto. Le vecchie sezioni sincrone vengono sostituite.
+
+- 🔧 Bash: Rewrite accept/reject/status usecase tests and run them
+
+I test falliscono perché `OrderQueued` non esiste. Implemento modelli e casi d'uso.
+
+- 🔧 Bash: Replace AcceptResponse with OrderQueued and extend status response
+
+- 🔧 Bash: Verify only intended lines removed from models
+
+Solo le righe previste. Aggiungo `OrderRepository.get_by_replacement`, che serve per ereditare la posizione in coda, con il suo test di contratto. Poi riscrivo i casi d'uso.
+
+- 🔧 Bash: Add get_by_replacement to repos and contract
+
+- 🔧 Bash: Check MemoryOrders after insertion
+
+Ora riscrivo i casi d'uso: accettazione, stato e rinuncia.
+
+- 🔧 Bash: Implement async accept, status and cancelling reject
+
+- 🔧 Bash: Tidy imports and run usecase tests
+
+Il problema è `inline_worker`: importa `vela.app`, che importa la superficie REST, che usa ancora `AcceptResponse`. È il momento delle superfici (Task 17). Aggiorno REST e MCP.
+
+- 🔧 Bash: Update REST and MCP surfaces, run usecase tests
+
+- 🔧 Bash: Reuse replaced order traveler and rerun tests
+
+Il dominio è verde. Ora aggiorno i test delle superfici al nuovo contratto, partendo da REST.
+
+- 🔧 Bash: Read failing REST tests
+
+- 🔧 Bash: Read last REST test
+
+- 🔧 Bash: Rewrite REST tests for queued accept
+
+- 🔧 Bash: Remove meaningless assertion and tidy imports
+
+- 🔧 Bash: Inspect remaining app and MCP test failures
+
+- 🔧 Bash: Update MCP tool tests for queued accept
+
+Sto aggiornando i test delle superfici MCP al nuovo contratto asincrono: manca solo un import, poi restano quelli del replay e dello smoke test.
+
+- 🔧 Bash: Fix import; read app replay checkout tests
+
+- 🔧 Bash: Adapt app replay tests to the job-produced link
+
+- 🔧 Bash: Relax drain count and check smoke tests
+
+- 🔧 Bash: Read smoke script header and remaining smoke tests
+
+- 🔧 Bash: Update smoke script to async flow and rerun suite
+
+Suite verde: 675 test. `say_accept` non è più usata da nessuna parte, perché l'accettazione non dà più il totale né il link. La tolgo insieme ai suoi test.
+
+- 🔧 Bash: Find say_accept usages
+
+- 🔧 Bash: Remove unused say_accept and run suite
+
+Tutto verde: 674 test. Faccio il commit del blocco Task 10 + 17.
+
+- 🔧 Bash: Commit Task 10 and 17

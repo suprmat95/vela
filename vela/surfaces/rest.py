@@ -2,7 +2,9 @@
 
 Bearer statico ``VELA_API_TOKEN``; senza token configurato ogni endpoint risponde 503. Ogni
 risposta di successo è ``{"outcome": ..., **to_dict()}``: gli esiti previsti (domanda, niente di
-compatibile, dati mancanti) sono 200, non errori. Gli errori sono RFC 7807
+compatibile, dati mancanti) sono 200, non errori. L'accettazione è asincrona (RF-45): 202
+``order_queued`` con ``Location`` verso lo stato dell'ordine; un doppio accept risponde 200 con lo
+stato attuale. Gli errori sono RFC 7807
 (``vela/surfaces/problems.py``). Ordine dei controlli: token, validazione, dominio.
 """
 import hmac
@@ -13,18 +15,17 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, StringConstraints
 
-from vela.domain.models import (AcceptResponse, IntentCreated, IntentQuestion,
-                                MissingTravelerData, NoMatch, OrderStatusResponse, ProposalMade,
-                                TravelerProfile, profile_from_dict)
+from vela.domain.models import (IntentCreated, IntentQuestion, MissingTravelerData, NoMatch,
+                                OrderQueued, OrderStatusResponse, ProposalMade, TravelerProfile,
+                                profile_from_dict)
 from vela.domain.usecases import Vela
 from vela.surfaces.problems import domain_unavailable, rest_not_configured, unauthorized
 
 bearer = HTTPBearer(auto_error=False)
 
 OUTCOMES = {IntentCreated: "intent_created", IntentQuestion: "question",
-            ProposalMade: "proposal", NoMatch: "no_match", AcceptResponse: "order",
+            ProposalMade: "proposal", NoMatch: "no_match", OrderQueued: "order_queued",
             MissingTravelerData: "missing_traveler_data", OrderStatusResponse: "order_status"}
-CREATED = (IntentCreated, AcceptResponse)
 
 
 def require_token(request: Request,
@@ -44,8 +45,13 @@ def get_vela(request: Request) -> Vela:
 
 
 def reply(result) -> JSONResponse:
-    status = 201 if isinstance(result, CREATED) else 200
-    return JSONResponse({"outcome": OUTCOMES[type(result)], **result.to_dict()}, status_code=status)
+    body = {"outcome": OUTCOMES[type(result)], **result.to_dict()}
+    if isinstance(result, IntentCreated):
+        return JSONResponse(body, status_code=201)
+    if isinstance(result, OrderQueued):     # RF-45: accettato, lavoro asincrono
+        return JSONResponse(body, status_code=202,
+                            headers={"Location": "/v1/orders/%s" % result.order_id})
+    return JSONResponse(body, status_code=200)
 
 
 class ParticipantIn(BaseModel):

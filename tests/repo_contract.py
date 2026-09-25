@@ -151,6 +151,8 @@ class RepositoryContract:
         self.repos.orders.save(replaced)
         self.assertEqual(self.repos.orders.get("o1"), replaced)
         self.assertEqual(self.repos.orders.ids_with_status(OrderStatus.REPLACED), ["o1"])
+        self.assertEqual(self.repos.orders.get_by_replacement("p9"), replaced)
+        self.assertIsNone(self.repos.orders.get_by_replacement("p1"))
 
     # job (RF-27, RF-50)
     def seed_orders(self, n):

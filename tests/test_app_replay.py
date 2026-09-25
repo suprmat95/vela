@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import inline_worker, NOW
+from support import NOW, inline_worker
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -39,10 +39,13 @@ def make_app(preload=False):
     return app, vela
 
 
-def paid_order(vela):
+def ready_order(app, vela):
+    """Ordine accettato e passato dal job d'acquisto: lo stato ha il link di pagamento."""
     iid = vela.create_intent(INTENT, FULL).intent_id
     proposal = vela.get_proposal(iid)
-    return vela.accept_proposal(proposal.proposal.id)
+    oid = vela.accept_proposal(proposal.proposal.id).order_id
+    app.state.worker.drain()
+    return vela.get_order_status(oid)
 
 
 class BootstrapTest(unittest.TestCase):
@@ -61,7 +64,7 @@ class BootstrapTest(unittest.TestCase):
     def test_resumes_pending_bookings(self):
         """RF-27: un ordine pagato senza job di prenotazione (processo morto prima di accodarlo)."""
         app, vela = make_app(preload=True)
-        oid = paid_order(vela).order_id
+        oid = ready_order(app, vela).order_id
         order = vela.repos.orders.get(oid)
         vela.repos.orders.save(replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi"))
         with TestClient(app):
@@ -81,7 +84,7 @@ class CheckoutTest(unittest.TestCase):
     def test_checkout_marks_paid_and_books(self):
         app, vela = make_app(preload=True)
         with TestClient(app) as c:
-            accepted = paid_order(vela)
+            accepted = ready_order(app, vela)
             self.assertTrue(accepted.payment_url.startswith("http://test/replay/checkout/"))
             r = c.get(urlparse(accepted.payment_url).path)
             self.assertEqual(r.status_code, 200)
@@ -89,7 +92,7 @@ class CheckoutTest(unittest.TestCase):
             self.assertEqual(body["order_id"], accepted.order_id)
             self.assertEqual(body["status"], "paid_pending_booking")
             self.assertIn("Pagamento", body["say"])
-            self.assertEqual(app.state.worker.drain(), 1)          # il job di prenotazione
+            app.state.worker.drain()                               # il job di prenotazione
             status = vela.get_order_status(accepted.order_id)
             self.assertEqual(status.status, OrderStatus.CONFIRMED)
             self.assertRegex(status.booking_code, r"^R-\d{6}$")
@@ -97,7 +100,7 @@ class CheckoutTest(unittest.TestCase):
     def test_second_visit_has_no_effect(self):
         app, vela = make_app(preload=True)
         with TestClient(app) as c:
-            accepted = paid_order(vela)
+            accepted = ready_order(app, vela)
             path = urlparse(accepted.payment_url).path
             c.get(path)
             app.state.worker.drain()

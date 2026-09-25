@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from fastapi.testclient import TestClient
 from mcp import Client
 
-from support import inline_worker, NOW
+from support import NOW, inline_worker
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -51,10 +51,10 @@ class SmokeFlowTest(unittest.IsolatedAsyncioTestCase):
             def open_url(url):
                 opened.append(url)
                 self.assertEqual(tc.get(urlparse(url).path).status_code, 200)
-                app.state.worker.drain()        # la prenotazione passa dal worker
 
             async with Client(app.state.mcp) as client:
-                summary = await mcp_smoke.run_flow(client, open_url, expected_base="http://test", delay=0)
+                summary = await mcp_smoke.run_flow(client, open_url, expected_base="http://test", delay=0,
+                                                   tick=app.state.worker.drain)
         self.assertRegex(summary["booking_code"], r"^R-\d{6}$")
         self.assertNotEqual(summary["first"], summary["second"])
         self.assertEqual(len(opened), 1)
@@ -65,7 +65,8 @@ class SmokeFlowTest(unittest.IsolatedAsyncioTestCase):
             async with Client(app.state.mcp) as client:
                 with self.assertRaises(mcp_smoke.SmokeFailure) as ctx:
                     await mcp_smoke.run_flow(client, lambda url: None,
-                                             expected_base="https://elsewhere.example", delay=0)
+                                             expected_base="https://elsewhere.example", delay=0,
+                                             tick=app.state.worker.drain)
         self.assertIn("VELA_PUBLIC_URL", str(ctx.exception))
 
     async def test_empty_catalog_fails_at_get_proposal(self):
@@ -79,8 +80,16 @@ class SmokeFlowTest(unittest.IsolatedAsyncioTestCase):
         app = make_app()
         async with Client(app.state.mcp) as client:
             with self.assertRaises(mcp_smoke.SmokeFailure) as ctx:
-                await mcp_smoke.run_flow(client, lambda url: None, attempts=2, delay=0)
+                await mcp_smoke.run_flow(client, lambda url: None, attempts=2, delay=0,
+                                         tick=app.state.worker.drain)
         self.assertIn("awaiting_payment", str(ctx.exception))
+
+    async def test_link_never_ready_is_reported(self):
+        app = make_app()
+        async with Client(app.state.mcp) as client:
+            with self.assertRaises(mcp_smoke.SmokeFailure) as ctx:
+                await mcp_smoke.run_flow(client, lambda url: None, attempts=2, delay=0)
+        self.assertIn("queued", str(ctx.exception))
 
 
 class SmokeCliTest(unittest.TestCase):
