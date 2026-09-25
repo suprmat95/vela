@@ -80,3 +80,27 @@ const bytes = Buffer.from("p_g_1d27qron:matteodospina@gmail.com", "utf8");
 new Uint8Array(memory.buffer).set(bytes, 0);
 console.log((seal(0, bytes.length) >>> 0).toString(16).padStart(8, "0"));
 ```
+
+## Chiave 4 — "The stream" (+75m)
+
+**Traccia.** `/api/stream` consegna un carattere alla volta e non si fa mettere fretta. Se
+prendi più di quanto offre, dimentica tutto ciò che hai raccolto. La chiave è ciò che
+assembli arrivando in fondo.
+
+**Risposta.** `VELA-66EP-D57R` (14 caratteri; l'ultima risposta con `done: true` la
+restituisce anche per intero nel campo `key`).
+
+**Come.** Endpoint `https://vela-dev-challenge.web.app/api/stream`, 2026-09-25.
+
+- Senza `Authorization` → 401 `missing bearer token`. Con le chiavi precedenti come
+  bearer → 401 `Wrong number of segments`: vuole un JWT. Il token giusto è quello di
+  sessione del sito della challenge (formato `vela1.<payload>.<firma>`, payload con
+  email, nome e `exp`), lo stesso che il frontend manda alle sue `/api/...`.
+- Ogni `GET` autenticata risponde `{"data": {"done", "index", "total": 14, "char",
+  "remainingInWindow", "windowResetsInMs": 10000}}`. La prima chiamata dà `index 0` con
+  `remainingInWindow 2`: la finestra è di 10 s e offre 3 richieste, oltre le quali lo stato
+  viene azzerato.
+- Ritmo usato, prudente: una richiesta ogni `windowResetsInMs + 1 s` (11 s), sequenziale,
+  con cookie jar e log grezzo di ogni risposta. 15 richieste in ~2,5 minuti, nessun reset.
+- La quindicesima chiamata (dopo l'indice 13) risponde `index 14, char null, done true,
+  key "VELA-66EP-D57R"`.

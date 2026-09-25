@@ -145,3 +145,78 @@ Nessun import, memoria da 1 pagina, `seal(i32,i32)->i32`: è un hash FNV-1a con 
 Deterministico e sensibile all'input. Annoto la chiave 3 nel documento e committo.
 
 - 🔧 Bash: Append the key 3 notes to the easter egg doc and commit
+
+Chiave 3: **`1f500cd8`**.
+
+**Come l'ho ottenuta**
+
+- Il wasm è sul sito della challenge, a `https://vela-dev-challenge.web.app/api/seal.wasm`. È un modulo da 143 byte senza import: esporta `memory` e `seal(i32, i32) -> i32`.
+- Il codice è un hash FNV-1a a 32 bit con un finalizer finale. Non serviva reimplementarlo: l'ho eseguito con Node 20 scrivendo `p_g_1d27qron:matteodospina@gmail.com` in memoria all'offset 0 e chiamando `seal(0, len)`.
+- Controlli fatti: stesso input due volte dà lo stesso valore, uno spazio in più o un'altra chiave cambiano il risultato.
+
+Se la piattaforma dovesse rifiutarla perché la chiave 2 corretta era l'altra candidata, la variante `p_g_np3dww01:matteodospina@gmail.com` dà `29814149`.
+
+Tutto annotato in `docs/easter-eggs.md` e committato. Incollami la traccia della chiave 4 quando si sblocca.
+
+## Utente 13:32
+
+ok passa alla successiva: The stream
++75m
+/api/stream hands out one character at a time and will not be hurried. Take more than it offers and it forgets everything you have collected so far. The key is what you assemble when you reach the end.
+
+## Agente 13:33
+
+Spike anche questo. Propongo l'approccio e aspetto il tuo OK, perché qui un errore (prendere troppo) azzera il progresso:
+
+- **Prima chiamata esplorativa, una sola**: `GET https://vela-dev-challenge.web.app/api/stream` con curl salvando body e header. Guardo cosa restituisce (un carattere? JSON con posizione/cursore?), se imposta un cookie di sessione, e se ci sono header tipo `Retry-After`, `X-Next-After`, `Cache-Control` che dicono quanto aspettare.
+- **Poi uno script Python usa-e-getta** che chiama in loop rispettando il ritmo: riusa cookie e cursore se presenti, aspetta il tempo indicato (o parte da 1 s e sale se la risposta segnala "troppo presto"), accoda ogni carattere e si ferma quando la risposta segnala la fine. Log su file in scratchpad di ogni risposta grezza, così se "dimentica" capisco cosa ha innescato il reset.
+- **Regola di prudenza**: mai richieste in parallelo, mai `Range`/parametri tipo `count`, e se un reset succede lo fermo e ti riporto cosa l'ha causato prima di riprovare.
+- **Alla fine**: chiave annotata in `docs/easter-eggs.md` con ritmo, header osservati e commit.
+
+Tempo stimato: sconosciuto finché non vedo il ritmo (se sono 1 carattere ogni pochi secondi per 32-64 caratteri, qualche minuto). Procedo con la prima chiamata?
+
+## Utente 13:34
+
+si
+
+## Agente 13:34
+
+- 🔧 Bash: Make a single exploratory request to the stream endpoint and show headers, body and cookies
+
+Il endpoint vuole un bearer token. Nella catena "ogni chiave apre la successiva", quindi provo la chiave 3 come token (e, se fallisce, la chiave 2).
+
+- 🔧 Bash: Try the stream endpoint with key 3 and then key 2 as bearer token
+
+- 🔧 AskUserQuestion
+
+Ecco come passarmi il token senza che lo veda:
+
+1. Apri la pagina della challenge in Chrome, loggato, e apri DevTools (Cmd+Alt+I).
+2. Vai su **Network**, filtra per `api`, ricarica la pagina o apri una traccia, clicca una richiesta verso `/api/...` e nella sezione **Request Headers** copia il valore dopo `Authorization: Bearer ` (senza la parola Bearer).
+   In alternativa, in **Console** incolla questo, che cerca il token Firebase e lo copia negli appunti:
+   ```js
+   (async()=>{const q=indexedDB.open('firebaseLocalStorageDb');q.onsuccess=()=>{const s=q.result.transaction('firebaseLocalStorage').objectStore('firebaseLocalStorage').getAll();s.onsuccess=()=>{const t=s.result.map(r=>r.value?.stsTokenManager?.accessToken).find(Boolean);if(t){copy(t);console.log('token copiato, '+t.length+' caratteri')}else console.log('token non trovato')}}})()
+   ```
+3. Con il token negli appunti, digita qui nella sessione:
+   ```
+   ! pbpaste > /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-key-reserch/de2a16b3-344c-4915-b3ff-4690991e804d/scratchpad/stream/token.txt
+   ```
+   Il file resta in scratchpad, fuori dal repo, e lo script lo legge da lì.
+
+Quando è fatto, dimmi "ok" e faccio la prima chiamata autenticata. Nota che il token Firebase scade dopo un'ora: se lo stream è lento potrei chiederti di rinnovarlo.
+
+## Utente 13:36
+
+vela1.<redacted>.<redacted>
+
+## Agente 13:37
+
+Il token è finito in chat (e quindi nel transcript), ma scade solo a fine ottobre 2026 ed è legato al tuo account della challenge: lo salvo nel file e procedo senza più stamparlo.
+
+- 🔧 Bash: Save the token to a private scratchpad file and make the first authenticated stream request
+
+- 🔧 Bash: Run the paced stream collector loop and show its output
+
+Chiave assemblata e confermata dal server stesso: `VELA-66EP-D57R`. Annoto e committo.
+
+- 🔧 Bash: Append the key 4 notes to the easter egg doc and commit
