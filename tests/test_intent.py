@@ -80,6 +80,71 @@ class PeriodTest(unittest.TestCase):
     def test_none(self):
         self.assertIsNone(parse_period("padel in Spagna", TODAY))
 
+    def span(self, text, today=TODAY):
+        p = parse_period(text, today)
+        return (p.start, p.end) if p else None
+
+    def test_ranges(self):
+        cases = [
+            ("dal 10 al 14 ottobre", (date(2026, 10, 10), date(2026, 10, 14))),
+            ("20-23 novembre", (date(2026, 11, 20), date(2026, 11, 23))),
+            ("from 10 to 14 October", (date(2026, 10, 10), date(2026, 10, 14))),
+            ("from the 3rd to the 7th of December", (date(2026, 12, 3), date(2026, 12, 7))),
+            ("tra il 5 e l'8 dicembre", (date(2026, 12, 5), date(2026, 12, 8))),
+            ("between 14 and 20 November", (date(2026, 11, 14), date(2026, 11, 20))),
+            ("October 10-12", (date(2026, 10, 10), date(2026, 10, 12))),
+            ("oct 10 to nov 2", (date(2026, 10, 10), date(2026, 11, 2))),
+            ("dal 10/10 al 13/10", (date(2026, 10, 10), date(2026, 10, 13))),
+            ("2026-11-07 - 2026-11-09", (date(2026, 11, 7), date(2026, 11, 9))),
+            ("dal 28 ottobre al 3 novembre", (date(2026, 10, 28), date(2026, 11, 3))),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.span(text), expected)
+
+    def test_range_across_new_year(self):
+        self.assertEqual(self.span("dal 28 dicembre al 3 gennaio"),
+                         (date(2026, 12, 28), date(2027, 1, 3)))
+
+    def test_past_range_is_next_year(self):
+        self.assertEqual(self.span("dal 1 al 5 giugno"), (date(2027, 6, 1), date(2027, 6, 5)))
+
+    def test_impossible_range_falls_through(self):
+        p = parse_period("dal 30 al 31 febbraio", TODAY)
+        self.assertEqual(p.label, "febbraio")
+
+    def test_abbreviations_and_ordinals(self):
+        self.assertEqual(self.span("il 12 ott"), (date(2026, 10, 12), date(2026, 10, 12)))
+        self.assertEqual(self.span("the 10th of October"), (date(2026, 10, 10), date(2026, 10, 10)))
+        self.assertEqual(self.span("Oct 3rd"), (date(2026, 10, 3), date(2026, 10, 3)))
+
+    def test_abbreviation_only_next_to_a_day(self):
+        self.assertEqual(parse_period("Lloret de Mar a ottobre", TODAY).label, "ottobre")
+        self.assertIsNone(parse_period("padel a Lloret de Mar", TODAY))
+
+    def test_month_first_is_not_people(self):
+        p = parse_period("October 2 people", TODAY)
+        self.assertEqual((p.start, p.end), (date(2026, 10, 1), date(2026, 10, 31)))
+
+    def test_month_parts(self):
+        self.assertEqual(self.span("a inizio ottobre"), (date(2026, 10, 1), date(2026, 10, 10)))
+        self.assertEqual(self.span("a metà marzo"), (date(2027, 3, 11), date(2027, 3, 20)))
+        self.assertEqual(self.span("a fine ottobre"), (date(2026, 10, 21), date(2026, 10, 31)))
+        self.assertEqual(self.span("early November"), (date(2026, 11, 1), date(2026, 11, 10)))
+        self.assertEqual(self.span("mid-October"), (date(2026, 10, 11), date(2026, 10, 20)))
+        self.assertEqual(self.span("late February"), (date(2027, 2, 21), date(2027, 2, 28)))
+
+    def test_fine_settimana_is_still_weekend(self):
+        self.assertEqual(parse_period("fine settimana", TODAY).label, "fine settimana")
+
+    def test_next_month(self):
+        self.assertEqual(self.span("il mese prossimo"), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual(self.span("next month", date(2026, 12, 10)),
+                         (date(2027, 1, 1), date(2027, 1, 31)))
+
+    def test_impossible_single_date_falls_through(self):
+        self.assertEqual(parse_period("il 31/02 a marzo", TODAY).label, "marzo")
+
 
 class PaxTest(unittest.TestCase):
     def test_forms(self):
