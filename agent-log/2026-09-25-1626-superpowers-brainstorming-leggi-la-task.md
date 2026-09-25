@@ -277,3 +277,31 @@ Tutti falliscono perché `/mcp` risponde 404, che è il motivo giusto. `test_oth
 - 🔧 Bash: Mount MCP routes and lifespan in app.py, run HTTP tests
 
 - 🔧 Bash: Capture SDK warnings in tests; run suite
+
+La suite è verde: 300 test, 11 saltati. I log di alembic c'erano già prima di M3. Commit del Task 3.
+
+- 🔧 Bash: Commit task 3
+
+Task 4, fase RED: test dello smoke script.
+
+- 🔧 Bash: Write smoke tests and watch them fail
+
+- 🔧 Bash: Write smoke script from plan and run its tests
+
+- 🔧 Bash: Capture usage stderr; find who configures logging
+
+- 🔧 Bash: Search MCP SDK for logging configuration
+
+- 🔧 Bash: Read the SDK logging configuration
+
+Questa scelta non è coperta dal piano, quindi mi fermo e chiedo. Il resto del Task 4 è pronto (7 test verdi), ma non ancora committato.
+
+- 🔧 AskUserQuestion
+
+Aggiungo prima il test di regressione in `tests/test_mcp_tools.py`, poi la correzione.
+
+- 🔧 Bash: Add root logging regression test, watch it fail
+
+- 🔧 Bash: Set MCP log level to WARNING and rerun suites
+
+- 🔧 Bash: Commit smoke script, then the logging fix with docs
