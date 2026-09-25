@@ -269,3 +269,20 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m11-chooser-v2.md` in TDD.
 |---|---|---|
 | Verifica delle proprietà | Spostando il filtro `rejected` in testa falliscono `test_rejected_is_reported_only_when_compatible_products_were_all_rejected`, `test_failed_criterion_is_the_first_emptying_filter` e le proprietà su tutti gli 11 intenti della tabella; `test_filter_order` no, perché controlla la costante `FILTERS` e non l'ordine dei `steps` | Il piano citava `test_filter_order` tra quelli che dovevano fallire: correzione del piano, nessun cambio di codice |
 | Bytecode dopo una mutazione | Dopo un ripristino con `git checkout` nello stesso secondo e con la stessa dimensione del file, Python riusa il `.pyc` della versione mutata: va cancellato `vela/domain/__pycache__/chooser.cpython-312.pyc` | L'invalidazione dei `.pyc` usa mtime in secondi e dimensione; evita falsi rossi dopo le prove di mutazione |
+
+## 2026-09-25 — M9: parser completo, rifiuto con motivo, fallback Haiku
+
+Origine: intervista sulla macro task M9, piano in `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Criteri dopo un rifiuto | Nuovo `IntentRepository.update_criteria(intent_id, criteria)` in memoria e Postgres, nessuna migrazione | L'intento mostra sempre i criteri correnti; `criteria` è già una colonna JSON |
+| "Più a sud" / "più a nord" | Tabelle statiche `SOUTH_OF` / `NORTH_OF` in `vela/domain/geo.py` (luogo o paese → aree ordinate, si prende la prima) | La fixture non ha coordinate; `geohierarchy` contiene solo paese e id GeoNames (per Nicosia con paese sbagliato) |
+| "Più vicino" | Non gestito: motivo non riconosciuto, esclude solo il prodotto | "Vicino" a cosa è ambiguo senza la posizione del viaggiatore |
+| Fallback LLM | SDK `anthropic` (dipendenza nuova), `claude-haiku-4-5-20251001`, strumento forzato `record_criteria`, timeout 5 s, 1 retry, dietro la porta `IntentExtractor` | Output strutturato ed errori tipizzati; la roadmap prevedeva l'SDK |
+| Quando si chiama Haiku | Solo se il parser non trova né sport né periodo e `ANTHROPIC_API_KEY` è presente | Lettura letterale di RF-03; poche chiamate |
+| Combinazione parser/Haiku | Haiku sovrascrive i campi che restituisce validi; valori invalidi scartati; la lingua resta quella del parser | Scelta dell'utente; la validazione evita valori impossibili |
+| "Troppo caro" | Budget = 80% di prezzo × persone della proposta rifiutata, mai sopra il budget attuale; una cifra nel motivo vince | Scelta dell'utente (sconto percentuale) |
+| Frasi inglesi | `say_*`, domande di RF-04 e motivazione del chooser in it/en secondo `criteria.language` | Rimandate da M2 a M9 |
+| Regioni | Aggiunte a mano (Andalusia, Catalogna, Costa del Sol, Comunità Valenciana, Lombardia, Veneto, Emilia-Romagna, Occitania); nel chooser v1 valgono come corrispondenza di paese | Il catalogo ha città; M11 raffina |
+| Documenti | Design e microtask in un solo file in `docs/plans/`, senza spec separata | Scelta dell'utente, come M0-M2 |
