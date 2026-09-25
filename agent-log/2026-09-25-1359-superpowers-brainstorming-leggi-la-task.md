@@ -140,3 +140,13 @@ T5 chiusa. T6: Alembic con migrazione vuota, test prima.
 - 🔧 Bash: Create Alembic config, env, template and empty initial migration; run tests and CLI
 
 - 🔧 Bash: Commit T6 and record it in the ledger
+
+T6 chiusa. T7: Dockerfile ed entrypoint, test sui file prima, poi build e smoke.
+
+- 🔧 Bash: Write failing tests for Dockerfile, entrypoint and dockerignore
+
+- 🔧 Bash: Write Dockerfile, entrypoint and dockerignore, run tests and build the image
+
+- 🔧 Bash: Rebuild image, smoke test container with SQLite and check failure without DATABASE_URL
+
+- 🔧 Bash: Commit T7, ledger the manual verification and record completion
