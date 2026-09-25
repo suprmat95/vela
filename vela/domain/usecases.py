@@ -4,17 +4,23 @@ Dipende solo dalle porte: repository, HofJ e pagamenti sono iniettati. `now` e `
 iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodotto (RF-10).
 """
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Callable, Optional, Union
 
 from vela.domain import say
 from vela.domain.chooser import Choice, choose
 from vela.domain.intent import parse_intent
-from vela.domain.models import (Intent, IntentCreated, IntentQuestion, NoMatch, Product,
-                                ProductSummary, Proposal, ProposalMade, Rejection, TravelerProfile)
-from vela.ports.hofj import HofJPort
+from vela.domain.models import (AcceptResponse, Intent, IntentCreated, IntentQuestion,
+                                MissingTravelerData, NoMatch, Order, OrderStatus,
+                                OrderStatusResponse, Product, ProductSummary, Proposal,
+                                ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
+from vela.domain.orders import NotFound, OrderService
+from vela.ports.hofj import Customer, HofJPort
 from vela.ports.payments import PaymentsPort
-from vela.ports.repositories import Repositories
+from vela.ports.repositories import DuplicateOrder, Repositories
+
+__all__ = ["Vela", "NotFound", "utcnow", "random_id", "summary_of"]
 
 
 def utcnow() -> datetime:
@@ -23,13 +29,6 @@ def utcnow() -> datetime:
 
 def random_id() -> str:
     return str(uuid.uuid4())
-
-
-class NotFound(Exception):
-    def __init__(self, kind: str, id: str):
-        super().__init__("%s %s non trovato" % (kind, id))
-        self.kind = kind
-        self.id = id
 
 
 def summary_of(product: Product) -> ProductSummary:
@@ -43,9 +42,10 @@ class Vela:
         self.repos = repos
         self.hofj = hofj
         self.payments = payments
-        self.defaults = defaults
         self.now = now or utcnow
         self.new_id = new_id or random_id
+        self.defaults = defaults or TravelerDefaults()
+        self.orders = OrderService(repos, hofj, self.now)
 
     # --- RF-01..05 -----------------------------------------------------------
 
@@ -97,3 +97,61 @@ class Vela:
         product = product or self.repos.products.get(proposal.product_id)
         summary = summary_of(product)
         return ProposalMade(proposal, summary, say.say_proposal(summary, proposal))
+
+    # --- RF-12..16, RNF-03 ---------------------------------------------------
+
+    def accept_proposal(self, proposal_id: str, traveler: Optional[TravelerProfile] = None
+                        ) -> Union[AcceptResponse, MissingTravelerData]:
+        proposal = self.repos.proposals.get(proposal_id)
+        if proposal is None:
+            raise NotFound("proposal", proposal_id)
+        existing = self.repos.orders.get_by_proposal(proposal_id)
+        if existing is not None:
+            return self._accepted(existing)
+        intent = self.repos.intents.get(proposal.intent_id)
+        profile = intent.profile.merged_with(traveler or TravelerProfile())
+        missing = profile.missing_fields(proposal.pax)
+        if missing:
+            return MissingTravelerData(proposal_id, tuple(missing), say.say_missing(missing))
+        product = self.repos.products.get(proposal.product_id)
+        itinerary = self.hofj.create_itinerary(product, proposal.start_date, proposal.pax, 1,
+                                               proposal.currency)
+        d = self.defaults
+        self.hofj.set_customer(itinerary.id, Customer(
+            profile.first_name, profile.last_name, profile.email, profile.phone,
+            d.street1, d.postal_code, d.city, d.region, d.country_code))
+        names = [(profile.first_name, profile.last_name)] + [
+            (p.first_name, p.last_name) for p in profile.participants]
+        slots = self.hofj.get_pax(itinerary.id)
+        filled = [replace(slot, first_name=names[i][0], last_name=names[i][1])
+                  if i < len(names) else slot for i, slot in enumerate(slots)]
+        self.hofj.set_pax(itinerary.id, filled)
+        now = self.now()
+        order = Order(self.new_id(), proposal.id, intent.id, product.id,
+                      OrderStatus.AWAITING_PAYMENT, proposal.pax, proposal.price_from,
+                      itinerary.total, itinerary.currency, profile, now, now,
+                      itinerary_id=itinerary.id)
+        try:
+            self.repos.orders.add(order)
+        except DuplicateOrder:
+            return self._accepted(self.repos.orders.get_by_proposal(proposal_id))
+        link = self.payments.create_payment_link(order)
+        order = replace(order, payment_url=link.url, payment_ref=link.reference,
+                        updated_at=self.now())
+        self.repos.orders.save(order)
+        return self._accepted(order)
+
+    def _accepted(self, order: Order) -> AcceptResponse:
+        estimate = order.price_from * order.pax
+        differs = order.total != estimate
+        return AcceptResponse(order.id, order.status, order.total, order.currency, estimate,
+                              differs, order.payment_url or "",
+                              say.say_accept(order.total, estimate, differs))
+
+    # --- RF-25, RF-26 --------------------------------------------------------
+
+    def get_order_status(self, order_id: str) -> OrderStatusResponse:
+        order = self.orders.get(order_id)
+        return OrderStatusResponse(order.id, order.status, order.booking_code,
+                                   say.say_status(order.status, order.booking_code,
+                                                  order.failure_reason))

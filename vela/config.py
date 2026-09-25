@@ -51,3 +51,9 @@ class Settings:
             anthropic_api_key=env.get("ANTHROPIC_API_KEY"),
             vela_public_url=env.get("VELA_PUBLIC_URL"),
         )
+
+
+from vela.domain.models import TravelerDefaults  # noqa: E402
+
+# RF-13: default dichiarati nella configurazione, non chiesti al viaggiatore.
+DEFAULT_TRAVELER = TravelerDefaults()

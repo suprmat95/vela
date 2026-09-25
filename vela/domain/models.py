@@ -234,6 +234,17 @@ class Rejection:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class TravelerDefaults:
+    """Campi richiesti da HofJ ma non chiesti al viaggiatore (RF-13): vincolo del prototipo,
+    documentato in ARCHITECTURE.md (M15)."""
+    street1: str = "Via del Prototipo 1"
+    postal_code: str = "20100"
+    city: str = "Milano"
+    region: str = "MI"
+    country_code: str = "IT"
+
+
 # --- risposte dei casi d'uso (RF-39, RF-42) -----------------------------------
 
 @dataclass(frozen=True)

@@ -269,3 +269,21 @@ Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il c
 **Task 9 (adapter replay e pagamento finto)**.
 
 - 🔧 Bash: TDD Task 9, commit
+
+**Task 10 (accettazione, ordini, prenotazione in background)**. Prima la macchina a stati degli ordini e il runner.
+
+- 🔧 Bash: TDD the order service and booking runner
+
+Ora i test di accettazione. Li aggiungo prima di toccare il dominio.
+
+- 🔧 Bash: Append acceptance tests and watch them fail
+
+Fallisce per le parti mancanti. Aggiungo `TravelerDefaults`, `DEFAULT_TRAVELER` e i due casi d'uso nuovi.
+
+- 🔧 Bash: Implement acceptance and order status, run suite
+
+- 🔧 Bash: Check usecases header and look for noisy test output
+
+Il docstring del modulo `usecases.py` si è perso quando ho sostituito gli import. Lo rimetto e poi faccio il commit.
+
+- 🔧 Bash: Restore usecases docstring and commit Task 10
