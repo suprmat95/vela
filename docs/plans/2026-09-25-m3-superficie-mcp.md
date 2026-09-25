@@ -386,8 +386,10 @@ class ErrorsTest(McpCase):
         self.assertEqual(await self.error_text("get_order_status", order_id="x"), say.say_unavailable())
 
     async def test_invalid_arguments_are_a_tool_error(self):
-        r = await self.call("create_intent")
+        with self.assertLogs(level="INFO") as logs:
+            r = await self.call("create_intent")
         self.assertTrue(r.is_error)
+        self.assertIn("rejected arguments", "\n".join(logs.output))
 
 
 class AllowedHostsTest(unittest.TestCase):

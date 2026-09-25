@@ -239,3 +239,31 @@ Task 1, fase RED: aggiungo i test delle frasi d'errore.
 - 🔧 Bash: Add say tests and watch them fail
 
 - 🔧 Bash: Check failure reason, implement, rerun
+
+- 🔧 Bash: Commit task 1
+
+Task 2, fase RED: scrivo `tests/test_mcp_tools.py` copiandolo dal piano.
+
+- 🔧 Bash: Extract MCP tools test from plan, watch it fail
+
+You've hit your session limit · resets 6pm (Europe/Rome)
+
+## Utente 17:04
+
+contina
+
+## Agente 17:04
+
+- 🔧 Bash: Confirm failure reason, implement mcp.py, rerun
+
+Il RED è quello atteso: il modulo `vela.surfaces.mcp` non esiste. L'estrazione del codice dal piano ha fallito per un marcatore sbagliato; lo correggo.
+
+- 🔧 Bash: Write mcp.py from the plan and run tool tests
+
+I 15 test passano. Resta una riga di log dell'SDK ("rejected arguments") che sporca l'output: nel test degli argomenti non validi la catturo con `assertLogs`, così diventa anche una verifica.
+
+- 🔧 Bash: Capture SDK log in test; run file and full suite
+
+La suite è verde: 289 test, 11 saltati. Allineo il piano al test modificato e faccio il commit.
+
+- 🔧 Bash: Sync plan with test change and commit task 2
