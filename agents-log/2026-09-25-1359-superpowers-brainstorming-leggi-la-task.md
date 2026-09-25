@@ -386,3 +386,108 @@ Task 3 approvato (un minor: `max(1, …)` per input 0, previsto dal piano). Ledg
 - 🔧 Agent: Implement Task 4: CLI main
 
 Task 4 in esecuzione; attendo l'implementer.
+
+## Utente 14:40
+
+<task-notification>
+<task-id>a3d26bb4899110cfd</task-id>
+<tool-use-id>toolu_01WqsB7Bxs8oeLRg97VRJrB9</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a3d26bb4899110cfd.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 4: CLI main" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>---
+
+**Status:** DONE
+
+**Commit created:**
+- `43d190a` - Add record_catalog CLI with dry-run and build-only modes
+
+**Test summary:**
+- Ran 61 tests: all OK (53 existing + 8 new MainTest cases)
+- TDD evidence: RED (AttributeError on missing main) → GREEN (all tests pass)
+
+**Manual dry-run output (last line):**
+```
+chiamate previste: 2 liste + 92 dettagli + 2 sync quota = 96 autenticate, in 2 finestre da 60 s (stima: 123 prodotti, 92 non archiviati)
+```
+
+**Concerns:** None. All code transcribed exactly from brief, all 9 tests included and passing, manual dry-run produces expected output, no changes to api_explore.py.
+
+**Report file:** `/Users/matteodospina/orca/workspaces/vela/task-m1/.superpowers/sdd/2026-09-25-m1-fixture-catalogo/task-4-report.md`</result>
+<usage><subagent_tokens>50891</subagent_tokens><tool_uses>13</tool_uses><duration_ms>98055</duration_ms></usage>
+</task-notification>
+
+## Agente 14:40
+
+Task 4 implementato (commit `43d190a`, 61/61 test, dry-run stampa 96 chiamate). Review diff e dispatch.
+
+- 🔧 Bash: Build task 4 review diff and update the ledger
+
+- 🔧 Agent: Review Task 4 (spec + quality)
+
+Review del Task 4 in corso; attendo l'esito.
+
+## Utente 14:45
+
+<task-notification>
+<task-id>a82dfcf7f7eface45</task-id>
+<tool-use-id>toolu_01JK91BvdB3goyDZRcbCUnwW</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a82dfcf7f7eface45.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 4 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ Spec compliant.
+
+Verified against the brief's binding constraints:
+- stdlib-only, Python 3.7-compatible; no new imports added beyond `argparse`/`json`/`os`/`sys` already present at the top of `scripts/record_catalog.py` (unchanged, pre-existing).
+- `scripts/api_explore.py` untouched — confirmed via `git show 43d190a --name-only`: only `scripts/record_catalog.py`, `tests/test_record_catalog.py`, and auto-generated `agents-log/` files changed.
+- Key handling: `scripts/record_catalog.py:141` reads `api_key` only via `KEY_ENVS = ("HOFJ_API_KEY", "API_BEAR_KEY")` (pre-existing constant, line 26), never printed — the only `print` calls (lines 149-151, 157, 164-166) never reference `api_key`; `test_full_run_records_and_writes_fixture` (diff, `tests/test_record_catalog.py`) explicitly asserts `"SECRET-KEY"` is absent from stdout.
+- `HOFJ_BRAND` optional: `brand = os.environ.get(BRAND_ENV) or None` (record_catalog.py:132) → unset or empty produces `None`, which `build_catalog` writes as `brand: null` (confirmed in unchanged `build_catalog`, `record_catalog.py:99` area).
+- No network calls in tests: every `MainTest` case mocks `urllib.request.urlopen` (via `FakeHofj` or `AssertionError` side effects).
+- CLI surface matches spec exactly: `--raw-dir` required, `--out` default `DEFAULT_OUT` (= `fixtures/catalog.json`, pre-existing constant), `--dry-run`, `--build-only`; dry-run estimate falls back to `EXPECTED_TOTAL=123`/`EXPECTED_ACTIVE=92` (pre-existing constants at record_catalog.py:29-30) when no fixture exists, else reads counts from the existing fixture (`expected_counts`).
+- `--build-only` skips recording entirely (`if not args.build_only:` guard) and rebuilds via `build_catalog`/`write_catalog` without touching the network.
+- Non-empty `--raw-dir` refused only for actual recording (not for `--dry-run` or `--build-only`), per `record_catalog.py:135-137`.
+- All required `sys.exit(...)` exit paths present and ordered correctly (raw-dir check → key check → record → build), and no partial fixture is ever written: `write_catalog` is only reached after `build_catalog` succeeds, and the STOP/quota path exits before reaching the build/write stage at all.
+
+Byte-level diff check: I extracted the brief's mandated Step-1 and Step-3 code blocks and diffed them programmatically against the implemented code — the only difference in each case is a single trailing newline (file ends with `\n`, brief's fenced block doesn't). The implementation is a literal, exact transcription of the brief-mandated code and tests, satisfying "il codice e i test sono forniti per intero nel brief: l'implementazione deve corrispondere a quel testo."
+
+Named-risk checks performed (per review scope):
+- `api_explore.Client.__init__` (`scripts/api_explore.py:102-113`): creates `out_dir` unconditionally via `os.makedirs(out_dir, exist_ok=True)` even in dry-run, and resolves `self.opener = opener or urllib.request.urlopen` — confirms why `mock.patch("urllib.request.urlopen", ...)` in the tests works, and why `--dry-run` with a fresh raw-dir path still succeeds (dir gets created but stays empty since dry-run never calls `_save`).
+- `record`/`call_plan` signatures (`scripts/record_catalog.py`, unchanged region): `record(client, locale=LOCALE, brand=None, expected=(EXPECTED_TOTAL, EXPECTED_ACTIVE))` and `call_plan(n_calls, cap=...)` match exactly how `main()` calls them.
+
+### Strengths
+- Implementation is a verbatim transcription of the mandated brief code (verified programmatically), which is exactly what this brief requires given Task 6 depends on exact strings.
+- Correct ordering of validation (`raw-dir` emptiness → API key presence → record → build/write) prevents partial-fixture writes on every failure path.
+- Test suite (9 methods) exercises every edge case named in the requirements: no-key dry-run, fixture-based estimate reuse, missing key, fallback key, non-empty dir refusal, full run with brand + key non-leak, build-only, quota exceeded (STOP + raw kept), incomplete raw (no fixture written).
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- `task-4-report.md:112` ("61 total tests pass (53 existing + 8 new)") is internally inconsistent: the diff adds 9 test methods (`grep -c "def test_" tests/test_record_catalog.py` on the diff's new block), not 8, so "53 + 8 = 61" doesn't reconcile with 9 added tests. Also, the GREEN evidence block (`task-4-report.md:61-74`) is a `tail -10` excerpt that only shows 8 of the 9 new test names (`test_fallback_key_env_is_accepted` is cut off) — truncated evidence, not a code defect, but the report's arithmetic doesn't hold up under inspection and should be corrected for future trust in TDD evidence.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The diff is an exact, verified transcription of the brief-mandated `expected_counts`/`main`/`__main__` code and its test suite, all binding constraints (stdlib-only, key handling, brand-null, no-network tests, exact CLI surface and exit messages, no partial-fixture writes) are satisfied and cross-checked against the unchanged `api_explore.Client`/`record`/`call_plan` code they depend on. Only issue found is a self-reported arithmetic slip in the report's TDD evidence section, which does not affect the shipped code.</result>
+<usage><subagent_tokens>69513</subagent_tokens><tool_uses>14</tool_uses><duration_ms>227270</duration_ms></usage>
+</task-notification>
+
+## Agente 14:45
+
+Task 4 approvato (unico minor: aritmetica nel report dell'implementer, non nel codice: 52 + 9 = 61 test). Ledger e dispatch del Task 5.
+
+- 🔧 Bash: Record task 4 completion in the ledger
+
+- 🔧 Agent: Implement Task 5: fixture test e docs
+
+Nel frattempo, verifiche di ambiente per il Task 6 che non dipendono dal Task 5: presenza del file `.env` (solo esistenza, senza aprirlo), versione di Python e bundle TLS.
+
+- 🔧 Bash: Check .env existence (not content), Python version and TLS CA paths for the real recording
+
+- 🔧 Bash: Locate the main checkout, check .env existence there, and TLS CA file availability
