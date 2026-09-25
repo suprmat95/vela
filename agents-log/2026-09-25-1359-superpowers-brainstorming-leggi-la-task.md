@@ -294,3 +294,95 @@ Task 2 approvato senza rilievi. Ledger e dispatch del Task 3.
 - 🔧 Agent: Implement Task 3: record e call_plan
 
 Task 3 in esecuzione; attendo l'implementer.
+
+## Utente 14:35
+
+<task-notification>
+<task-id>a8b9a651da8234e29</task-id>
+<tool-use-id>toolu_01RhWchSTagEuMeA8Q4dCv36</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a8b9a651da8234e29.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 3: record e call_plan" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Perfect! All tests pass. Now here is my final report:
+
+---
+
+**Status:** DONE
+
+**Commit created:** `2bed85e` - "Record product list and extended details within the HofJ quota"
+
+**Test summary:** All 52 tests pass (52/52). 9 new tests added: 8 in RecordTest, 1 in CallPlanTest.
+
+**Concerns:** None. Implementation matches the brief exactly, all tests pass, no modifications to existing code from Tasks 1-2.
+
+**Report file:** `/Users/matteodospina/orca/workspaces/vela/task-m1/.superpowers/sdd/2026-09-25-m1-fixture-catalogo/task-3-report.md`</result>
+<usage><subagent_tokens>52523</subagent_tokens><tool_uses>13</tool_uses><duration_ms>111957</duration_ms></usage>
+</task-notification>
+
+## Agente 14:35
+
+Task 3 implementato (commit `2bed85e`, 52/52 test). Diff di review e dispatch del reviewer.
+
+- 🔧 Bash: Build task 3 review diff and update the ledger
+
+- 🔧 Agent: Review Task 3 (spec + quality)
+
+Review del Task 3 in corso; attendo l'esito.
+
+## Utente 14:38
+
+<task-notification>
+<task-id>a3ca0e43c714688f5</task-id>
+<tool-use-id>toolu_01GbvckQepjthGNGFQ6QaxsS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a3ca0e43c714688f5.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 3 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>No trailing whitespace issues. Review complete.
+
+### Spec Compliance
+✅ Spec compliant. No missing, extra, or misunderstood requirements found.
+
+Verified point-by-point against the global constraints:
+- Solo stdlib / Python 3.7, `scripts/api_explore.py` untouched — confirmed by diff stat (only `scripts/record_catalog.py` and `tests/test_record_catalog.py` changed).
+- Key never logged/written by `record` — `record()` (scripts/record_catalog.py:114-141) never touches `client.api_key`; the only log call is `client.log("%d prodotti in lista, %d non archiviati...")` (line 136-137), path/params only, consistent with `test_key_never_written_or_logged`.
+- No network calls in automated tests — dry-run branch (scripts/record_catalog.py:114-122) returns before any `client.get` reaches the network (verified `Client.get`, scripts/api_explore.py:120-125: when `dry_run`, it appends to `self.planned` and returns immediately, never calling `self.opener`).
+- Quota/pacing entirely delegated: every call in `record()` goes through `client.get` (scripts/record_catalog.py:126, 139), none bypass it; pacing logic (`_ensure_budget`, `QuotaGuard.sync`/`wait_seconds`, 429 handling) is unchanged, existing code in `api_explore.py:130-165`.
+- List pagination: `GET /v1/products` with `limit=PAGE_LIMIT(100), locale, brand` (params filtered of `None` by `Client.get`, api_explore.py:121), follows `meta.nextCursor` until falsy (record_catalog.py:125-134). Non-200 → `RuntimeError` including HTTP status (line 128-130).
+- Detail calls only for `archived` false (line 135, 138-140); a failed detail does not stop the loop — confirmed structurally: `Client.get` only raises on `429` (api_explore.py:139-140), any other status (e.g., 502 from `broken_ids`) returns normally and is silently discarded by `record()`, so the `for product in active` loop continues unimpeded.
+- Dry-run planning: `pages = max(1, ceil(total/PAGE_LIMIT))` list calls, `active` detail calls, returns `None` (record_catalog.py:115-122) — matches `test_dry_run_plans_from_expected_counts`.
+- `call_plan(n, cap)` = `(ceil(n/(cap-1)), n + windows)` (record_catalog.py:144-148), verified against `CallPlanTest` cases by hand: `call_plan(94,90)=(2,96)`, `call_plan(89,90)=(1,90)`, `call_plan(1,90)=(1,2)` — all correct.
+- Exact transcription requirement: I diffed the brief's two fenced code blocks against the actual file contents programmatically (Python string comparison) — both `record`/`call_plan` in `scripts/record_catalog.py` and the new test classes in `tests/test_record_catalog.py` match the brief **character-for-character**, including docstrings, comments, and blank-line spacing.
+
+### Strengths
+- Faithful, verified-exact transcription of the brief's prescribed implementation and tests — no drift in signatures, docstrings, or logic.
+- Correctly relies on existing `Client.get`/`QuotaGuard` behavior rather than reimplementing pacing or error handling, keeping `record()` a thin orchestration layer.
+- Test suite covers all the named edge cases: pagination + active-only details, brand omission, key non-leakage, cross-window pacing, 429 mid-run, non-fatal detail failure, fatal list failure, and dry-run planning.
+- No trailing whitespace or stray formatting introduced (checked via `git diff` grep for `^\+.* +$` — no matches).
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- scripts/record_catalog.py:116 and :147 — both `pages = max(1, -(-total // PAGE_LIMIT))` and `windows = max(1, -(-n_calls // (cap - 1)))` floor at 1 even when the input is `0`, which diverges slightly from the literal constraint prose (`ceil(total/100)`, `ceil(n/(cap-1))`, which would be `0` for `n=0`). This is inherited verbatim from the brief's own Step 3 code (plan-mandated, not an implementer deviation) and is never exercised by real inputs (`EXPECTED_TOTAL=123`, `EXPECTED_ACTIVE=92`, and `call_plan` is only ever called with `n_calls&gt;0` in tests), so it has no observable effect today — flagging only for awareness if `call_plan(0, ...)` is ever invoked by Task 4.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The diff is a byte-for-byte match to the brief's mandated code and tests, all named spec behaviors (pagination, active-only detail fetch, non-fatal detail errors, fatal list errors, quota pacing via existing `Client`/`QuotaGuard`, dry-run planning, key non-leakage) are correctly implemented and covered by tests, and no scope creep or structural issues were found.</result>
+<usage><subagent_tokens>73045</subagent_tokens><tool_uses>9</tool_uses><duration_ms>172416</duration_ms></usage>
+</task-notification>
+
+## Agente 14:38
+
+Task 3 approvato (un minor: `max(1, …)` per input 0, previsto dal piano). Ledger e dispatch del Task 4 (CLI).
+
+- 🔧 Bash: Record task 3 completion in the ledger
+
+- 🔧 Agent: Implement Task 4: CLI main
+
+Task 4 in esecuzione; attendo l'implementer.

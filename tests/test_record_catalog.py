@@ -324,5 +324,94 @@ class CallPlanTest(unittest.TestCase):
         self.assertEqual(record_catalog.call_plan(1, cap=90), (1, 2))
 
 
+def run_main(argv, env):
+    """Esegue main con un ambiente controllato e cattura stdout."""
+    out = io.StringIO()
+    with mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
+        record_catalog.main(argv)
+    return out.getvalue()
+
+
+class MainTest(unittest.TestCase):
+    def setUp(self):
+        self.raw = os.path.join(tempfile.mkdtemp(), "raw")
+        self.out = os.path.join(tempfile.mkdtemp(), "fixtures", "catalog.json")
+
+    def test_dry_run_needs_no_key_and_makes_no_calls(self):
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("rete usata")):
+            text = run_main(["--raw-dir", self.raw, "--out", self.out, "--dry-run"], {})
+        self.assertIn("2 liste + 92 dettagli + 2 sync quota = 96 autenticate", text)
+        self.assertIn("2 finestre", text)
+        self.assertEqual(os.listdir(self.raw), [])
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_dry_run_uses_existing_fixture_counts(self):
+        record_catalog.write_catalog({"products": [{} for _ in range(10)],
+                                      "details": {str(i): {} for i in range(4)}}, self.out)
+        text = run_main(["--raw-dir", self.raw, "--out", self.out, "--dry-run"], {})
+        self.assertIn("1 liste + 4 dettagli + 1 sync quota = 6 autenticate", text)
+
+    def test_missing_key_exits_before_any_call(self):
+        with self.assertRaises(SystemExit) as ctx:
+            run_main(["--raw-dir", self.raw, "--out", self.out], {})
+        self.assertIn("HOFJ_API_KEY", str(ctx.exception))
+        self.assertFalse(os.path.exists(self.out))
+
+    def test_fallback_key_env_is_accepted(self):
+        server = FakeHofj([item(1)])
+        with mock.patch("urllib.request.urlopen", server):
+            run_main(["--raw-dir", self.raw, "--out", self.out], {"API_BEAR_KEY": "SECRET-KEY"})
+        self.assertEqual(server.calls[1][2]["Authorization"], "Bearer SECRET-KEY")
+
+    def test_non_empty_raw_dir_is_refused(self):
+        os.makedirs(self.raw)
+        with open(os.path.join(self.raw, "001-GET-x.json"), "w") as fh:
+            fh.write("{}")
+        with self.assertRaises(SystemExit) as ctx:
+            run_main(["--raw-dir", self.raw, "--out", self.out], {"HOFJ_API_KEY": "SECRET-KEY"})
+        self.assertIn("non è vuota", str(ctx.exception))
+
+    def test_full_run_records_and_writes_fixture(self):
+        server = FakeHofj([item(1), item(2, archived=True), item(3)])
+        with mock.patch("urllib.request.urlopen", server):
+            text = run_main(["--raw-dir", self.raw, "--out", self.out],
+                            {"HOFJ_API_KEY": "SECRET-KEY", "HOFJ_BRAND": "weebora.com"})
+        self.assertIn("richieste autenticate eseguite: 4", text)  # quota + lista + 2 dettagli
+        self.assertIn("3 prodotti, 2 dettagli", text)
+        with open(self.out, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        self.assertEqual(catalog["brand"], "weebora.com")
+        self.assertEqual(sorted(catalog["details"]), ["1", "3"])
+        self.assertNotIn("SECRET-KEY", text)
+
+    def test_build_only_rebuilds_without_calls(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"])
+        calls_before = len(server.calls)
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("rete usata")):
+            text = run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only"], {})
+        self.assertEqual(len(server.calls), calls_before)
+        self.assertIn("1 prodotti, 1 dettagli", text)
+        self.assertTrue(os.path.exists(self.out))
+
+    def test_quota_exceeded_exits_with_stop_and_keeps_raw(self):
+        server = FakeHofj([item(i) for i in range(1, 6)], limit=3)
+        with mock.patch("urllib.request.urlopen", server):
+            with self.assertRaises(SystemExit) as ctx:
+                run_main(["--raw-dir", self.raw, "--out", self.out], {"HOFJ_API_KEY": "SECRET-KEY"})
+        self.assertIn("STOP", str(ctx.exception))
+        self.assertFalse(os.path.exists(self.out))
+        self.assertGreaterEqual(len(os.listdir(self.raw)), 2)
+
+    def test_incomplete_raw_does_not_write_fixture(self):
+        server = FakeHofj([item(1), item(2)], broken_ids=["2"])
+        with mock.patch("urllib.request.urlopen", server):
+            with self.assertRaises(SystemExit) as ctx:
+                run_main(["--raw-dir", self.raw, "--out", self.out], {"HOFJ_API_KEY": "SECRET-KEY"})
+        self.assertIn("fixture non scritta", str(ctx.exception))
+        self.assertIn("2", str(ctx.exception))
+        self.assertFalse(os.path.exists(self.out))
+
+
 if __name__ == "__main__":
     unittest.main()

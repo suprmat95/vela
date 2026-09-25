@@ -156,3 +156,65 @@ def call_plan(n_calls, cap=api_explore.CAP_PER_WINDOW):
     di /v1/quota per finestra: ogni finestra ospita al più cap - 1 chiamate utili."""
     windows = max(1, -(-n_calls // (cap - 1)))
     return windows, n_calls + windows
+
+
+def expected_counts(out_path):
+    """Stime per il dry-run: dalla fixture esistente se c'è, altrimenti da docs/api/counts.md."""
+    try:
+        with open(out_path, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        return len(catalog["products"]), len(catalog["details"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return EXPECTED_TOTAL, EXPECTED_ACTIVE
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--raw-dir", required=True,
+                    help="cartella FUORI dal repo per le risposte grezze (nuova o vuota)")
+    ap.add_argument("--out", default=DEFAULT_OUT,
+                    help="fixture da scrivere (default fixtures/catalog.json)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="stampa le chiamate previste senza eseguirle")
+    ap.add_argument("--build-only", action="store_true",
+                    help="ricostruisce la fixture da --raw-dir senza chiamate")
+    args = ap.parse_args(argv)
+    brand = os.environ.get(BRAND_ENV) or None
+
+    if not args.build_only:
+        if not args.dry_run and os.path.isdir(args.raw_dir) and os.listdir(args.raw_dir):
+            sys.exit("--raw-dir %s non è vuota: usa una cartella nuova o --build-only"
+                     % args.raw_dir)
+        api_key = next((os.environ[k] for k in KEY_ENVS if os.environ.get(k)), None)
+        if not api_key and not args.dry_run:
+            sys.exit("variabile d'ambiente %s assente" % " o ".join(KEY_ENVS))
+        client = api_explore.Client(args.raw_dir, api_explore.QuotaGuard(), api_key or "",
+                                    dry_run=args.dry_run)
+        if args.dry_run:
+            total, active = expected_counts(args.out)
+            record(client, brand=brand, expected=(total, active))
+            lists = sum(1 for path, _, _ in client.planned if path == "/v1/products")
+            details = len(client.planned) - lists
+            windows, calls = call_plan(len(client.planned))
+            print("chiamate previste: %d liste + %d dettagli + %d sync quota = %d autenticate, "
+                  "in %d finestre da 60 s (stima: %d prodotti, %d non archiviati)"
+                  % (lists, details, windows, calls, windows, total, active))
+            return
+        try:
+            record(client, brand=brand)
+        except RuntimeError as e:   # QuotaExceededError o lista fallita
+            sys.exit("STOP: %s (risposte parziali in %s)" % (e, args.raw_dir))
+        print("richieste autenticate eseguite: %d" % client.guard.total_requests)
+
+    try:
+        catalog = build_catalog(args.raw_dir, brand=brand)
+    except BuildError as e:
+        sys.exit("fixture non scritta: %s" % e)
+    write_catalog(catalog, args.out)
+    print("scritta %s: %d prodotti, %d dettagli, %d byte"
+          % (args.out, len(catalog["products"]), len(catalog["details"]),
+             os.path.getsize(args.out)))
+
+
+if __name__ == "__main__":
+    main()
