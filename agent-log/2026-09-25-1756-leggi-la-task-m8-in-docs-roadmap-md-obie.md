@@ -2588,3 +2588,63 @@ Il contratto passa su Postgres, compreso il test `SKIP LOCKED`. Lancio la suite 
 - 🔧 Bash: Run full suite without and with Postgres
 
 - 🔧 Bash: Commit Task 6
+
+Task 6 fatto (commit `a5f9b9e`): la coda dei job funziona in memoria e su Postgres. La suite è verde anche su Postgres: **576 test**, erano 551.
+
+**Cosa ho fatto:**
+- **Porta `JobRepository`** (`vela/ports/jobs.py`) con `enqueue`, `get`, `save`, `claim`, `active_for_order`, `queued_purchase_position` e `purchase_waiting`.
+- **Prelievo (`claim`):**
+  - prende un job alla volta, prima i `booking`, poi le verifiche di pagamento, poi gli acquisti in ordine di arrivo;
+  - rispetta `run_after`;
+  - un job in lavorazione da più di 2 minuti (istanza morta) torna prelevabile e riparte dal passo salvato.
+- **Postgres:** `FOR UPDATE SKIP LOCKED`, in un'unica transazione con il passaggio a `running`.
+- **Posizione in coda:** conta solo gli acquisti `pending` arrivati prima. Chi è in lavorazione non conta, e un ordine senza acquisto in attesa non ha posizione.
+- **`Repositories`** ora espone `jobs` e `quota`, in memoria e su Postgres.
+- **Test:**
+  - 12 test nel contratto comune dei repository;
+  - su Postgres, un test in più: mentre un'altra transazione tiene bloccato il primo job, `claim` prende il secondo invece di aspettare;
+  - li ho visti fallire prima dell'implementazione.
+
+**Cosa ho deciso:**
+- **Test nel contratto dei repository, non in un file a parte** come diceva il piano. I job hanno una foreign key sugli ordini, quindi servono gli ordini di prova che il contratto già crea.
+- **`purchase_waiting` senza argomento `now`.** Conta anche gli acquisti rimandati alla finestra successiva, così il `sync` non parte mentre ci sono acquisti in coda.
+- **Ordine di prelievo:** le verifiche di pagamento vengono dopo i `booking` e prima degli acquisti. Non consumano quota HofJ e sbloccano pagamenti già fatti.
+
+**Dubbi:**
+- **Test SKIP LOCKED non verificato in negativo.** Non l'ho provato senza `SKIP LOCKED`: senza, il prelievo resterebbe bloccato in attesa e il test andrebbe in stallo invece di fallire. Il comportamento corretto però è verificato.
+- **Suite Postgres lenta da qui:** circa 7 minuti.
+
+Il prossimo è il **Task 7**, che estende la porta HofJ:
+- `create_itinerary` restituisce solo l'id;
+- si aggiungono `get_itinerary` (importo da pagare), `get_quota`, `ConfigError` e `QuotaError` con `retry_after`;
+- nel replay si aggiungono latenza e quota simulate.
+
+Tocca anche `FakeHofJ` e il flusso di accettazione attuale, che per ora resta sincrono: lo adatto al minimo. Vado?
+
+## Utente 20:49
+
+si
+
+## Agente 20:49
+
+- 🔧 Bash: Read HofJ port, replay adapter, FakeHofJ and callers
+
+- 🔧 Bash: Find tests depending on itinerary API
+
+- 🔧 Bash: Read replay tests and call-order assertions
+
+Scrivo prima i test: la nuova forma della porta nel replay, latenza e quota simulate, e l'ordine delle chiamate nell'accettazione (per ora ancora sincrona), che ora include la lettura del totale.
+
+- 🔧 Bash: Write failing replay and port tests
+
+Fallisce, come atteso, su `ConfigError`, che non esiste ancora. Implemento porta, replay, `FakeHofJ` e l'adattamento minimo dell'accettazione.
+
+- 🔧 Bash: Implement port, replay simulation, FakeHofJ and accept adaptation
+
+- 🔧 Bash: Run replay tests and full suite
+
+- 🔧 Bash: Verify the call-order test fails without get_itinerary
+
+Confermato: senza la lettura del totale, i due test dell'accettazione falliscono per la ragione giusta. Con la modifica ripristinata passano. Faccio il commit.
+
+- 🔧 Bash: Commit Task 7

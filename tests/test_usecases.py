@@ -246,7 +246,7 @@ class AcceptProposalTest(unittest.TestCase):
         self.assertNotIn("http", r.say)
         assert_single_product(self, r.to_dict())
         calls = [c[0] for c in vela.hofj.calls]
-        self.assertEqual(calls, ["create_itinerary", "set_customer", "get_pax", "set_pax"])
+        self.assertEqual(calls, ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
         self.assertEqual(vela.hofj.calls[0][1:], ("3", date(2026, 10, 1), 2, 1, "EUR"))
         customer = vela.hofj.calls[1][2]
         self.assertEqual((customer.first_name, customer.email), ("Anna", "anna@x.it"))

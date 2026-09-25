@@ -16,7 +16,15 @@ class ProductError(HofJError):
 
 
 class QuotaError(HofJError):
-    """Quota esaurita (RF-37)."""
+    """Quota esaurita, 429 (RF-37, RF-38). `retry_after` in secondi se HofJ lo dichiara."""
+
+    def __init__(self, message: str = "quota esaurita", retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class ConfigError(HofJError):
+    """401/403: chiave o profilo sbagliati. Non è colpa del prodotto né della rete."""
 
 
 class UpstreamError(HofJError):
@@ -26,7 +34,7 @@ class UpstreamError(HofJError):
 @dataclass(frozen=True)
 class Itinerary:
     id: str
-    total: Decimal
+    total: Decimal       # importo da pagare: `checkout.openAmount` (verifiche §8)
     currency: str
 
 
@@ -67,9 +75,12 @@ class PaymentProof:
 
 
 class HofJPort(Protocol):
+    """Ogni metodo è una chiamata HofJ e consuma quota (RF-36), `get_quota` compreso."""
     def create_itinerary(self, product: Product, start_date: date, adults: int, rooms: int,
-                         currency: str) -> Itinerary: ...
+                         currency: str) -> str: ...
     def set_customer(self, itinerary_id: str, customer: Customer) -> None: ...
     def get_pax(self, itinerary_id: str) -> List[Pax]: ...
     def set_pax(self, itinerary_id: str, pax: List[Pax]) -> None: ...
+    def get_itinerary(self, itinerary_id: str) -> Itinerary: ...
     def create_booking(self, itinerary_id: str, proof: PaymentProof) -> str: ...
+    def get_quota(self) -> QuotaSnapshot: ...

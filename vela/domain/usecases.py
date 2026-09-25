@@ -132,18 +132,19 @@ class Vela:
         if missing:
             return MissingTravelerData(proposal_id, tuple(missing), say.say_missing(missing, lang))
         product = self.repos.products.get(proposal.product_id)
-        itinerary = self.hofj.create_itinerary(product, proposal.start_date, proposal.pax, 1,
-                                               proposal.currency)
+        itinerary_id = self.hofj.create_itinerary(product, proposal.start_date, proposal.pax, 1,
+                                                  proposal.currency)
         d = self.defaults
-        self.hofj.set_customer(itinerary.id, Customer(
+        self.hofj.set_customer(itinerary_id, Customer(
             profile.first_name, profile.last_name, profile.email, profile.phone,
             d.street1, d.postal_code, d.city, d.region, d.country_code))
         names = [(profile.first_name, profile.last_name)] + [
             (p.first_name, p.last_name) for p in profile.participants]
-        slots = self.hofj.get_pax(itinerary.id)
+        slots = self.hofj.get_pax(itinerary_id)
         filled = [replace(slot, first_name=names[i][0], last_name=names[i][1])
                   if i < len(names) else slot for i, slot in enumerate(slots)]
-        self.hofj.set_pax(itinerary.id, filled)
+        self.hofj.set_pax(itinerary_id, filled)
+        itinerary = self.hofj.get_itinerary(itinerary_id)
         now = self.now()
         order = Order(self.new_id(), proposal.id, intent.id, product.id,
                       OrderStatus.AWAITING_PAYMENT, proposal.pax, proposal.price_from,
