@@ -251,3 +251,13 @@ Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il c
 **Task 4 (parser)** e **Task 5 (chooser v1, con le prime due funzioni di `say.py`)**.
 
 - 🔧 Bash: TDD Task 4 and Task 5, commit each
+
+**Task 6 (frasi `say`)**. Il test fallisce prima che io completi `say.py`. Metto i nuovi import in testa al file, come dice il piano.
+
+- 🔧 Bash: TDD Task 6: say phrases, commit
+
+- 🔧 Bash: Check say.py has no duplicate imports in the body
+
+**Task 7 (porte e repository in memoria)**.
+
+- 🔧 Bash: TDD Task 7, commit
