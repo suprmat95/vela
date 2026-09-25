@@ -12,7 +12,7 @@ la quota è esaurita. Piano e decisioni: `docs/plans/2026-09-25-m1-fixture-catal
 |---|---|
 | `recorded_at` | istante dell'ultima risposta registrata (ISO-8601 UTC) |
 | `locale` | `it` |
-| `brand` | valore di `HOFJ_BRAND` usato, `null` se omesso (default del server: `weebora.com`) |
+| `brand` | brand letto dalle pagine di lista registrate (`params.brand`), `null` se le pagine non lo includevano (default del server: `weebora.com`). Un `HOFJ_BRAND` diverso al momento della build (`--build-only` compreso) fa fallire la scrittura della fixture: è solo un controllo incrociato, non la fonte del valore |
 | `base_url` | base URL dell'API al momento della costruzione |
 | `products` | item della lista così come li restituisce l'API, in ordine di id |
 | `details[id].catalog` | campi di RF-28 con i nomi dell'API: `id, title, slug, shortDescription, price, currency, minPax, maxPax, minDate, maxDate, availabilities, defaultDurationInDays, updatedAt, category, venue, destination, hotels` (`hotels` = `rawAttributes.hotels` senza media) |
@@ -22,17 +22,31 @@ la quota è esaurita. Piano e decisioni: `docs/plans/2026-09-25-m1-fixture-catal
 
 Variabili: `HOFJ_API_KEY` (o `API_BEAR_KEY`), opzionali `HOFJ_BASE_URL`, `HOFJ_BRAND`.
 La chiave non viene mai stampata né salvata. Le risposte grezze vanno in una cartella
-fuori dal repository e permettono di ricostruire il file senza consumare quota.
+fuori dal repository e permettono di ricostruire il file senza consumare quota. La cartella
+deve essere nuova o vuota: `--raw-dir` non vuota viene rifiutata (evita di mischiare due
+registrazioni), quindi si usa un nome datato a ogni corsa.
 
 ```bash
-python3 scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-it --dry-run   # solo conteggio
-python3 scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-it             # ≈ 96 chiamate, 2 finestre
-python3 scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-it --build-only  # ricostruzione
-python3 -m unittest tests.test_catalog_fixture -v                               # validazione
+RAW=~/vela-raw/catalog-it-$(date +%Y%m%d-%H%M)   # cartella nuova: una non vuota viene rifiutata
+python3 scripts/record_catalog.py --raw-dir "$RAW" --dry-run     # solo conteggio
+SSL_CERT_FILE=/etc/ssl/cert.pem \
+  python3 scripts/record_catalog.py --raw-dir "$RAW"             # ≈ 80 chiamate, 1 finestra (vedi --dry-run)
+python3 scripts/record_catalog.py --raw-dir "$RAW" --build-only  # ricostruzione
+python3 -m unittest tests.test_catalog_fixture -v                # validazione
 ```
+
+`SSL_CERT_FILE` serve solo alla corsa reale (fa richieste in rete): il Python 3.7 di
+python.org per macOS non porta un bundle di CA proprio e senza questa variabile
+l'handshake TLS fallisce (`docs/decisions.md`, 2026-09-25 — Esplorazione read-only).
 
 Pacing: budget per finestra di 60 s = min(`remainingInWindow`, 90 − `usedInWindow`), attesa
 fino a `windowEndsAt` + 2 s, stop immediato su 429 (`scripts/api_explore.py`).
+
+Budget di dimensione: l'ultima fixture pesa 1 434 730 byte, circa il 96% del limite di
+1 500 000 byte imposto da `tests/test_catalog_fixture.py::test_size_within_budget`. Una
+futura registrazione che faccia crescere il catalogo di oltre il ~5% richiederà di estendere
+`MEDIA_KEYS` o alzare `MAX_BYTES`: è una decisione da registrare in `docs/decisions.md`,
+non da fare silenziosamente.
 
 ## Ultima registrazione
 

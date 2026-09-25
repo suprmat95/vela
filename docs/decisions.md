@@ -68,3 +68,5 @@ Origine: intervista sulla macro task M1, piano in `docs/plans/2026-09-25-m1-fixt
 | Cartella grezza | La registrazione rifiuta una `--raw-dir` non vuota | Evita di mischiare due registrazioni |
 | Validazione | `tests/test_catalog_fixture.py` verifica il file committato e si salta se manca | RNF-09: suite verde senza servizi esterni |
 | Roadmap | `docs/roadmap.md` resta sul branch `doc/roadmap`, non mergiata su `task/m1` | Il piano è autosufficiente |
+| Soglia del test | `tests/test_catalog_fixture.py` richiede almeno 70 prodotti attivi invece di 80 | il catalogo `it` registrato il 2026-09-25 ha 110 prodotti e 77 attivi (en: 123/92); il catalogo `it` è un insieme di voci CMS distinto (id 181-1093, categoryId 8/7/9) — margine per il churn |
+| Brand nella fixture | letto dalle pagine di lista registrate, `HOFJ_BRAND` al build serve solo da controllo | `--build-only` può girare in una shell diversa: la fixture deve dire cosa è stato registrato |
