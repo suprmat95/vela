@@ -47,3 +47,36 @@ Note per il progetto:
 - La lista alloggi può andare in timeout (502 "upstream timeout") e rispondere alla
   chiamata successiva: serve un retry.
 - Costo: 12 richieste in tutto, nessuna chiamata a payment o booking.
+
+## Chiave 3 — "The seal" (+60m)
+
+**Traccia.** Un artefatto compilato è servito a `/api/seal.wasm`; esporta `seal(ptr, len)`
+e una `memory`. Va alimentato con `<chiave 2>:<email>` in UTF-8; il valore restituito,
+come otto cifre esadecimali minuscole, è la chiave.
+
+**Risposta.** `1f500cd8` per l'input `p_g_1d27qron:matteodospina@gmail.com` (email
+dell'account della challenge). Variante con l'altra chiave candidata
+`p_g_np3dww01:matteodospina@gmail.com` → `29814149`.
+
+**Come.** Il file sta sul sito della challenge:
+`https://vela-dev-challenge.web.app/api/seal.wasm` (200, `application/wasm`, 143 byte,
+SHA-256 `4a401b3baa4e2ab61c13e96ea420352880097b6d13de63c9e62980634802b4ca`). Non è
+sull'API HOFJ né sui siti brand (404 ovunque).
+
+- Export: `memory` (1 pagina) e `seal: (i32, i32) -> i32`. Nessun import, nessun
+  allocatore: l'input va scritto direttamente in `memory` all'offset 0.
+- Il codice è un FNV-1a a 32 bit (offset `0x811c9dc5`, primo `0x01000193`) seguito da un
+  finalizer `h ^= h>>15; h *= costante; h ^= h>>13`; non serve reimplementarlo,
+  basta eseguirlo con Node 20 (`WebAssembly` integrato).
+- Controlli: stesso input due volte → stesso valore; uno spazio in più o un'altra chiave
+  cambiano il risultato; stringa vuota → `e92884c2`.
+
+Script usato (Node, usa-e-getta):
+
+```js
+const inst = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync("seal.wasm")), {});
+const { memory, seal } = inst.exports;
+const bytes = Buffer.from("p_g_1d27qron:matteodospina@gmail.com", "utf8");
+new Uint8Array(memory.buffer).set(bytes, 0);
+console.log((seal(0, bytes.length) >>> 0).toString(16).padStart(8, "0"));
+```
