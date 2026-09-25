@@ -55,6 +55,85 @@ def detail_of(list_item):
     return detail
 
 
+def quota_body(used, remaining, ends="2026-09-25T09:54:47.409Z"):
+    return {"data": {"clientId": "c", "limitPerMinute": 120, "usedInWindow": used,
+                     "remainingInWindow": remaining, "windowEndsAt": ends,
+                     "backend": "firestore"}}
+
+
+class FakeResponse(io.BytesIO):
+    def __init__(self, status, body):
+        super().__init__(json.dumps(body).encode("utf-8"))
+        self.status = status
+        self.headers = {"Content-Type": "application/json"}
+
+
+class FakeHofj:
+    """Server finto: /v1/quota, lista paginata per cursore, dettaglio per id.
+
+    Simula il 429 oltre `limit` richieste per finestra; `new_window` azzera il contatore
+    (va passato come `sleep` al Client). `broken_ids` rispondono 502 al dettaglio,
+    `list_status` diverso da 200 fa fallire la lista.
+    """
+
+    def __init__(self, products, limit=120, page_size=100, broken_ids=(), list_status=200):
+        self.products = products
+        self.limit = limit
+        self.page_size = page_size
+        self.broken_ids = set(broken_ids)
+        self.list_status = list_status
+        self.calls = []            # (path, query dict, headers dict)
+        self.window_used = 0
+        self.max_window_used = 0
+
+    def new_window(self, *_):
+        self.window_used = 0
+
+    def __call__(self, req, timeout=None):
+        url = urllib.parse.urlsplit(req.full_url)
+        query = dict(urllib.parse.parse_qsl(url.query))
+        self.calls.append((url.path, query, dict(req.header_items())))
+        self.window_used += 1
+        self.max_window_used = max(self.max_window_used, self.window_used)
+        if self.window_used > self.limit:
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many", {}, io.BytesIO(b"{}"))
+        if url.path == "/v1/quota":
+            return FakeResponse(200, quota_body(self.window_used, 120 - self.window_used))
+        if url.path == "/v1/products":
+            if self.list_status != 200:
+                return FakeResponse(self.list_status, {"title": "bad request"})
+            page = int(query.get("cursor", "p1")[1:])
+            start = (page - 1) * self.page_size
+            chunk = self.products[start:start + self.page_size]
+            more = start + self.page_size < len(self.products)
+            return FakeResponse(200, {"data": chunk,
+                                      "meta": {"nextCursor": "p%d" % (page + 1) if more else None}})
+        match = re.match(r"^/v1/products/(\d+)$", url.path)
+        if match:
+            pid = match.group(1)
+            if pid in self.broken_ids:
+                return FakeResponse(502, {"type": "https://api.hofj.com/problems/upstream-error",
+                                          "status": 502})
+            for product in self.products:
+                if product["id"] == pid:
+                    return FakeResponse(200, {"data": detail_of(product)})
+            return FakeResponse(502, {"title": "upstream-error"})
+        return FakeResponse(404, {"title": "not found"})
+
+
+def make_client(raw_dir, server, logs, cap=90):
+    return api_explore.Client(raw_dir, api_explore.QuotaGuard(cap=cap), "SECRET-KEY",
+                              base_url="https://api.test", opener=server,
+                              sleep=server.new_window, log=logs.append)
+
+
+def record_pages_and_details(client, products, locale="it"):
+    """Simula a mano una registrazione: una pagina di lista e i dettagli indicati."""
+    client.get("/v1/products", {"limit": 100, "locale": locale})
+    for pid in products:
+        client.get("/v1/products/%s" % pid, {"extended": "true", "locale": locale})
+
+
 class StripMediaTest(unittest.TestCase):
     def test_removes_media_keys_at_any_depth_without_touching_input(self):
         detail = detail_of(item(12))
@@ -91,6 +170,73 @@ class ProjectDetailTest(unittest.TestCase):
         self.assertIsNone(catalog["venue"])
         self.assertIsNone(catalog["hotels"])
         self.assertIsNone(catalog["price"])
+
+
+class BuildCatalogTest(unittest.TestCase):
+    def setUp(self):
+        self.raw = tempfile.mkdtemp()
+        self.logs = []
+
+    def test_builds_products_and_active_details(self):
+        server = FakeHofj([item(1), item(2, archived=True), item(3)])
+        record_pages_and_details(make_client(self.raw, server, self.logs), ["1", "3"])
+        catalog = record_catalog.build_catalog(self.raw)
+        self.assertEqual([p["id"] for p in catalog["products"]], ["1", "2", "3"])
+        self.assertEqual(list(catalog["details"]), ["1", "3"])
+        self.assertEqual(catalog["details"]["1"]["catalog"]["category"]["slug"], "padel")
+        self.assertNotIn("gallery", catalog["details"]["1"]["raw"])
+        self.assertIn("rawAttributes", catalog["details"]["1"]["raw"])
+        self.assertEqual((catalog["locale"], catalog["brand"]), ("it", None))
+        self.assertEqual(catalog["base_url"], api_explore.BASE_URL)
+        self.assertRegex(catalog["recorded_at"], r"^\d{4}-\d{2}-\d{2}T")
+        self.assertIn("description", catalog["products"][0])  # item della lista integrale
+
+    def test_brand_is_written_as_given(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, self.logs), ["1"])
+        self.assertEqual(record_catalog.build_catalog(self.raw, brand="weebora.com")["brand"],
+                         "weebora.com")
+
+    def test_ignores_other_locales_and_failed_calls(self):
+        server = FakeHofj([item(1)], broken_ids=["1"])
+        client = make_client(self.raw, server, self.logs)
+        client.get("/v1/products", {"limit": 100, "locale": "en"})   # locale sbagliato
+        client.get("/v1/products", {"limit": 100, "locale": "it"})
+        client.get("/v1/products/1", {"extended": "true", "locale": "it"})  # 502
+        with self.assertRaises(record_catalog.BuildError) as ctx:
+            record_catalog.build_catalog(self.raw)
+        self.assertIn("1", str(ctx.exception))
+
+    def test_missing_detail_raises_with_ids(self):
+        server = FakeHofj([item(1), item(3), item(4, archived=True)])
+        record_pages_and_details(make_client(self.raw, server, self.logs), ["1"])
+        with self.assertRaises(record_catalog.BuildError) as ctx:
+            record_catalog.build_catalog(self.raw)
+        self.assertIn("3", str(ctx.exception))
+        self.assertNotIn("4", str(ctx.exception))  # archiviato: nessun dettaglio atteso
+
+    def test_duplicate_ids_last_wins(self):
+        server = FakeHofj([item(1, title="vecchio")])
+        client = make_client(self.raw, server, self.logs)
+        client.get("/v1/products", {"limit": 100, "locale": "it"})
+        server.products = [item(1, title="nuovo")]
+        client.get("/v1/products", {"limit": 100, "locale": "it", "cursor": "p1"})
+        client.get("/v1/products/1", {"extended": "true", "locale": "it"})
+        catalog = record_catalog.build_catalog(self.raw)
+        self.assertEqual(len(catalog["products"]), 1)
+        self.assertEqual(catalog["products"][0]["title"], "nuovo")
+
+    def test_empty_raw_dir_raises(self):
+        with self.assertRaises(record_catalog.BuildError):
+            record_catalog.build_catalog(self.raw)
+
+    def test_write_catalog_creates_dir_and_trailing_newline(self):
+        out = os.path.join(self.raw, "fixtures", "catalog.json")
+        record_catalog.write_catalog({"a": "è"}, out)
+        with open(out, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertTrue(text.endswith("}\n"))
+        self.assertIn("è", text)  # ensure_ascii=False
 
 
 if __name__ == "__main__":

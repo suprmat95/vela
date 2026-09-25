@@ -55,3 +55,60 @@ def project_detail(detail):
     raw_attributes = detail.get("rawAttributes") or {}
     catalog["hotels"] = strip_media(raw_attributes.get("hotels"))
     return catalog
+
+
+class BuildError(RuntimeError):
+    """La cartella grezza non basta a costruire una fixture completa."""
+
+
+def detail_id(record):
+    """Id del prodotto se il record è un dettaglio esteso riuscito, altrimenti None."""
+    match = re.match(r"^/v1/products/([^/]+)$", record["path"])
+    if match and record["params"].get("extended") == "true" and record["status"] == 200:
+        return match.group(1)
+    return None
+
+
+def build_catalog(raw_dir, locale=LOCALE, brand=None):
+    """Assembla la fixture dai record salvati da api_explore.Client in `raw_dir`.
+
+    Lista: tutti gli item (anche archiviati), l'ultimo record vince a parità di id.
+    Dettagli: solo i prodotti non archiviati; se ne manca uno solleva BuildError.
+    """
+    products, details, stamps = {}, {}, []
+    for record in api_explore.load_records(raw_dir):
+        body = record["body"] if isinstance(record["body"], dict) else {}
+        if record["params"].get("locale") != locale:
+            continue
+        if record["path"] == "/v1/products" and record["status"] == 200:
+            for product in body.get("data") or []:
+                products[str(product["id"])] = product
+            stamps.append(record["requestedAt"])
+        pid = detail_id(record)
+        if pid and isinstance(body.get("data"), dict):
+            details[pid] = body["data"]
+            stamps.append(record["requestedAt"])
+    if not products:
+        raise BuildError("nessuna pagina di /v1/products (locale %s) in %s" % (locale, raw_dir))
+    active = [pid for pid, product in products.items() if not product.get("archived")]
+    missing = [pid for pid in active if pid not in details]
+    if missing:
+        raise BuildError("dettaglio mancante per %d prodotti non archiviati: %s"
+                         % (len(missing), ", ".join(missing)))
+    return {
+        "recorded_at": max(stamps),
+        "locale": locale,
+        "brand": brand,
+        "base_url": api_explore.BASE_URL,
+        "products": list(products.values()),
+        "details": {pid: {"catalog": project_detail(details[pid]),
+                          "raw": strip_media(details[pid])} for pid in active},
+    }
+
+
+def write_catalog(catalog, out_path):
+    """Scrive la fixture: indent=1 per contenere la dimensione, UTF-8 non escapato."""
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(catalog, fh, indent=1, ensure_ascii=False)
+        fh.write("\n")
