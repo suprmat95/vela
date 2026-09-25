@@ -222,3 +222,19 @@ Fallisce per il motivo atteso. Fase GREEN:
 Verde in memoria. Eseguo il contratto anche su Postgres, nello schema `vela_test`, caricando l'ambiente senza stamparlo:
 
 - 🔧 Bash: Run Postgres repository contract tests
+
+Il worktree non ha un `.env`, quindi i test Postgres restano saltati. Non vado a cercare il file altrove e lo segnalo nel resoconto finale. Committo il Task 1.
+
+- 🔧 Bash: Commit Task 1
+
+**Task 2**, fase RED: test di `/health`.
+
+- 🔧 Bash: Write health tests and watch them fail
+
+I test falliscono perché mancano `catalog` e `quota`. `test_health_needs_no_token` passa già: è una guardia di regressione. Fase GREEN:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/vela/surfaces/health.py
+
+- 🔧 Bash: Run health tests and full suite
+
+- 🔧 Bash: Commit Task 2
