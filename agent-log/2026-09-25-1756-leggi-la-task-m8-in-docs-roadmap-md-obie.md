@@ -2230,3 +2230,34 @@ ok m6 ha finito
 - 🔧 Bash: Tidy remaining plan references and run baseline suite
 
 - 🔧 Bash: Check current hooks M5 must replace
+
+- 🔧 Bash: Record baseline and commit plan alignment
+
+`task/m5` ora parte dal `master` aggiornato, con M6 senza webhook e M9, e la suite è verde: **513 test, 13 saltati**.
+
+- **Rebase:** i miei 8 commit di documentazione sono sopra `master` (`de0fd25`). L'unico conflitto era in `docs/decisions.md`, e l'ho risolto tenendo entrambe le parti. Prima del rebase ho creato il branch di sicurezza `backup/task-m5-pre-rebase`: dimmi se posso cancellarlo.
+- **Piano allineato** (commit `adf0f6d`):
+  - migrazione **`0005_jobs_quota`**, perché su `master` ci sono già la `0003` di M6 e la `0004` che la annulla;
+  - il webhook non c'è più, quindi il Task 13b non deve rimuovere nulla;
+  - la suite di partenza è annotata nel piano.
+- **Controllo del codice su `master`:** i punti che M5 deve sostituire sono quelli previsti dal piano: `BookingRunner` in `app.py`, `runner.submit` nel checkout replay, `_ensure_link` nell'accept, `create_payment_link(order, description)`.
+
+Il prossimo passo è il **Task 2**: i nuovi parametri in `Settings`, con i valori di default e senza nuove variabili d'ambiente, in TDD. Parto?
+
+## Utente 20:08
+
+vai
+
+## Agente 20:08
+
+- 🔧 Bash: Read config and its tests
+
+- 🔧 Bash: Write failing Settings tests and run them
+
+Il fallimento è quello atteso: i campi non esistono ancora. Adesso implemento.
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m5/vela/config.py
+
+- 🔧 Bash: Add Tuple import and run tests and suite
+
+- 🔧 Bash: Confirm test count and commit Task 2

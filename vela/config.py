@@ -4,7 +4,7 @@ Nessun file viene aperto: i segreti arrivano dall'ambiente del processo.
 """
 import os
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Tuple
 
 DEFAULT_UPSTREAM_MODE = "replay"
 
@@ -35,6 +35,17 @@ class Settings:
     vela_upstream_mode: str = DEFAULT_UPSTREAM_MODE
     anthropic_api_key: Optional[str] = None
     vela_public_url: Optional[str] = None
+    # Parametri di M5: configurabili da codice, mai da env (l'elenco di §6 resta chiuso).
+    worker_concurrency: int = 4                        # RF-50, thread per istanza
+    quota_margin: float = 0.10                         # limite effettivo = limitPerMinute × 0,9
+    booking_reserve: float = 0.20                      # RF-47, quota della finestra per i booking
+    purchase_max_attempts: int = 3                     # RF-46
+    booking_max_attempts: int = 5                      # RF-24
+    booking_backoff: Tuple[int, ...] = (5, 10, 20, 40)  # secondi tra i tentativi di booking
+    job_lease_seconds: int = 120                       # un job running più vecchio torna prelevabile
+    payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
+    replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
+    replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> "Settings":
