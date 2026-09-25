@@ -1,8 +1,12 @@
-"""Porta verso il pagamento (RF-18, RF-19, RF-21). Implementazioni: finta (M2), Stripe (M6)."""
+"""Porta verso il pagamento (RF-18..21). Implementazioni: finta (M2), Stripe (M6).
+
+Nessun webhook (decisione M5): `link_status` legge lo stato del link, e la verifica del
+pagamento (`vela.domain.payment_check`) lo interroga finché il viaggiatore non paga.
+"""
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Optional, Protocol
 
 from vela.domain.models import Order
 
@@ -23,5 +27,14 @@ def to_cents(amount: Decimal) -> int:
     return int((amount * 100).quantize(Decimal("1")))
 
 
+@dataclass(frozen=True)
+class LinkStatus:
+    state: str                         # "open" | "paid" | "expired"
+    amount_cents: Optional[int]
+    currency: Optional[str]            # maiuscola, come negli ordini
+    payment_ref: Optional[str]         # id del PaymentIntent, da inoltrare al booking (RF-23)
+
+
 class PaymentsPort(Protocol):
     def create_payment_link(self, order: Order, description: str) -> PaymentLink: ...
+    def link_status(self, reference: str) -> LinkStatus: ...

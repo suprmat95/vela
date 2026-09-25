@@ -47,7 +47,7 @@ from decimal import Decimal as _Decimal
 from datetime import timedelta as _timedelta
 
 from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
-from vela.ports.payments import PaymentLink, PaymentsError
+from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 
 class FakeHofJ:
@@ -137,6 +137,9 @@ class StubPayments:
                            "pi_%s" % order.id)
         self.links.append(link)
         return link
+
+    def link_status(self, reference):
+        return LinkStatus("open", None, None, None)
 
 
 class FlakyPayments(StubPayments):

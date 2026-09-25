@@ -15,6 +15,8 @@ from vela.domain.jobs import JobProcessor
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, NoMatch, Order,
                                 OrderStatus, Participant, Period, Proposal, QuotaClass,
                                 TravelerProfile)
+from vela.domain.orders import OrderService
+from vela.domain.payment_check import PaymentCheckJob
 from vela.domain.purchase import PurchaseJob
 from vela.ports.hofj import QuotaError, QuotaSnapshot, UpstreamError
 
@@ -41,11 +43,15 @@ class World:
         self.repos.products.upsert_many([make_product(i, price=300 + i) for i in range(1, 6)])
         self.repos.intents.add(Intent("i1", "padel", CRITERIA, PROFILE, NOW))
         self.hofj = hofj or FakeHofJ(quota=quota or QuotaSnapshot(120, 1, NOW, NOW + timedelta(seconds=60)))
-        purchase = PurchaseJob(self.repos, self.hofj, StubPayments(), lambda intent: NoMatch("i1", "x", "x"),
+        payments = StubPayments()
+        purchase = PurchaseJob(self.repos, self.hofj, payments, lambda intent: NoMatch("i1", "x", "x"),
                                DEFAULT_TRAVELER, now=self.clock, max_attempts=3)
         booking = BookingJob(self.repos, self.hofj, now=self.clock)
+        orders = OrderService(self.repos, self.hofj, now=self.clock)
+        check = PaymentCheckJob(self.repos, payments, orders, now=self.clock)
         self.processor = JobProcessor(self.repos, self.hofj, {JobKind.PURCHASE: purchase,
-                                                              JobKind.BOOKING: booking},
+                                                              JobKind.BOOKING: booking,
+                                                              JobKind.PAYMENT_CHECK: check},
                                       now=self.clock, lease_seconds=120)
 
     def purchase(self, n, seconds_ago=0):

@@ -2954,3 +2954,21 @@ Il test fallisce perché il modulo non esiste. Lo scrivo.
 I 12 test passano. Faccio il commit del Task 13 e passo al 13b, la verifica del pagamento per interrogazione.
 
 - 🔧 Bash: Commit Task 13 and read payments code for 13b
+
+Commit del Task 13 fatto (644 test verdi). Per il 13b guardo come i test di M6 simulano il client Stripe.
+
+- 🔧 Bash: Read Stripe fake client in tests
+
+Scrivo i test del 13b: lettura dello stato della sessione (Stripe e finto), `settle_payment`, job di verifica e accodamento dal job d'acquisto.
+
+- 🔧 Bash: Write failing payment check tests
+
+Falliscono per la ragione attesa: mancano `payment_check` e `LinkStatus`. Prima di implementare riscrivo in modo leggibile il test sulla quota, che era confuso.
+
+- 🔧 Bash: Fix test and add LinkStatus port and Stripe link_status
+
+- 🔧 Bash: Implement payment check, fake payments and purchase enqueue
+
+- 🔧 Bash: Give test worlds a payment check handler and run suite
+
+- 🔧 Bash: Commit Task 13b

@@ -10,13 +10,21 @@ import stripe
 from support import NOW
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.domain.models import Order, OrderStatus, TravelerProfile
-from vela.ports.payments import PaymentsError
+from vela.ports.payments import LinkStatus, PaymentsError
 
 
 class FakeSessions:
-    def __init__(self, error=None):
+    def __init__(self, error=None, retrieved=None):
         self.calls = []
         self.error = error
+        self.retrieved = retrieved
+        self.retrieve_calls = []
+
+    def retrieve(self, session_id, params=None, options=None):
+        self.retrieve_calls.append(session_id)
+        if self.error:
+            raise self.error
+        return self.retrieved
 
     def create(self, params=None, options=None):
         self.calls.append((params, options))
@@ -101,3 +109,36 @@ class StripePaymentsTest(unittest.TestCase):
 class BuildClientTest(unittest.TestCase):
     def test_builds_a_client_without_network(self):
         self.assertIsInstance(build_stripe_client("sk_test_x"), stripe.StripeClient)
+
+
+def session(status, payment_status, amount=79990, currency="eur", payment_intent="pi_9"):
+    return SimpleNamespace(status=status, payment_status=payment_status, amount_total=amount,
+                           currency=currency, payment_intent=payment_intent)
+
+
+class LinkStatusTest(unittest.TestCase):
+    """RF-20: Vela legge lo stato della Checkout Session invece di ricevere un webhook."""
+
+    def status_of(self, retrieved=None, error=None):
+        sessions = FakeSessions(error=error, retrieved=retrieved)
+        payments = StripePayments(fake_client(sessions), "https://vela.test")
+        return payments.link_status("cs_test_1"), sessions
+
+    def test_complete_and_paid_is_paid_with_the_payment_intent(self):
+        status, sessions = self.status_of(session("complete", "paid"))
+        self.assertEqual(status, LinkStatus("paid", 79990, "EUR", "pi_9"))
+        self.assertEqual(sessions.retrieve_calls, ["cs_test_1"])
+
+    def test_expanded_payment_intent_object_gives_its_id(self):
+        status, _ = self.status_of(session("complete", "paid", payment_intent=SimpleNamespace(id="pi_x")))
+        self.assertEqual(status.payment_ref, "pi_x")
+
+    def test_expired_and_open(self):
+        self.assertEqual(self.status_of(session("expired", "unpaid", payment_intent=None))[0].state, "expired")
+        self.assertEqual(self.status_of(session("open", "unpaid", payment_intent=None))[0].state, "open")
+        self.assertEqual(self.status_of(session("complete", "unpaid"))[0].state, "open")
+
+    def test_stripe_error_becomes_payments_error(self):
+        with self.assertRaises(PaymentsError):
+            self.status_of(error=stripe.APIConnectionError("rete"))
+

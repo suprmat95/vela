@@ -5,6 +5,7 @@
 `awaiting_payment` → `expired` (expire, dalla verifica della sessione). Ogni transizione è
 idempotente: uno stato diverso da quello atteso lascia l'ordine com'è.
 """
+import logging
 import uuid
 from dataclasses import replace
 from datetime import datetime
@@ -12,7 +13,10 @@ from typing import Callable, List
 
 from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
 from vela.ports.hofj import HofJError, HofJPort, PaymentProof
+from vela.ports.payments import LinkStatus, to_cents
 from vela.ports.repositories import Repositories
+
+log = logging.getLogger(__name__)
 
 
 class NotFound(Exception):
@@ -58,6 +62,23 @@ class OrderService:
         """RF-27: al boot, ogni ordine pagato senza job di prenotazione attivo ne riceve uno."""
         now = self.now()
         return [oid for oid in self.pending_booking_ids() if self._enqueue_booking(oid, now)]
+
+    def settle_payment(self, order_id: str, status: LinkStatus) -> Order:
+        """RF-20: esito della verifica del link. Pagato con importo e valuta dell'ordine → pagato
+        e job di prenotazione; scaduto → `expired`; qualunque incongruenza lascia l'ordine com'è."""
+        order = self.get(order_id)
+        if order.status != OrderStatus.AWAITING_PAYMENT:
+            return order
+        if status.state == "expired":
+            return self.expire(order_id)
+        if status.state != "paid":
+            return order
+        expected = (to_cents(order.total), order.currency.upper())
+        if (status.amount_cents, status.currency) != expected:
+            log.warning("pagamento dell'ordine %s non applicato: %s %s invece di %s %s", order_id,
+                        status.amount_cents, status.currency, expected[0], expected[1])
+            return order
+        return self.mark_paid(order_id, status.payment_ref or "")
 
     def expire(self, order_id: str) -> Order:
         """Link scaduto (RF-21): solo un ordine ancora da pagare passa a `expired`."""

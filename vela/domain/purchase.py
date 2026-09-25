@@ -6,7 +6,7 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
   1 cliente (`set_customer`)                                    1
   2 passeggeri (`get_pax` + `set_pax`, un'unica unità di ripresa) 2
   3 importo da pagare (`get_itinerary`, salva `total`)          1
-  4 link di pagamento (porta dei pagamenti)                     0
+  4 link di pagamento (porta dei pagamenti) e job di verifica    0
   5 fatto: l'ordine è `awaiting_payment`
 
 Prima di ogni passo l'ordine viene riletto: se non è più `queued` (rinuncia, RF-49) il job si
@@ -18,12 +18,13 @@ ferma senza altre chiamate. Esiti degli errori:
   proposta è chiusa come rifiutata e l'ordine è `replaced` con la proposta successiva (RF-17);
 - 401/403: `failed` senza toccare il prodotto.
 """
+import uuid
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Union
 
 from vela.domain import say
-from vela.domain.models import (Job, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
+from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
 from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJPort, ProductError, QuotaError)
 from vela.ports.payments import PaymentsError, PaymentsPort
@@ -48,10 +49,11 @@ class JobResult:
 class PurchaseJob:
     def __init__(self, repos: Repositories, hofj: HofJPort, payments: PaymentsPort,
                  propose: Callable[..., Union[ProposalMade, NoMatch]], defaults: TravelerDefaults,
-                 now: Callable[[], datetime], max_attempts: int = 3):
+                 now: Callable[[], datetime], max_attempts: int = 3,
+                 new_id: Callable[[], str] = lambda: str(uuid.uuid4()), poll_seconds: int = 60):
         self.repos, self.hofj, self.payments = repos, hofj, payments
         self.propose, self.defaults, self.now = propose, defaults, now
-        self.max_attempts = max_attempts
+        self.max_attempts, self.new_id, self.poll_seconds = max_attempts, new_id, poll_seconds
 
     def run(self, job: Job, next_window: datetime) -> JobResult:
         try:
@@ -106,6 +108,9 @@ class PurchaseJob:
             link = self.payments.create_payment_link(order, product.title)
             self._save_order(replace(order, status=OrderStatus.AWAITING_PAYMENT,
                                      payment_url=link.url, payment_ref=link.reference))
+            now = self.now()   # RF-20: da qui la verifica del pagamento per interrogazione
+            self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PAYMENT_CHECK, order.id, JobStatus.PENDING,
+                                        now, now + timedelta(seconds=self.poll_seconds)))
         job = replace(job, step=job.step + 1)
         self.repos.jobs.save(job)
         return job
