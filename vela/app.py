@@ -6,6 +6,7 @@ lifespan.
 ``create_app`` è la factory usata dai test; ``app`` è l'istanza per ``uvicorn vela.app:app``.
 In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan carica il
 catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
+La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RFC 7807.
 """
 from contextlib import asynccontextmanager
 from typing import Callable, List, Optional, Tuple
@@ -23,7 +24,9 @@ from vela.domain.models import Product
 from vela.domain.usecases import Vela
 from vela.surfaces.health import router as health_router
 from vela.surfaces.mcp import build_mcp, mcp_routes
+from vela.surfaces.problems import install_problem_handlers
 from vela.surfaces.replay import router as replay_router
+from vela.surfaces.rest import router as rest_router
 
 REPLAY = "replay"
 CatalogLoader = Callable[[], List[Product]]
@@ -73,6 +76,8 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     app.state.bootstrap = None
     app.state.mcp = build_mcp(lambda: app.state.vela)
     app.include_router(health_router)
+    install_problem_handlers(app)
+    app.include_router(rest_router)
     if settings.vela_upstream_mode == REPLAY:
         app.include_router(replay_router)
     app.router.routes.extend(mcp_routes(app.state.mcp, settings.vela_public_url))

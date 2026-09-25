@@ -254,3 +254,27 @@ Il modulo manca, come atteso. Fase GREEN:
 - 🔧 Bash: Run 7807 tests and full suite
 
 - 🔧 Bash: Check test output for noise
+
+Output pulito. Committo il Task 3.
+
+- 🔧 Bash: Commit Task 3
+
+**Task 4**, fase RED: test di autenticazione, intenti e proposta.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/tests/test_rest.py
+
+You've hit your session limit · resets 6pm (Europe/Rome)
+
+## Utente 17:04
+
+continua
+
+## Agente 17:04
+
+- 🔧 Bash: Run REST tests to see them fail
+
+17 fallimenti perché il router `/v1` non esiste ancora (404). La guardia su `/health` e `/replay` passa già. Fase GREEN: `rest.py` e il collegamento in `app.py`.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/vela/surfaces/rest.py
+
+- 🔧 Bash: Wire REST router into app and run tests
