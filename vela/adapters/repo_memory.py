@@ -96,6 +96,23 @@ class MemoryRejections:
         return {r.proposal_id for r in self._items.values() if r.intent_id == intent_id}
 
 
+class MemoryWebhookEvents:
+    def __init__(self):
+        self._items: Dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def claim(self, event_id: str, event_type: str, at: datetime) -> bool:
+        with self._lock:
+            if event_id in self._items:
+                return False
+            self._items[event_id] = event_type
+            return True
+
+    def release(self, event_id: str) -> None:
+        with self._lock:
+            self._items.pop(event_id, None)
+
+
 class MemoryRepositories:
     def __init__(self):
         self.clear()
@@ -106,3 +123,4 @@ class MemoryRepositories:
         self.proposals = MemoryProposals()
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
+        self.webhook_events = MemoryWebhookEvents()

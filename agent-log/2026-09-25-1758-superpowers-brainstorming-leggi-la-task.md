@@ -219,3 +219,23 @@ RED confermato: mancano `expire`, `total` e la nuova firma di `say_status`. Fase
 Suite verde: 410 test. Committo.
 
 - 🔧 Bash: git add vela/domain/orders.py vela/domain/models.py vela/domain/say.py vela/doma…
+
+**Task 4** — tabella `stripe_events`. Fase RED:
+
+- 🔧 Bash: uv run python - <<'EOF' p="tests/repo_contract.py"; s=open(p).read().rstrip("\n"…
+
+RED confermato. Fase GREEN:
+
+- 🔧 Bash: cat > alembic/versions/0003_stripe_events.py <<'EOF' """Tabella stripe_events: i…
+
+Il controllo sull'esistenza di `.env` è stato bloccato: giusto così, non lo tocco. Eseguo solo la suite.
+
+- 🔧 Bash: git status --short && uv run python -m unittest discover -s tests 2>&1 | tail -3
+
+Il comando bloccato conteneva anche l'implementazione, che quindi non è stata applicata. La rilancio senza il controllo su `.env`.
+
+- 🔧 Bash: cat > alembic/versions/0003_stripe_events.py <<'EOF' """Tabella stripe_events: i…
+
+Suite verde: 412 test, 13 saltati. I test Postgres sono saltati perché `DATABASE_URL` non è nell'ambiente: lo annoto tra le decisioni di esecuzione. Committo.
+
+- 🔧 Bash: git add vela/ports/repositories.py vela/adapters/schema.py alembic/versions/0003…
