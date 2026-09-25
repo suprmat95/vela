@@ -305,3 +305,7 @@ Il test delle route ora passa: fa da guardia di regressione per i Task 5 e 6. Gl
 Tutto verde. Resta un warning MCP stampato in console: lo metto sotto `assertLogs` nel test.
 
 - 🔧 Bash: uv run python - <<'EOF' p="tests/test_mcp_tools.py"; s=open(p).read() o='''     …
+
+**Task 8** — documentazione. Estraggo `docs/stripe.md` dal piano e aggiorno `rest.md`, README e `acceptance.md`.
+
+- 🔧 Bash: uv run python - <<'EOF' p="docs/plans/2026-09-25-m6-stripe.md"; s=open(p).read()…

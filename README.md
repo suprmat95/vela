@@ -65,10 +65,10 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
 | `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
-| `STRIPE_SECRET_KEY` | in `live` | Chiave segreta Stripe (account di test). |
-| `STRIPE_WEBHOOK_SECRET` | in `live` | Segreto per verificare la firma dei webhook Stripe. |
+| `STRIPE_SECRET_KEY` | per Stripe reale | Chiave segreta Stripe (account di test). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; vedi `docs/stripe.md`. |
+| `STRIPE_WEBHOOK_SECRET` | con `STRIPE_SECRET_KEY` | Segreto per verificare la firma dei webhook su `/webhooks/stripe`. Senza, con la chiave impostata l'app non parte. |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
-| `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. |
+| `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. Obbligatoria con `STRIPE_SECRET_KEY`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku per gli intenti non capiti dal parser. |
 
 ## Docker
