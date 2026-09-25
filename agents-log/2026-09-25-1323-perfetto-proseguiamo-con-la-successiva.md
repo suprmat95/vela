@@ -360,3 +360,51 @@ C'è un header `Link` verso `/.well-known/vela/ledger`: probabilmente è "the wi
 - 🔧 Bash: Try a second batch of HMAC variants (raw key bytes, alternative key 2, separators), each with a fresh nonce
 
 - 🔧 Bash: Append the key 5 notes and the corrected key chain to the easter egg doc and commit
+
+Catena completa: **5 chiavi su 5, +5 ore sul tuo orologio.** Lo stage 5 è stato accettato via API e lo stato del server lo conferma.
+
+**Cosa non tornava.** Le quattro chiavi erano tutte giuste come le avevamo, e il timing del nonce non c'entrava. Il punto era la frase "exactly as they were given to you": per gli stage 2 e 3 il server aveva accettato anche `p_g_1d27qron` e il suo sigillo `1f500cd8`, ma per la firma usa i suoi valori canonici, cioè l'hotel più economico della lista alloggi e il sigillo calcolato su quello.
+
+| # | Stage | Chiave canonica |
+|---|---|---|
+| 1 | The wire | `VELA-DMFT-DPN2` |
+| 2 | The cart | `p_g_np3dww01` |
+| 3 | The seal | `29814149` |
+| 4 | The stream | `VELA-66EP-D57R` |
+| 5 | The signature | HMAC-SHA256 di nonce+email con quelle 4 chiavi concatenate |
+
+**Come l'ho trovato**
+
+- Dal frontend del sito ho visto che il pulsante Submit chiama `POST /api/key`, quindi ho inviato l'HMAC direttamente via API, pochi millisecondi dopo il nonce.
+- Ho confermato la chiave 1 leggendo il "ledger" linkato da un header `Link` della home page, che con il tuo token restituisce proprio `VELA-DMFT-DPN2`.
+- Ho provato in sequenza una ventina di interpretazioni, ognuna con un nonce fresco. Quella con chiave 2 e 3 canoniche è passata al primo colpo.
+
+Tutto è annotato in `docs/easter-eggs.md`, inclusa la lista delle varianti scartate, e committato in 4 commit piccoli.
+
+Una cosa da decidere tu: il token di sessione del sito è finito in chat e quindi nel transcript JSONL dentro `agents-log/`. Scade a fine ottobre e serve solo per la challenge, ma se preferisci posso rimuoverlo dal JSONL prima del push.
+
+## Utente 14:08
+
+rimuovilo
+
+## Agente 14:09
+
+Prima raccolgo i fatti: in quali file del repo e in quali commit compare il token, e se quei commit sono già stati pushati.
+
+- 🔧 Bash: Find where the token appears in the repo, git history, remote state and the session transcript
+
+- 🔧 Bash: Redact the token in the session transcript, regenerate the agents-log files, delete the scratchpad token and verify
+
+- 🔧 AskUserQuestion
+
+- 🔧 Bash: Check when the agents-log hook fires before rewriting history
+
+- 🔧 Bash: Rewrite the local commits to redact the token from agents-log files, verify, and restore the regenerated log files
+
+- 🔧 Bash: Clean the index, rewrite the two local commits to redact the token, verify and restore the regenerated log files
+
+- 🔧 Bash: Drop the backup ref and reflogs, garbage-collect the old commits, commit the regenerated log, and verify no token remains anywhere
+
+- 🔧 Bash: Find where the token reappeared in the transcript and check the state of the last commit
+
+- 🔧 Bash: Redact the transcript again, regenerate the agents log, commit it and verify the whole history is clean
