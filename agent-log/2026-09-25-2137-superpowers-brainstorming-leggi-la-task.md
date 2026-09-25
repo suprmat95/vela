@@ -479,3 +479,9 @@ Aggiungo l'import mancante nel chooser e le frasi `price` in `say.py`:
 - 🔧 Bash: Read RF-08 text
 
 - 🔧 Bash: Record decisions and commit Task 6b
+
+- 🔧 Bash: Simplify stop states in rest_flow, rerun tests
+
+Suite verde. Faccio il commit del Task 6:
+
+- 🔧 Bash: Commit Task 6
