@@ -114,3 +114,11 @@ T2 chiusa: rinomina fatta, storia preservata, e l'hook ora logga anche questa se
 - 🔧 Bash: Show the failing test in the T3 log
 
 - 🔧 Bash: Fix the no-dotenv test, commit, and record T3 in ledger
+
+T3 chiusa. T4: engine e check del DB, test prima.
+
+- 🔧 Bash: Write failing tests for vela.adapters.db
+
+- 🔧 Bash: Implement vela.adapters.db and run its tests
+
+- 🔧 Bash: Time each db test individually
