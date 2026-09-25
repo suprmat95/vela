@@ -4,8 +4,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, make_product
-from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Participant, Period,
-                                Proposal, Rejection, TravelerProfile)
+from vela.domain.models import (Area, Criteria, Intent, Order, OrderStatus, Participant,
+                                Period, Proposal, Rejection, TravelerProfile)
 from vela.ports.repositories import DuplicateOrder
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
@@ -67,6 +67,18 @@ class RepositoryContract:
     def test_intents_round_trip(self):
         self.repos.intents.add(intent())
         self.assertEqual(self.repos.intents.get("i1"), intent())
+        self.assertIsNone(self.repos.intents.get("nope"))
+
+    def test_intents_update_criteria(self):
+        self.repos.intents.add(intent())
+        new = replace(CRITERIA, budget=Decimal("560.00"), area=Area("city", "Alicante", "ES"),
+                      language="en")
+        self.repos.intents.update_criteria("i1", new)
+        got = self.repos.intents.get("i1")
+        self.assertEqual(got.criteria, new)
+        self.assertEqual((got.id, got.text, got.profile, got.created_at),
+                         ("i1", intent().text, PROFILE, NOW))
+        self.repos.intents.update_criteria("nope", new)   # nessun effetto, nessun errore
         self.assertIsNone(self.repos.intents.get("nope"))
 
     def seed(self):

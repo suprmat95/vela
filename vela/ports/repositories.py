@@ -2,7 +2,8 @@
 from datetime import datetime
 from typing import Iterable, List, Optional, Protocol, Set
 
-from vela.domain.models import Intent, Order, OrderStatus, Product, Proposal, Rejection
+from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
+                                Rejection)
 
 
 class DuplicateOrder(Exception):
@@ -20,6 +21,7 @@ class ProductRepository(Protocol):
 class IntentRepository(Protocol):
     def add(self, intent: Intent) -> None: ...
     def get(self, intent_id: str) -> Optional[Intent]: ...
+    def update_criteria(self, intent_id: str, criteria: Criteria) -> None: ...
 
 
 class ProposalRepository(Protocol):

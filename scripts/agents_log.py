@@ -177,6 +177,21 @@ def render_markdown(entries, meta):
     return "\n".join(out)
 
 
+SESSION_LINE_RE = re.compile(r"^- Sessione: `([^`]+)`", re.M)
+
+
+def _free_path(md_path, session_id):
+    """Il percorso del log per questa sessione. Se il nome e' gia' occupato dal log di un'altra
+    sessione (stessa ora di inizio, stesso slug), aggiunge le prime 8 cifre dell'id sessione."""
+    if not session_id or not os.path.exists(md_path):
+        return md_path
+    with open(md_path, encoding="utf-8") as f:
+        found = SESSION_LINE_RE.search(f.read())
+    if found is None or found.group(1) == session_id:
+        return md_path
+    return md_path[:-len(".md")] + "-" + session_id[:8] + ".md"
+
+
 def transcribe(transcript_path, out_dir):
     """Scrive <out_dir>/<nome>.md e una copia identica del transcript in <nome>.jsonl.
 
@@ -188,7 +203,7 @@ def transcribe(transcript_path, out_dir):
     if name is None:
         return None
     os.makedirs(out_dir, exist_ok=True)
-    md_path = os.path.join(out_dir, name)
+    md_path = _free_path(os.path.join(out_dir, name), meta.get("session_id"))
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(render_markdown(entries, meta))
     jsonl_path = md_path[:-len(".md")] + ".jsonl"

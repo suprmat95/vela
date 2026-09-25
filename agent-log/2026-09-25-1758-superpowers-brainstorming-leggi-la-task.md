@@ -327,3 +327,71 @@ Il diff di M6 è pulito: 41 file dal punto di partenza, nessuna chiave. Nel frat
 - 🔧 Bash: git merge-tree 103908d HEAD master | grep -B2 -A12 "^+<<<<<<<" | head -80; git m…
 
 - 🔧 Bash: uv run python - <<'EOF' p="docs/decisions.md"; d=open(p).read().rstrip("\n") d+=…
+
+Ho eseguito tutto il piano M6 in TDD sul branch `task/m6`: 11 commit, test visti fallire prima di ogni implementazione. La suite finale conta 445 test, tutti verdi, con 13 saltati: all'inizio erano 390. Nel diff non ci sono chiavi, e nessuna chiamata a Stripe o HofJ.
+
+**Cosa fa ora Vela:**
+- **Accettazione:** crea una Checkout Session di Stripe per il totale reale in EUR, con `metadata` (ordine e itinerario) e scadenza 24 h dalla creazione dell'ordine. Un secondo tentativo restituisce sempre la stessa sessione, non una nuova.
+- **Errore di Stripe:** la REST risponde 503 `payments-unavailable`, MCP legge una frase per il viaggiatore. Un nuovo accept ricrea il link senza duplicare ordine o itinerario.
+- **Webhook `POST /webhooks/stripe`:** verifica la firma. `checkout.session.completed` porta l'ordine a `paid_pending_booking` e avvia la prenotazione; `checkout.session.expired` lo porta a `expired`. Gli eventi duplicati non hanno effetto; firma errata, vecchia o payload manomesso danno 400; un errore interno dà 500 e Stripe ripete l'evento.
+- **Stato dell'ordine:** ora include `total`, `currency` e `payment_url`. Il link compare solo finché l'ordine è da pagare.
+- **Pagine di ritorno:** `/checkout/success` e `/checkout/cancel`, statiche, senza dati dell'ordine.
+- **Scelta di Stripe:** con `STRIPE_SECRET_KEY` si usa Stripe reale. Senza `STRIPE_WEBHOOK_SECRET` o `VELA_PUBLIC_URL` l'app non parte.
+
+**Fuori dal piano:**
+- **Logging dei test:** `alembic/env.py` spegneva i logger di Vela quando le migrazioni giravano nello stesso processo dei test, per cui alcuni test fallivano solo nella suite completa. Ho corretto con `disable_existing_loggers=False` e aggiunto un test che lo verifica. In produzione non cambia nulla, perché lì le migrazioni girano in un processo separato.
+- **Valori attesi:** in alcuni test ho scritto URL, path e scadenza a mano invece di prenderli dalle costanti del codice sotto test, altrimenti il test passerebbe sempre.
+
+Tutto è registrato in `docs/decisions.md`.
+
+**Cosa non ho verificato o fatto:**
+- **Test su Postgres non eseguiti:** `DATABASE_URL` non è nell'ambiente, quindi la registrazione degli eventi webhook e la migrazione `0003` sono verificate solo in memoria e su SQLite.
+- **Test manuale:** lo fai tu dopo il deploy, seguendo `docs/stripe.md`: registrare l'endpoint nel Dashboard di Stripe, poi pagare con la carta `4242…`.
+- **Merge con `master`:** nel frattempo su `master` è entrata M9. Il merge darebbe 9 conflitti, tutti aggiunte adiacenti da tenere entrambe. Il punto delicato è `vela/app.py`, dove vanno tenuti sia `build_payments(settings)` sia `extractor=extractor`. Non ho fatto rebase né merge perché le regole del repo chiedono di chiederti prima.
+- **Test esistente inefficace:** `test_replay_router_absent_in_live` passa sempre, qualunque cosa succeda. In questa versione di FastAPI le route incluse non espongono `path` in `app.routes`. Non è nello scope di M6, quindi non l'ho toccato.
+
+Vuoi che faccia il merge di `master` in `task/m6` risolvendo i conflitti, o preferisci un rebase?
+
+## Utente 18:52
+
+si
+
+## Agente 18:52
+
+Interpreto il "sì" come via libera al **merge** di `master` in `task/m6`, la prima opzione. Non riscrive la storia. Procedo.
+
+- 🔧 Bash: git status --short && git merge master --no-commit 2>&1 | tail -15
+
+- 🔧 Bash: git log --oneline master -- agent-log/2026-09-25-1758-superpowers-brainstorming-…
+
+- 🔧 Bash: git stash push -m "m6-agentlog-before-merge-7f3a" -- agent-log/2026-09-25-1758-s…
+
+Stash registrato (`44320819`). I conflitti reali sono 5 file, gli altri si sono fusi da soli. Li guardo uno per uno.
+
+- 🔧 Bash: for f in vela/app.py vela/adapters/repo_postgres.py tests/test_app_replay.py REA…
+
+Tutti e cinque si risolvono tenendo entrambe le parti. In `app.py` combino `build_payments(settings)` di M6 con l'`extractor` di M9.
+
+- 🔧 Bash: awk '/^<<<<<<< |^=======$|^>>>>>>> /{print NR": "$0}' docs/decisions.md && uv ru…
+
+Conflitti risolti. Controllo che M9 non abbia aggiunto migrazioni in conflitto con la `0003`, poi eseguo la suite completa sul risultato del merge.
+
+- 🔧 Bash: ls alembic/versions; grep -rn "<<<<<<<\|>>>>>>>" --include=*.py --include=*.md .…
+
+Il `tail -15` di prima aveva tagliato la lista dei conflitti: ci sono marcatori anche in `say.py` e `usecases.py`. Guardo l'elenco completo dei file non risolti.
+
+- 🔧 Bash: git diff --name-only --diff-filter=U; for f in vela/domain/usecases.py vela/doma…
+
+- 🔧 Bash: git show master:vela/domain/say.py | grep -n "def \|lang" | head -60; git show m…
+
+- 🔧 Bash: sed -n 118,136p vela/domain/usecases.py; sed -n 183,195p vela/domain/usecases.py
+
+- 🔧 Bash: uv run python - <<'EOF' import re pat=re.compile(r"<<<<<<< HEAD\n(.*?)=======\n(…
+
+Un solo test di M9 fallisce, perché cerca "waiting for payment". Adatto la frase inglese a "waiting for payment of %s", che resta naturale, invece di toccare il test di M9.
+
+- 🔧 Bash: sed -i '' 's/"The order is waiting for a payment of %s: use the link I sent you.…
+
+- 🔧 Bash: uv run python - <<'EOF' p="docs/decisions.md"; d=open(p).read() i=d.index("| Mer…
+
+- 🔧 Bash: git commit -q -m "Merge master (M9) into task/m6  Conflicts resolved keeping bot…
