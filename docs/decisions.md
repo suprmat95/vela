@@ -151,3 +151,17 @@ Origine: intervista sulla macro task M2, piano in `docs/plans/2026-09-25-m2-domi
 | Proposta "aperta" | `get_proposal` restituisce l'ultima proposta dell'intento non rifiutata, anche se già accettata; una nuova scelta avviene solo dopo un rifiuto | Idempotenza: due `get_proposal` o un `get_proposal` dopo `accept` non producono un secondo prodotto né un secondo ordine |
 | Modalità `live` | `create_app` fallisce all'avvio con `RuntimeError("VELA_UPSTREAM_MODE=live non disponibile prima di M5")` | Niente porte finte spacciate per reali |
 | Denaro e id | `Decimal` per prezzi e totali (stringa con due decimali in `to_dict`), uuid4 come stringhe per id; codice prenotazione replay `R-` + 6 cifre | Coerente con `Money.amount` stringa di HofJ |
+
+## 2026-09-25 — M2: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m2-dominio-replay.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Schema dei test Postgres | I test dei repository usano lo schema `vela_test` (`search_path` nell'URL), creato se manca e svuotato a ogni test | I test cancellano le tabelle e non devono toccare i dati dell'app su Render |
+| Migrazione su Render | Il test di M0 `test_upgrade_head_is_idempotent` applica `alembic upgrade head` allo schema `public`: eseguendo la suite con `DATABASE_URL` il DB di Render è passato a `0002` prima del deploy di M2 | Comportamento già previsto da M0; le tabelle nuove sono vuote e il codice M0 in produzione le ignora. Il deploy di M2 troverà la migrazione già applicata |
+| Catalogo senza JSON grezzo nel chooser | `products.list_all()` non legge la colonna `raw`; `get()` la include | Il chooser non ne ha bisogno e il JSON grezzo della fixture pesa circa 1 MB |
+| Prenotazione replay dopo un riavvio | `ReplayHofJ.create_booking` accetta qualunque id `it-replay-*`, anche se non è più in memoria | La ripresa di RF-27 avviene in un processo nuovo che non ha l'itinerario |
+| Default RF-13 | `TravelerDefaults` definita in `vela/domain/models.py` con i valori; `DEFAULT_TRAVELER` in `vela/config.py` | Il dominio non importa la configurazione |
+| Verifica end-to-end | Il flusso completo in replay (intento, proposta, rifiuto, doppio accept, checkout, `confirmed` con codice `R-`) è stato eseguito sull'app vera con Postgres nello schema `vela_test` | Prova il wiring reale oltre ai test con repository in memoria |
+| Interprete | Test eseguiti con `uv run python` (3.12); il `python3` di sistema è 3.7 | Come da M0 |

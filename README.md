@@ -6,7 +6,9 @@ ElevenLabs, o un client REST). Non ha una homepage e non mostra liste: propone u
 volta, lo prenota sull'API House of Journeys e restituisce il codice di prenotazione.
 Requisiti in `docs/spec.md`, roadmap in `docs/roadmap.md`, decisioni in `docs/decisions.md`.
 
-Stato: M0 (fondamenta). L'app espone solo `GET /health`.
+Stato: M2 (dominio e replay). L'app espone `GET /health` e, in replay, `GET /replay/checkout/{order_id}`
+(pagamento simulato). I cinque casi d'uso (`create_intent`, `get_proposal`, `reject_proposal`,
+`accept_proposal`, `get_order_status`) vivono in `vela/domain/usecases.py` e arrivano su MCP (M3) e REST (M4).
 
 ## Requisiti
 
@@ -24,6 +26,10 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
+In replay, al primo avvio con la tabella `products` vuota, l'app carica `fixtures/catalog.json`
+(110 prodotti) e riprende gli ordini `paid_pending_booking`. `VELA_UPSTREAM_MODE=live` è rifiutato
+fino a M5.
+
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
 
@@ -40,6 +46,11 @@ Nessun test chiama servizi esterni. I test che richiedono Postgres girano solo s
 `DATABASE_URL` è impostata, altrimenti vengono saltati. Attenzione: il `python3` di sistema
 potrebbe essere una versione vecchia; la suite richiede il 3.12 del venv e lo verifica.
 
+I test Postgres lavorano nello schema `vela_test` (creato se manca) e non toccano le tabelle
+dell'app. Fa eccezione il test di migrazione di M0, che applica `alembic upgrade head` allo
+schema principale. Per eseguirli in locale: `set -a; . ./.env; set +a; uv run python -m unittest
+discover -s tests` in una sola riga, senza stampare le variabili.
+
 ## Variabili d'ambiente
 
 Solo variabili d'ambiente: nessun file `.env` viene letto dal codice (e non va mai aperto
@@ -55,7 +66,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `STRIPE_SECRET_KEY` | in `live` | Chiave segreta Stripe (account di test). |
 | `STRIPE_WEBHOOK_SECRET` | in `live` | Segreto per verificare la firma dei webhook Stripe. |
 | `VELA_API_TOKEN` | da M4 | Bearer token statico delle superfici REST e MCP. |
-| `VELA_PUBLIC_URL` | da M6 | URL pubblico di Vela, usato per i ritorni da Stripe. |
+| `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku per gli intenti non capiti dal parser. |
 
 ## Docker
@@ -89,10 +100,10 @@ URL live: https://vela-n506.onrender.com (`GET /health`, deploy M0 verificato il
 ## Struttura
 
 ```
-vela/domain     casi d'uso e modelli (M2)
-vela/ports      interfacce verso HofJ e Stripe (M2)
-vela/adapters   implementazioni: db.py, HofJ, Stripe, replay (M2, M5, M6)
-vela/surfaces   health.py, REST (M4), MCP (M3), webhook (M6)
+vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2)
+vela/ports      HofJPort, PaymentsPort, repository (M2)
+vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto, runner (M2); HofJ HTTP (M5), Stripe (M6)
+vela/surfaces   health.py, replay.py (M2), MCP (M3), REST (M4), webhook (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per la modalità replay (M1)

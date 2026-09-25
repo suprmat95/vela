@@ -307,3 +307,11 @@ Ora il contratto dei repository su Postgres. Carico `.env` nella stessa riga del
 Suite verde. Faccio il commit e poi provo il flusso completo sull'app vera con Postgres. Uso lo schema `vela_test`, non quello dell'app.
 
 - 🔧 Bash: Commit Task 12, then run the full replay flow through the real app on Postgres in the test schema
+
+- 🔧 Bash: Locate README lines to edit and README checks in tests
+
+- 🔧 Bash: Update README status, startup, env var and structure
+
+- 🔧 Bash: Update README test notes and decisions, then run final verification
+
+- 🔧 Bash: Confirm test counts with Postgres, commit Task 13 and list branch commits
