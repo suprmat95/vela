@@ -43,13 +43,13 @@ def make_app(preload=False):
     return app, vela
 
 
-def staging_fixtures_dir():
+def staging_fixtures_dir(locale="en"):
     """Cartella con la sola fixture di staging (un prodotto, id 118): in live si sceglie per host."""
     folder = tempfile.mkdtemp()
     entry = {"id": "118", "title": "Padel Barcelona", "slug": "padel-barcelona", "price": 245,
              "currency": "EUR", "minPax": 1, "availabilities": []}
     with open(os.path.join(folder, "catalog-staging.json"), "w", encoding="utf-8") as fh:
-        json.dump({"locale": "en", "brand": "staging.weebora.com",
+        json.dump({"locale": locale, "brand": "staging.weebora.com",
                    "base_url": "https://staging.api.hofj.com", "products": [entry],
                    "details": {"118": {"catalog": entry, "raw": entry}}}, fh)
     return folder
@@ -157,7 +157,7 @@ class ModeTest(unittest.TestCase):
         hofj = app.state.vela.hofj
         self.assertIsInstance(hofj, HofJHttp)
         self.assertEqual((str(hofj.client.base_url), hofj.brand, hofj.locale),
-                         ("https://staging.api.hofj.com", "staging.weebora.com", "it"))
+                         ("https://staging.api.hofj.com", "staging.weebora.com", "en"))
         self.assertIsInstance(app.state.vela.payments, StripePayments)
 
     def test_live_loads_the_fixture_recorded_on_hofj_base_url(self):
@@ -165,6 +165,12 @@ class ModeTest(unittest.TestCase):
         with mock.patch("vela.app.FIXTURES_DIR", folder):
             app = create_app(Settings(**self.LIVE))
         self.assertEqual([p.id for p in app.state.catalog_loader()], ["118"])
+
+    def test_live_cart_locale_is_the_locale_of_the_fixture(self):
+        for locale in ("en", "it"):
+            with self.subTest(locale), mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir(locale)):
+                app = create_app(Settings(**self.LIVE))
+                self.assertEqual(app.state.vela.hofj.locale, locale)
 
     def test_live_without_a_fixture_for_the_host_is_refused(self):
         folder = staging_fixtures_dir()

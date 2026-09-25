@@ -218,3 +218,47 @@ Rossi per i motivi attesi. GREEN:
 - 🔧 Bash: Implement fixture selection and run tests
 
 - 🔧 Bash: Commit Task 3
+
+Task 3 è fatto: commit `e33edc4`, suite verde con 729 test e 40 saltati.
+
+**Cosa ho fatto**
+- In `vela/domain/catalog.py` ci sono ora `fixture_meta(path)` e `select_fixture(fixtures_dir, base_url)`.
+- In `vela/app.py`, in live il catalogo si carica dalla fixture registrata su `HOFJ_BASE_URL`. Se non ne esiste una, l'avvio fallisce con l'elenco degli host trovati, senza segreti nel messaggio. In replay il catalogo resta `fixtures/catalog.json`.
+- Test: nuovo `tests/test_fixture_select.py` (5 test) e 3 test nuovi in `tests/test_app_replay.py`. Tutti fallivano prima del codice.
+
+**Cosa ho deciso**
+- Per i test ho usato una costante `FIXTURES_DIR` in `vela/app.py`, sostituita con `mock.patch`, invece del parametro `fixtures_dir` che avevo proposto. Motivo: i test del live passano da `create_app`, che chiama `build_vela` al suo interno, e il parametro avrebbe dovuto attraversare anche `create_app`.
+- Ho aggiornato il test esistente `test_live_builds_http_adapter_and_m6_payments`, che con l'URL di staging si aspettava il catalogo di produzione. Ora usa una cartella con una fixture di staging finta.
+
+**Su cosa ho dubbi**
+- Finché `fixtures/catalog-staging.json` non esiste (Task 7), un'app in live su staging non parte. Non è un problema oggi, perché `master` e Render sono in replay. Però `task/m7` non va mergiato prima del Task 7: il piano lo prevede già nel Task 8.
+
+**Proposta per il Task 4 (`HofJHttp` col locale della fixture), aspetto il tuo OK:**
+- In `build_vela`, in live, la fixture si sceglie una volta sola. Il suo `locale` (`fixture_meta`) va sia al loader sia a `HofJHttp`, tramite un nuovo argomento `build_hofj(settings, locale="it")`. `build_hofj` resta responsabile dei controlli sulle variabili mancanti, che avvengono prima della scelta della fixture: così un `HOFJ_BASE_URL` assente dà ancora l'errore di prima.
+- `HofJHttp` accetta già `locale` e lo manda su ogni chiamata del carrello, quindi l'adapter non cambia.
+- Test prima del codice, in `tests/test_app_replay.py`, con la fixture di staging finta in `en`:
+  - `app.state.vela.hofj.locale == "en"`;
+  - con una fixture `it` registrata sullo stesso host il locale è `it`.
+- Un test end-to-end sul wiring: con `httpx.MockTransport` iniettato nel client dell'adapter, `create_itinerary` manda `?locale=en&brand=staging.weebora.com`. Così si verifica che il locale arrivi davvero nella richiesta, non solo nell'attributo.
+
+## Utente 21:51
+
+ok
+
+## Agente 21:51
+
+- 🔧 Bash: Read HofJHttp _call and test helpers
+
+- 🔧 Bash: Check locale coverage in adapter tests
+
+- 🔧 Bash: Add locale wiring tests, expect red
+
+Rossi per il motivo giusto: il locale resta `it`. GREEN:
+
+- 🔧 Bash: Wire fixture locale into HofJHttp
+
+- 🔧 Bash: Refactor build_hofj to return loader, run suite
+
+Il fallback `or "it"` non ha un test che lo richieda, e le fixture scritte da `record_catalog.py` hanno sempre `locale`. Lo tolgo:
+
+- 🔧 Bash: Drop untested fallback, run suite, commit Task 4

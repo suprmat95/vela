@@ -28,7 +28,7 @@ from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.booking import BookingJob
-from vela.domain.catalog import select_fixture
+from vela.domain.catalog import fixture_meta, select_fixture
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
@@ -59,11 +59,15 @@ def build_payments(settings: Settings) -> PaymentsPort:
     return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
 
 
-def build_hofj(settings: Settings):
+def build_hofj(settings: Settings) -> Tuple[object, CatalogLoader]:
     """Replay (RNF-08) oppure HofJ vero con `VELA_UPSTREAM_MODE=live` (M5). In live servono le
-    tre variabili HofJ e un pagamento vero: il checkout finto non è montato in live."""
+    tre variabili HofJ e un pagamento vero: il checkout finto non è montato in live.
+    Restituisce l'adapter e il caricatore del catalogo: in live la fixture registrata su
+    HOFJ_BASE_URL (decisione M7), il cui locale è anche quello del carrello, finché non c'è il
+    sync (M10)."""
     if settings.vela_upstream_mode == REPLAY:
-        return ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
+        hofj = ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
+        return hofj, hofj.load_catalog
     if settings.vela_upstream_mode != LIVE:
         raise RuntimeError("VELA_UPSTREAM_MODE=%s sconosciuto: usare replay o live"
                            % settings.vela_upstream_mode)
@@ -75,15 +79,14 @@ def build_hofj(settings: Settings):
     if not settings.stripe_secret_key:
         raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
                            "non esiste contro HofJ vero")
-    return HofJHttp(settings.hofj_base_url, settings.hofj_api_key, settings.hofj_brand)
+    fixture = select_fixture(FIXTURES_DIR, settings.hofj_base_url)
+    hofj = HofJHttp(settings.hofj_base_url, settings.hofj_api_key, settings.hofj_brand,
+                    locale=fixture_meta(fixture)["locale"])
+    return hofj, ReplayHofJ(fixture).load_catalog
 
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:
-    hofj = build_hofj(settings)
-    if isinstance(hofj, ReplayHofJ):
-        catalog_loader = hofj.load_catalog
-    else:   # in live: la fixture registrata su HOFJ_BASE_URL, finché non c'è il sync (M10)
-        catalog_loader = ReplayHofJ(select_fixture(FIXTURES_DIR, settings.hofj_base_url)).load_catalog
+    hofj, catalog_loader = build_hofj(settings)
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
         from vela.adapters.haiku import HaikuExtractor
