@@ -84,6 +84,11 @@ class PostgresProducts:
         with self.engine.connect() as conn:
             return conn.execute(select(func.max(products_t.c.fetched_at))).scalar_one()
 
+    def set_bookable(self, product_id: str, bookable: bool, checked_at: datetime) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(update(products_t).where(products_t.c.id == product_id)
+                         .values(bookable=bookable, bookable_checked_at=checked_at))
+
 
 class PostgresIntents:
     def __init__(self, engine: Engine):

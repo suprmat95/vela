@@ -102,6 +102,18 @@ class GetProposalTest(unittest.TestCase):
         self.assertEqual(first.proposal.id, second.proposal.id)
         self.assertEqual(len(vela.repos.proposals.list_for_intent(iid)), 1)
 
+    def test_product_unbookable_for_more_than_24h_is_proposed_again(self):
+        """RF-34: il caso d'uso passa l'ora corrente al chooser."""
+        from dataclasses import replace
+        stale = replace(make_product(3, price=350, country="ES", destination="Valencia"),
+                        bookable=False, bookable_checked_at=NOW - timedelta(hours=25))
+        fresh = replace(make_product(4, price=390, country="ES", destination="Lanzarote"),
+                        bookable=False, bookable_checked_at=NOW - timedelta(hours=1))
+        vela = make_vela(products=[stale, fresh])
+        r = vela.get_proposal(vela.create_intent(INTENT).intent_id)
+        self.assertIsInstance(r, ProposalMade)
+        self.assertEqual(r.product.product_id, "3")
+
     def test_no_match_names_criterion(self):
         vela = make_vela(products=[make_product(1, sport="tennis")])
         iid = vela.create_intent(INTENT).intent_id

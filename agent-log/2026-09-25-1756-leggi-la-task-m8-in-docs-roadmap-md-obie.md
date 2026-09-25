@@ -2648,3 +2648,69 @@ Fallisce, come atteso, su `ConfigError`, che non esiste ancora. Implemento porta
 Confermato: senza la lettura del totale, i due test dell'accettazione falliscono per la ragione giusta. Con la modifica ripristinata passano. Faccio il commit.
 
 - 🔧 Bash: Commit Task 7
+
+Task 7 fatto (commit `4c2698a`): la suite passa da 576 a **586 test, verde**, con 39 saltati senza `DATABASE_URL`.
+
+**Porta HofJ** (`vela/ports/hofj.py`):
+- `create_itinerary` restituisce **solo l'id**, come la vera API.
+- Nuovi metodi:
+  - `get_itinerary(id)`, che restituisce l'importo da pagare (`openAmount`);
+  - `get_quota()`, che restituisce la finestra letta da `/v1/quota`.
+- Nuovo errore `ConfigError` (per 401/403). `QuotaError` ora porta `retry_after`.
+
+**Replay** (`vela/adapters/hofj_replay.py`):
+- Latenza simulata `latency=(min, max)`, con la funzione di attesa iniettabile nei test.
+- Quota simulata `limit` su finestre di 60 s. Ogni chiamata conta, `get_quota` compreso. Oltre il limite solleva `QuotaError`.
+- Di default, niente latenza e quota illimitata.
+
+**`FakeHofJ` (test):**
+- supporta `get_itinerary` e `get_quota`;
+- supporta `fail_at`, per errori in sequenza su un metodo specifico. Servirà per i test di retry del job d'acquisto.
+
+**Accettazione:**
+- Per ora resta sincrona. Ho fatto solo l'adattamento minimo: dopo aver scritto i pax legge l'importo con `get_itinerary`.
+- Il test sull'ordine delle chiamate l'ho aggiornato insieme al codice. Poi l'ho verificato togliendo la modifica: senza `get_itinerary` due test falliscono per la ragione giusta.
+
+**Test nuovi:**
+- replay: nuova forma della porta, quota illimitata di default, 429 oltre il limite e ripartenza dopo 60 s, conteggio di tutte le chiamate, latenza, `get_quota`;
+- errori della porta.
+
+**Cosa ho deciso:**
+- **Quota illimitata in replay:** `get_quota` dichiara comunque 120 al minuto, come HofJ. In replay lo scheduler limita quindi comunque a 108.
+- **Chiamate che superano il limite:** non vengono contate. Non sappiamo se HofJ conti le chiamate rifiutate con 429.
+
+**Dubbi:** nessuno.
+
+Il prossimo è il **Task 8**, i prodotti non prenotabili:
+- `set_bookable` sui repository;
+- nel chooser, un prodotto marcato non prenotabile torna candidato dopo 24 ore (RF-33..35).
+
+Vado?
+
+## Utente 20:53
+
+vai
+
+## Agente 20:53
+
+- 🔧 Bash: Read chooser filters and product repositories
+
+- 🔧 Bash: Read choose function and chooser test style
+
+- 🔧 Bash: Write failing unbookable tests
+
+- 🔧 Bash: Add 24h recheck to chooser
+
+- 🔧 Bash: Add set_bookable to port and memory repo
+
+Aggiungo `set_bookable` anche su Postgres, collego il chooser all'ora corrente nel caso d'uso e rilancio i test.
+
+- 🔧 Bash: Add Postgres set_bookable and inspect usecase tests
+
+- 🔧 Bash: Read usecase test helpers
+
+- 🔧 Bash: Add usecase test and see it fail
+
+- 🔧 Bash: Wire now into choose and run suite plus Postgres contract
+
+- 🔧 Bash: Commit Task 8

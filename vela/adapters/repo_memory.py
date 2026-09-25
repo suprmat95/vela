@@ -33,6 +33,11 @@ class MemoryProducts:
     def last_fetched_at(self) -> Optional[datetime]:
         return max((p.fetched_at for p in self._items.values()), default=None)
 
+    def set_bookable(self, product_id: str, bookable: bool, checked_at: datetime) -> None:
+        p = self._items.get(product_id)
+        if p is not None:
+            self._items[product_id] = replace(p, bookable=bookable, bookable_checked_at=checked_at)
+
 
 class MemoryIntents:
     def __init__(self):

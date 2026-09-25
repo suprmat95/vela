@@ -98,8 +98,9 @@ class Vela:
         if open_proposals:
             return self._made(open_proposals[-1], lang=lang)
         rejected_products = self.repos.rejections.product_ids_for_intent(intent.id)
+        now = self.now()
         result = choose(self.repos.products.list_all(), intent.criteria, rejected_products,
-                        today=self.now().date())
+                        today=now.date(), now=now)
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
                            say.say_no_match(result.failed_criterion, intent.criteria))

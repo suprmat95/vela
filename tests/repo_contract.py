@@ -94,6 +94,21 @@ class RepositoryContract:
         self.repos.products.upsert_many([make_product(1), make_product(2)])
         self.repos.intents.add(intent())
 
+    def test_set_bookable_roundtrip(self):
+        """RF-33: marcato non prenotabile con l'ora del controllo; riabilitato più tardi (RF-34)."""
+        self.repos.products.upsert_many([make_product(1), make_product(2)])
+        self.repos.products.set_bookable("1", False, NOW)
+        p = self.repos.products.get("1")
+        self.assertEqual((p.bookable, p.bookable_checked_at), (False, NOW))
+        listed = {q.id: q for q in self.repos.products.list_all()}
+        self.assertEqual((listed["1"].bookable, listed["1"].bookable_checked_at), (False, NOW))
+        self.assertTrue(listed["2"].bookable)
+        later = NOW + timedelta(hours=25)
+        self.repos.products.set_bookable("1", True, later)
+        p = self.repos.products.get("1")
+        self.assertEqual((p.bookable, p.bookable_checked_at), (True, later))
+        self.repos.products.set_bookable("nope", False, NOW)     # nessun effetto, nessun errore
+
     # proposte
     def test_proposals_ordered_by_created_at(self):
         self.seed()

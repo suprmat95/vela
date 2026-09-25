@@ -1,7 +1,7 @@
 import re
 import unittest
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from support import TODAY, make_product
@@ -278,3 +278,29 @@ class ReasonTest(unittest.TestCase):
     def test_italian_reason_is_unchanged_by_language_default(self):
         self.assertEqual(self.reason(crit(area=None, budget=None, period=None, language="it")),
                          "È a Lanzarote. Parte il 1 ottobre 2026 ed è la più economica compatibile.")
+
+
+class UnbookableRecheckTest(unittest.TestCase):
+    """RF-33, RF-34: un prodotto non prenotabile torna candidato 24 h dopo `bookable_checked_at`."""
+    NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+
+    def unbookable(self, hours_ago):
+        return replace(make_product(1), bookable=False,
+                       bookable_checked_at=self.NOW - timedelta(hours=hours_ago))
+
+    def test_unbookable_product_excluded_within_24h(self):
+        result = choose([self.unbookable(23)], crit(), set(), TODAY, now=self.NOW)
+        self.assertEqual(result, NoChoice("bookable"))
+
+    def test_unbookable_product_candidate_again_after_24h(self):
+        result = choose([self.unbookable(24)], crit(), set(), TODAY, now=self.NOW)
+        self.assertIsInstance(result, Choice)
+        self.assertEqual(result.product.id, "1")
+
+    def test_unbookable_without_check_time_stays_excluded(self):
+        p = replace(make_product(1), bookable=False, bookable_checked_at=None)
+        self.assertEqual(choose([p], crit(), set(), TODAY, now=self.NOW), NoChoice("bookable"))
+
+    def test_choose_without_now_keeps_old_behaviour(self):
+        self.assertEqual(choose([self.unbookable(48)], crit(), set(), TODAY), NoChoice("bookable"))
+
