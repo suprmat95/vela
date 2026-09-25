@@ -128,10 +128,35 @@ class ModeTest(unittest.TestCase):
         app = create_app(Settings(vela_upstream_mode="live"))
         self.assertNotIn("/replay/checkout/{order_id}", [getattr(r, "path", None) for r in app.routes])
 
-    def test_live_with_database_is_refused(self):
+    LIVE = dict(database_url="sqlite://", vela_upstream_mode="live",
+                hofj_api_key="hofj-segreta", hofj_base_url="https://staging.api.hofj.com",
+                hofj_brand="staging.weebora.com", stripe_secret_key="rk_test_segreta",
+                vela_public_url="https://vela.test")
+
+    def test_live_builds_http_adapter_and_m6_payments(self):
+        from vela.adapters.hofj_http import HofJHttp
+        from vela.adapters.stripe_links import StripePayments
+        app = create_app(Settings(**self.LIVE))
+        hofj = app.state.vela.hofj
+        self.assertIsInstance(hofj, HofJHttp)
+        self.assertEqual((str(hofj.client.base_url), hofj.brand, hofj.locale),
+                         ("https://staging.api.hofj.com", "staging.weebora.com", "it"))
+        self.assertIsInstance(app.state.vela.payments, StripePayments)
+        self.assertEqual(len(app.state.catalog_loader()), 110)      # fixture finché non c'è M10
+
+    def test_live_requires_hofj_settings(self):
+        for missing in ("hofj_api_key", "hofj_base_url", "hofj_brand"):
+            settings = dict(self.LIVE, **{missing: None})
+            with self.subTest(missing), self.assertRaises(RuntimeError) as ctx:
+                create_app(Settings(**settings))
+            self.assertIn(missing.upper(), str(ctx.exception))
+            for secret in ("hofj-segreta", "rk_test_segreta"):
+                self.assertNotIn(secret, str(ctx.exception))
+
+    def test_live_requires_real_payments(self):
         with self.assertRaises(RuntimeError) as ctx:
-            create_app(Settings(database_url="sqlite://", vela_upstream_mode="live"))
-        self.assertIn("M5", str(ctx.exception))
+            create_app(Settings(**dict(self.LIVE, stripe_secret_key=None)))
+        self.assertIn("STRIPE_SECRET_KEY", str(ctx.exception))
 
     def test_replay_without_database_has_no_domain(self):
         app = create_app(Settings())

@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from sqlalchemy.engine import Engine
 
 from vela.adapters.db import make_engine
+from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -40,6 +41,7 @@ from vela.surfaces.replay import router as replay_router
 from vela.surfaces.rest import router as rest_router
 
 REPLAY = "replay"
+LIVE = "live"
 CatalogLoader = Callable[[], List[Product]]
 
 
@@ -54,11 +56,28 @@ def build_payments(settings: Settings) -> PaymentsPort:
     return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
 
 
-def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:
-    if settings.vela_upstream_mode != REPLAY:
-        raise RuntimeError("VELA_UPSTREAM_MODE=%s non disponibile prima di M5: usare replay"
+def build_hofj(settings: Settings):
+    """Replay (RNF-08) oppure HofJ vero con `VELA_UPSTREAM_MODE=live` (M5). In live servono le
+    tre variabili HofJ e un pagamento vero: il checkout finto non è montato in live."""
+    if settings.vela_upstream_mode == REPLAY:
+        return ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
+    if settings.vela_upstream_mode != LIVE:
+        raise RuntimeError("VELA_UPSTREAM_MODE=%s sconosciuto: usare replay o live"
                            % settings.vela_upstream_mode)
-    hofj = ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
+    missing = [name for name, value in (("HOFJ_API_KEY", settings.hofj_api_key),
+                                        ("HOFJ_BASE_URL", settings.hofj_base_url),
+                                        ("HOFJ_BRAND", settings.hofj_brand)) if not value]
+    if missing:
+        raise RuntimeError("VELA_UPSTREAM_MODE=live richiede %s" % ", ".join(missing))
+    if not settings.stripe_secret_key:
+        raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
+                           "non esiste contro HofJ vero")
+    return HofJHttp(settings.hofj_base_url, settings.hofj_api_key, settings.hofj_brand)
+
+
+def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:
+    hofj = build_hofj(settings)
+    catalog_loader = hofj.load_catalog if isinstance(hofj, ReplayHofJ) else ReplayHofJ().load_catalog
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
         from vela.adapters.haiku import HaikuExtractor
@@ -66,7 +85,7 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
                                  booking_reserve=settings.booking_reserve)
     vela = Vela(repos, hofj, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
-    return vela, hofj.load_catalog
+    return vela, catalog_loader   # in live: la fixture di M1 finché non c'è il sync (M10)
 
 
 def build_worker(vela: Vela, settings: Settings) -> Worker:

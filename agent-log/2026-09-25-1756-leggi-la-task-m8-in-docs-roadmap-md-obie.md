@@ -3110,3 +3110,11 @@ Il test fallisce perché il modulo non esiste. Scrivo l'adapter.
 I 27 test passano. Faccio il commit del Task 15.
 
 - 🔧 Bash: Run suite and commit Task 15
+
+- 🔧 Bash: Read mode tests
+
+- 🔧 Bash: Write failing live mode tests
+
+- 🔧 Bash: Implement live mode wiring and run tests
+
+- 🔧 Bash: Commit Task 16
