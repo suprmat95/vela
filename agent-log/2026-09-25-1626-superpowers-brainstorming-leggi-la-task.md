@@ -233,3 +233,9 @@ Il piano dice quello che vuoi? E quale modalità usiamo?
 Il piano lo eseguo io in questa sessione, in TDD. Parto dal Task 0: decisioni in `docs/decisions.md` e commit del piano.
 
 - 🔧 Bash: Append M3 decisions and commit the plan
+
+Task 1, fase RED: aggiungo i test delle frasi d'errore.
+
+- 🔧 Bash: Add say tests and watch them fail
+
+- 🔧 Bash: Check failure reason, implement, rerun

@@ -113,3 +113,23 @@ def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason:
 
 def say_paid() -> str:
     return "Pagamento simulato registrato: la prenotazione è in corso."
+
+
+_NOT_FOUND = {
+    "intent": "Non ritrovo questa richiesta di viaggio: dimmi di nuovo che viaggio hai in mente e riparto da lì.",
+    "proposal": "Non ritrovo questa proposta: dimmi di nuovo che viaggio hai in mente e te ne preparo una.",
+    "order": ("Non ritrovo questo ordine: controlla il link di pagamento che ti ho mandato, "
+              "oppure ripartiamo dal viaggio che hai in mente."),
+}
+
+
+def say_not_found(kind: str) -> str:
+    return _NOT_FOUND.get(kind, "Non ritrovo quello che mi chiedi: ripartiamo dal viaggio che hai in mente.")
+
+
+def say_unavailable() -> str:
+    return "Vela non è disponibile in questo momento: riprova tra qualche minuto."
+
+
+def say_error() -> str:
+    return "Qualcosa non ha funzionato dalla mia parte: riprova tra poco."

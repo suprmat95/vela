@@ -72,3 +72,25 @@ class SayTest(unittest.TestCase):
 
     def test_paid(self):
         self.assertIn("Pagamento", say.say_paid())
+
+
+class NotFoundSayTest(unittest.TestCase):
+    def test_each_kind_has_its_own_sentence(self):
+        sentences = {kind: say.say_not_found(kind) for kind in ("intent", "proposal", "order")}
+        self.assertEqual(len(set(sentences.values())), 3)
+        self.assertIn("proposta", sentences["proposal"])
+        self.assertIn("ordine", sentences["order"])
+        self.assertIn("richiesta", sentences["intent"])
+
+    def test_unknown_kind_is_generic(self):
+        self.assertTrue(say.say_not_found("boh"))
+        self.assertNotIn(say.say_not_found("boh"), [say.say_not_found("order")])
+
+    def test_error_sentences_are_speakable(self):
+        for s in (say.say_not_found("intent"), say.say_not_found("proposal"),
+                  say.say_not_found("order"), say.say_not_found("x"),
+                  say.say_unavailable(), say.say_error()):
+            self.assertNotIn("http", s)
+            self.assertNotIn("**", s)
+            self.assertNotIn("`", s)
+            self.assertTrue(s.endswith("."))
