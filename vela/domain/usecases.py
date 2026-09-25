@@ -86,7 +86,8 @@ class Vela:
         result = choose(self.repos.products.list_all(), intent.criteria, rejected_products,
                         today=self.now().date())
         if not isinstance(result, Choice):
-            return NoMatch(intent.id, result.failed_criterion, say.say_no_match(result.failed_criterion))
+            return NoMatch(intent.id, result.failed_criterion,
+                           say.say_no_match(result.failed_criterion, intent.criteria))
         proposal = Proposal(self.new_id(), intent.id, result.product.id, result.start_date,
                             result.end_date, intent.criteria.pax or 1, result.product.price,
                             result.product.currency, result.reason, self.now())

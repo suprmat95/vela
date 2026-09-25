@@ -239,3 +239,33 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m4-superficie-rest.md` in T
 | Guardie di regressione | `test_health_needs_no_token` e `test_health_and_replay_need_no_token` passavano già prima del codice nuovo | Non verificano codice nuovo ma impediscono che il router `/v1` o gli handler 7807 proteggano per errore `/health` e `/replay` |
 | Flusso `curl` di `docs/rest.md` | Non eseguito in locale: senza Postgres il dominio non esiste (SQLite non supporta l'upsert Postgres dei repository). Il flusso è coperto dal test `FullFlowTest` sull'app vera con repository in memoria e verrà eseguito su Render dopo il merge | Nessun Postgres locale disponibile in questo worktree |
 | Suite finale | 319 test, 12 saltati (Postgres), verde (erano 271 a inizio M4) | — |
+
+## 2026-09-25 — M11: chooser v2
+
+Origine: intervista sulla macro task M11, piano in `docs/plans/2026-09-25-m11-chooser-v2.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Area e budget | Restano criteri di ordinamento, mai di esclusione; se non rispettati la motivazione lo dichiara ("Non ho partenze compatibili a Lanzarote: questa è a Tenerife, alle Canarie") | RF-07 dice "si ordina per"; "nessun match su area/budget" diventa una proposta dichiarata, non un rifiuto |
+| Gerarchia geografica | `PARENTS` statico in `geo.py`, solo tra voci già presenti in `PLACES`: Lanzarote, Tenerife, Fuerteventura → Canarie; Palma de Mallorca → Maiorca → Baleari; Minorca, Ibiza → Baleari; Firenze, Pietrasanta → Toscana. Il paese chiude sempre la catena | `geohierarchy` è piatto e sbagliato in due casi; nessun alias nuovo, il parser non cambia |
+| `geohierarchy` | Non usato | Piatto, con errori, e richiederebbe un campo nuovo in `Product` |
+| Punteggio d'area | 3 = dentro l'area chiesta (anche un paese chiesto e una città di quel paese), 2 = stessa regione (antenato comune non nazionale), 1 = stesso paese, 0 = altrove | RF-07 "città > regione > paese" |
+| Area del prodotto | Dalla destinazione; se manca, dal titolo; se non riconosciuta, dal paese (`destination.country`) | 323/326 hanno Milano/Barcellona solo nel titolo; destinazioni nuove dal sync M10 degradano al paese |
+| Date proposte | Finestra fissa (lunghezza ≤ durata, o durata assente): il viaggio è la finestra. Finestra aperta: inizio = max(inizio finestra, oggi, `minDate`, inizio periodo), fine = inizio + durata − 1 entro la finestra. L'inizio cade nel periodo e non nel passato; il ritorno può uscire dal periodo; il viaggio sta in `[minDate, maxDate]`. Vale la prima partenza valida | Un "weekend" accetta un 4 giorni che parte venerdì; le finestre aperte non vengono più proposte per intero |
+| Ordine dei filtri | archived, bookable, trip, sport, dates, pax, **rejected per ultimo** | Con i rifiutati terzi, rifiutare l'unico padel produceva "nessun viaggio per lo sport chiesto" (falso). Ora `rejected` significa "i compatibili li hai scartati tutti" |
+| Non-viaggi | Filtro duro `trip`: esclusi i prodotti con destinazione del brand (`Weebora`) o slug con `gift-card`. Sulla fixture esclude solo il 282 | Una gift card da 50 € non è un viaggio |
+| Ordinamento | (−punteggio d'area, fuori budget, prezzo, id); totale = prezzo × (pax o 1) | Ordine di RF-07; tra i fuori budget vince il più vicino al budget |
+| Motivazione | Al massimo 2 frasi. Frase 1: area (soddisfatta o compromesso dichiarato). Frase 2: data di partenza (+ "nel periodo che hai chiesto") e budget (dentro / oltre; "la più economica" solo quando è vero) | RF-06 |
+| Messaggi RF-09 | `say_no_match(criterion, criteria=None)` cita il valore: sport, periodo, numero di persone | RF-09 "dice quale criterio non riesce a soddisfare" |
+| Articolo delle date | `on_date`: "il 1 ottobre", "l'8 ottobre", "l'11 ottobre"; usato nella motivazione, nei periodi e nelle date secche di `say_proposal` | "il 8" non è italiano |
+| Preposizioni | `geo.where`: "in Spagna", "a Lanzarote", "alle Canarie", "alle Baleari", "in Toscana", "in Sardegna"; usato anche da `say_intent_created` | Corregge "a Sardegna" di M2 |
+| Test di proprietà | Esaustivi sulla fixture: per ogni intento della tabella si rifiuta in sequenza fino a `NoChoice("rejected")`, verificando le proprietà a ogni passo. Nessun generatore casuale, nessuna dipendenza | Scelta dell'intervista |
+
+## 2026-09-25 — M11: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m11-chooser-v2.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Verifica delle proprietà | Spostando il filtro `rejected` in testa falliscono `test_rejected_is_reported_only_when_compatible_products_were_all_rejected`, `test_failed_criterion_is_the_first_emptying_filter` e le proprietà su tutti gli 11 intenti della tabella; `test_filter_order` no, perché controlla la costante `FILTERS` e non l'ordine dei `steps` | Il piano citava `test_filter_order` tra quelli che dovevano fallire: correzione del piano, nessun cambio di codice |
+| Bytecode dopo una mutazione | Dopo un ripristino con `git checkout` nello stesso secondo e con la stessa dimensione del file, Python riusa il `.pyc` della versione mutata: va cancellato `vela/domain/__pycache__/chooser.cpython-312.pyc` | L'invalidazione dei `.pyc` usa mtime in secondi e dimensione; evita falsi rossi dopo le prove di mutazione |

@@ -1,19 +1,24 @@
-"""Chooser v1 (RF-06, RF-07 semplificato, RF-09): una sola scelta deterministica.
+"""Chooser v2 (RF-06, RF-07, RF-09): una sola scelta deterministica.
 
-Esclusioni in sequenza (archiviati, non prenotabili, rifiutati, sport, date, pax); tra i
-restanti ordina per area coincidente (città > paese), totale entro budget, prezzo crescente,
-id. Se un filtro azzera i candidati, `NoChoice` porta il nome di quel filtro (RF-09). M11
-aggiunge geohierarchy, durata e intersezioni parziali.
+Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, rifiutati
+(ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
+restanti ordina per aderenza all'area (dentro l'area 3, stessa regione 2, stesso paese 1),
+totale entro budget, prezzo crescente, id. Area e budget non escludono mai: se non sono
+rispettati la motivazione lo dichiara. Se un filtro azzera i candidati, `NoChoice` porta il
+nome di quel filtro (RF-09).
 """
 from dataclasses import dataclass
-from datetime import date
-from typing import Iterable, Optional, Set, Union
+from datetime import date, timedelta
+from typing import Iterable, Optional, Set, Tuple, Union
 
 from vela.domain import geo
-from vela.domain.models import Area, Availability, Criteria, Period, Product
-from vela.domain.say import fmt_date, fmt_money
+from vela.domain.catalog import is_trip
+from vela.domain.models import Area, Criteria, Period, Product
+from vela.domain.say import fmt_money, on_date
 
-FILTERS = ("archived", "bookable", "rejected", "sport", "dates", "pax")
+FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rejected")
+
+INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,8 @@ class Choice:
     start_date: date
     end_date: date
     reason: str
+    area_score: int
+    within_budget: bool
 
 
 @dataclass(frozen=True)
@@ -29,22 +36,31 @@ class NoChoice:
     failed_criterion: str
 
 
-def window_for(product: Product, period: Optional[Period], today: date) -> Optional[Availability]:
+def departure(product: Product, period: Optional[Period], today: date) -> Optional[Tuple[date, date]]:
+    """Prima partenza valida (inizio, fine). Finestra fissa (lunga al più `duration_days`): il
+    viaggio è la finestra. Finestra aperta: inizio = max(inizio finestra, oggi, minDate, inizio
+    periodo), fine = inizio + durata - 1 dentro la finestra. L'inizio cade nel periodo e non nel
+    passato; il viaggio sta in [minDate, maxDate]."""
+    duration = product.duration_days
     for window in product.availabilities:
-        if window.start < today:
+        if duration and (window.end - window.start).days + 1 > duration:
+            start = max(d for d in (window.start, today, product.min_date,
+                                    period.start if period else None) if d is not None)
+            end = start + timedelta(days=duration - 1)
+            if end > window.end:
+                continue
+        else:
+            start, end = window.start, window.end
+        if start < today:
             continue
-        if period is None or period.start <= window.start <= period.end:
-            return window
+        if period is not None and not (period.start <= start <= period.end):
+            continue
+        if product.min_date and start < product.min_date:
+            continue
+        if product.max_date and end > product.max_date:
+            continue
+        return start, end
     return None
-
-
-def _dates_ok(product: Product, period: Optional[Period], today: date) -> bool:
-    if period is not None:
-        if product.min_date and period.end < product.min_date:
-            return False
-        if product.max_date and period.start > product.max_date:
-            return False
-    return window_for(product, period, today) is not None
 
 
 def _pax_ok(product: Product, pax: Optional[int]) -> bool:
@@ -57,36 +73,82 @@ def _pax_ok(product: Product, pax: Optional[int]) -> bool:
     return True
 
 
+def place_of(product: Product) -> Optional[Area]:
+    """Area del prodotto: dalla destinazione, altrimenti dal titolo, altrimenti dal paese."""
+    if product.destination:
+        return geo.area_of_destination(product.destination, product.country)
+    return geo.area_of_destination(product.title, product.country)
+
+
 def area_score(product: Product, area: Optional[Area]) -> int:
     if area is None:
-        return 0
-    if area.kind != "country":
-        found = geo.find_area(product.destination)
-        if found is not None and found.name == area.name:
-            return 2
-    return 1 if product.country == area.country_code else 0
+        return ELSEWHERE
+    place = place_of(product)
+    if place is not None:
+        if area in geo.ancestors(place):
+            return INSIDE
+        if geo.common_region(place, area) is not None:
+            return SAME_REGION
+    country = product.country or (place.country_code if place else None)
+    return SAME_COUNTRY if country == area.country_code else ELSEWHERE
+
+
+def _total(product: Product, criteria: Criteria):
+    return product.price * (criteria.pax or 1)
 
 
 def _within_budget(product: Product, criteria: Criteria) -> bool:
+    return criteria.budget is None or _total(product, criteria) <= criteria.budget
+
+
+def _area_sentence(product: Product, area: Optional[Area], score: int) -> Optional[str]:
+    place = place_of(product)
+    if area is None:
+        return "È %s." % geo.where(place) if place else None
+    if score == INSIDE:
+        if place is None or place == area:
+            return "È %s, come hai chiesto." % geo.where(area)
+        return "È %s, %s come hai chiesto." % (geo.where(place), geo.where(area))
+    head = "Non ho partenze compatibili %s" % geo.where(area)
+    if place is None:
+        return head + ": ti propongo comunque questo viaggio."
+    here = geo.where(place)
+    if score == SAME_REGION:
+        region = geo.common_region(place, area)
+        if region != place:
+            here += ", " + geo.where(region)
+    elif place.kind != "country":
+        country = geo.country_area(place.country_code)
+        if country is not None:
+            here += (", sempre " if score == SAME_COUNTRY else ", ") + geo.where(country)
+    return "%s: questa è %s." % (head, here)
+
+
+def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, score: int,
+                           within: bool) -> str:
+    text = "Parte %s" % on_date(start)
+    if criteria.period is not None:
+        text += ", nel periodo che hai chiesto,"
+    total = fmt_money(_total(product, criteria))
     if criteria.budget is None:
-        return True
-    return product.price * (criteria.pax or 1) <= criteria.budget
+        if criteria.area is None:
+            return text + " ed è la più economica compatibile."
+        return text + " e costa %s in totale." % total
+    budget = fmt_money(criteria.budget)
+    if within:
+        return text + " e costa %s in totale, dentro il tuo budget di %s." % (total, budget)
+    text += " e costa %s in totale, oltre il tuo budget di %s" % (total, budget)
+    if criteria.area is None:
+        return text + ", ma è la più economica compatibile."
+    if score == INSIDE:
+        return text + ", ma è la più economica %s." % geo.where(criteria.area)
+    return text + "."
 
 
-def _reason(product: Product, criteria: Criteria, window: Availability) -> str:
-    parts = []
-    if area_score(product, criteria.area) > 0:
-        where = criteria.area.name if area_score(product, criteria.area) == 1 else product.destination
-        parts.append("è in %s" % where if criteria.area.kind == "country" else "è a %s" % where)
-    elif product.destination:
-        parts.append("è a %s" % product.destination)
-    parts.append("parte il %s" % fmt_date(window.start))
-    if criteria.budget is not None and _within_budget(product, criteria):
-        parts.append("resta nel tuo budget di %s" % fmt_money(criteria.budget))
-    else:
-        parts.append("è la proposta più economica tra quelle compatibili")
-    sentence = ", ".join(parts[:-1]) + " e " + parts[-1] if len(parts) > 1 else parts[0]
-    return sentence[0].upper() + sentence[1:] + "."
+def _reason(product: Product, criteria: Criteria, start: date, score: int, within: bool) -> str:
+    first = _area_sentence(product, criteria.area, score)
+    second = _dates_budget_sentence(product, criteria, start, score, within)
+    return second if first is None else first + " " + second
 
 
 def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
@@ -95,10 +157,11 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
     steps = (
         ("archived", lambda p: not p.archived),
         ("bookable", lambda p: p.bookable),
-        ("rejected", lambda p: p.id not in rejected_ids),
+        ("trip", is_trip),
         ("sport", lambda p: criteria.sport is None or p.sport == criteria.sport),
-        ("dates", lambda p: _dates_ok(p, criteria.period, today)),
+        ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
+        ("rejected", lambda p: p.id not in rejected_ids),
     )
     for name, keep in steps:
         candidates = [p for p in candidates if keep(p)]
@@ -107,5 +170,7 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
     candidates.sort(key=lambda p: (-area_score(p, criteria.area), not _within_budget(p, criteria),
                                    p.price, p.id))
     best = candidates[0]
-    window = window_for(best, criteria.period, today)
-    return Choice(best, window.start, window.end, _reason(best, criteria, window))
+    start, end = departure(best, criteria.period, today)
+    score = area_score(best, criteria.area)
+    within = _within_budget(best, criteria)
+    return Choice(best, start, end, _reason(best, criteria, start, score, within), score, within)
