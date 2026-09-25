@@ -132,3 +132,11 @@ T4 chiusa. T5: app FastAPI e `/health`, test prima.
 - 🔧 Bash: Implement app factory, health router and package skeleton, run health tests
 
 - 🔧 Bash: Commit T5 and record it in the ledger
+
+T5 chiusa. T6: Alembic con migrazione vuota, test prima.
+
+- 🔧 Bash: Write failing tests for Alembic migrations
+
+- 🔧 Bash: Create Alembic config, env, template and empty initial migration; run tests and CLI
+
+- 🔧 Bash: Commit T6 and record it in the ledger
