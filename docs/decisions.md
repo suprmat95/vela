@@ -294,5 +294,5 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md`
 | Decisione | Scelta | Motivo |
 |---|---|---|
 | Versione SDK | `anthropic>=1.8.0` (installata 1.8.0, basata su `httpx2`); i test costruiscono le eccezioni con un `Request` di `httpx2` | Nessuna deviazione dal piano; l'SDK 1.x non usa più `httpx` |
-| Test Postgres di `update_criteria` | Non eseguiti in questo worktree: `DATABASE_URL` non disponibile, test saltato come da RNF-09; il contratto gira sul repository in memoria | Da eseguire con `DATABASE_URL` prima del merge |
+| Test Postgres di `update_criteria` | Eseguiti con `DATABASE_URL` (External Database URL di Render, schema `vela_test`): suite completa 353 test verdi, nessuno saltato | L'URL interno di Render (`dpg-…-a`) non si risolve fuori da Render: in locale serve l'External Database URL |
 | Prova reale di Haiku | Non eseguita: `scripts/try_haiku.py` richiede l'OK dell'utente per 1 chiamata | Regola del repo sulle chiamate a servizi a pagamento |
