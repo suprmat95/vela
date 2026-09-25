@@ -1,9 +1,11 @@
 """Repository in memoria: test del dominio (RNF-09) e app nei test delle superfici."""
 import threading
+from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
 
-from vela.domain.models import Intent, Order, OrderStatus, Product, Proposal, Rejection
+from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
+                                Rejection)
 from vela.ports.repositories import DuplicateOrder
 
 
@@ -37,6 +39,11 @@ class MemoryIntents:
 
     def get(self, intent_id: str) -> Optional[Intent]:
         return self._items.get(intent_id)
+
+    def update_criteria(self, intent_id: str, criteria: Criteria) -> None:
+        intent = self._items.get(intent_id)
+        if intent is not None:
+            self._items[intent_id] = replace(intent, criteria=criteria)
 
 
 class MemoryProposals:

@@ -5,7 +5,7 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, StubPayments, assert_single_product, make_product
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain.intent import QUESTION_PAX
-from vela.domain.models import (IntentCreated, IntentQuestion, NoMatch, ProposalMade,
+from vela.domain.models import (Area, IntentCreated, IntentQuestion, NoMatch, ProposalMade,
                                 TravelerProfile)
 from vela.domain.usecases import NotFound, Vela
 
@@ -58,6 +58,25 @@ class CreateIntentTest(unittest.TestCase):
         r = vela.create_intent("padel a ottobre", TravelerProfile(first_name="Anna", pax=2))
         self.assertIsInstance(r, IntentCreated)
         self.assertEqual(vela.repos.intents.get(r.intent_id).profile.first_name, "Anna")
+
+
+    def test_fallback_extractor_is_used(self):
+        class Fx:
+            calls = 0
+
+            def extract(self, text, today):
+                Fx.calls += 1
+                return {"sport": "padel", "area": None, "period_start": "2026-10-01",
+                        "period_end": "2026-10-31", "pax": None, "budget": None}
+        vela = make_vela()
+        vela.extractor = Fx()
+        r = vela.create_intent("una vacanza con la racchetta in Spagna per due")
+        self.assertIsInstance(r, IntentCreated)
+        self.assertEqual(r.criteria.sport, "padel")
+        self.assertEqual(Fx.calls, 1)
+
+    def test_default_has_no_extractor(self):
+        self.assertIsNone(make_vela().extractor)
 
 
 class GetProposalTest(unittest.TestCase):
@@ -133,6 +152,56 @@ class RejectProposalTest(unittest.TestCase):
     def test_unknown_proposal(self):
         with self.assertRaises(NotFound):
             make_vela().reject_proposal("nope", "x")
+
+    def test_too_expensive_lowers_budget(self):
+        vela = make_vela()
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)                  # prodotto 3, 350 × 2 = 700
+        second = vela.reject_proposal(first.proposal.id, "troppo caro")
+        self.assertEqual(vela.repos.intents.get(iid).criteria.budget, Decimal("560.00"))
+        self.assertEqual(second.product.product_id, "4")
+        self.assertIn("più economica", second.proposal.reason)
+
+    def test_double_reject_does_not_lower_twice(self):
+        vela = make_vela()
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)
+        vela.reject_proposal(first.proposal.id, "troppo caro")
+        vela.reject_proposal(first.proposal.id, "troppo caro")
+        self.assertEqual(vela.repos.intents.get(iid).criteria.budget, Decimal("560.00"))
+
+    def test_further_south_changes_area(self):
+        vela = make_vela([
+            make_product(1, price=350, country="ES", destination="Valencia"),
+            make_product(2, price=380, country="ES", destination="Barcellona"),
+            make_product(3, price=600, country="ES", destination="Alicante"),
+        ])
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)
+        self.assertEqual(first.product.product_id, "1")
+        second = vela.reject_proposal(first.proposal.id, "più a sud")
+        self.assertEqual(vela.repos.intents.get(iid).criteria.area, Area("city", "Alicante", "ES"))
+        self.assertEqual(second.product.product_id, "3")
+
+    def test_new_period_in_reason(self):
+        vela = make_vela([
+            make_product(1, price=350, country="ES", destination="Valencia"),
+            make_product(2, price=450, country="ES", destination="Madrid",
+                         windows=(("2026-11-05", "2026-11-08"),)),
+        ])
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)
+        second = vela.reject_proposal(first.proposal.id, "a novembre")
+        self.assertEqual(second.product.product_id, "2")
+        self.assertEqual(second.proposal.start_date, date(2026, 11, 5))
+
+    def test_unknown_reason_keeps_criteria(self):
+        vela = make_vela()
+        iid = vela.create_intent(INTENT).intent_id
+        before = vela.repos.intents.get(iid).criteria
+        first = vela.get_proposal(iid)
+        vela.reject_proposal(first.proposal.id, "più vicino")
+        self.assertEqual(vela.repos.intents.get(iid).criteria, before)
 
 
 from vela.adapters.background import InlineRunner
@@ -284,3 +353,24 @@ class FullReplayFlowTest(unittest.TestCase):
         restarted = self.make(repos)       # nuovo processo: stessi repository, nuovo ReplayHofJ
         self.assertEqual(InlineRunner(restarted.orders).resume(), [oid])
         self.assertEqual(restarted.get_order_status(oid).status, OrderStatus.CONFIRMED)
+
+
+class LanguageFlowTest(unittest.TestCase):
+    def test_english_intent_gets_english_answers(self):
+        from vela.domain.models import Participant
+        vela = make_vela()
+        created = vela.create_intent("a padel weekend in Spain in October, we are two, max 800 euros")
+        self.assertIn("Spain", created.say)
+        proposal = vela.get_proposal(created.intent_id)
+        self.assertIn("per person", proposal.say)
+        missing = vela.accept_proposal(proposal.proposal.id)
+        self.assertIn("To book", missing.say)
+        accepted = vela.accept_proposal(proposal.proposal.id, TravelerProfile(
+            "Anna", "Rossi", "a@x.it", "+39", participants=(Participant("Bo", "Bi"),)))
+        self.assertIn("payment link", accepted.say)
+        self.assertIn("waiting for payment", vela.get_order_status(accepted.order_id).say)
+
+    def test_english_no_match(self):
+        vela = make_vela([])                       # catalogo vuoto: si ferma al filtro "archived"
+        iid = vela.create_intent("tennis in October, we are two").intent_id
+        self.assertIn("try again later", vela.get_proposal(iid).say)

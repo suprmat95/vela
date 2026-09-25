@@ -2,8 +2,10 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from vela.domain.intent import (QUESTION_PAX, QUESTION_SPORT_OR_PERIOD, detect_language,
-                                parse_budget, parse_intent, parse_pax, parse_period)
+from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT_OR_PERIOD,
+                                QUESTION_SPORT_OR_PERIOD_EN, detect_language,
+                                is_per_person, parse_budget, parse_intent, parse_pax,
+                                parse_period)
 from vela.domain.models import Area, Period, TravelerProfile
 
 TODAY = date(2026, 9, 25)   # venerdì
@@ -30,7 +32,59 @@ TABLE = [
      ("padel", None, (date(2026, 9, 26), date(2026, 9, 27)), 2, Decimal("600"), "it")),
     ("we want a tennis holiday in winter, three of us, no more than 2000 euros",
      ("tennis", None, (date(2026, 12, 1), date(2027, 2, 28)), 3, Decimal("2000"), "en")),
+    ("padel dal 10 al 14 ottobre a Malaga, siamo in 2",
+     ("padel", "ES", (date(2026, 10, 10), date(2026, 10, 14)), 2, None, "it")),
+    ("tennis from 10 to 14 October in Greece, two of us",
+     ("tennis", "GR", (date(2026, 10, 10), date(2026, 10, 14)), 2, None, "en")),
+    ("padel 20-23 novembre in Sardegna per 4 persone, budget 2k",
+     ("padel", "IT", (date(2026, 11, 20), date(2026, 11, 23)), 4, Decimal("2000"), "it")),
+    ("padel tra il 5 e l'8 dicembre, in coppia",
+     ("padel", None, (date(2026, 12, 5), date(2026, 12, 8)), 2, None, "it")),
+    ("tennis dal 28 dicembre al 3 gennaio a Tenerife, siamo in tre",
+     ("tennis", "ES", (date(2026, 12, 28), date(2027, 1, 3)), 3, None, "it")),
+    ("padel October 10-12 in Mallorca for two",
+     ("padel", "ES", (date(2026, 10, 10), date(2026, 10, 12)), 2, None, "en")),
+    ("padel a fine ottobre per 2 persone",
+     ("padel", None, (date(2026, 10, 21), date(2026, 10, 31)), 2, None, "it")),
+    ("tennis in early November, just me",
+     ("tennis", None, (date(2026, 11, 1), date(2026, 11, 10)), 1, None, "en")),
+    ("padel a metà marzo a Valencia, io e mia moglie",
+     ("padel", "ES", (date(2027, 3, 11), date(2027, 3, 20)), 2, None, "it")),
+    ("padel il mese prossimo, siamo una famiglia di 4",
+     ("padel", None, (date(2026, 10, 1), date(2026, 10, 31)), 4, None, "it")),
+    ("tennis next month in Italy, a couple, under 1500 euros",
+     ("tennis", "IT", (date(2026, 10, 1), date(2026, 10, 31)), 2, Decimal("1500"), "en")),
+    ("padel in Andalusia a novembre, 500 euro a testa, siamo in 2",
+     ("padel", "ES", (date(2026, 11, 1), date(2026, 11, 30)), 2, Decimal("1000"), "it")),
+    ("padel weekend in Catalonia for 3 people, 400 euros each",
+     ("padel", "ES", (date(2026, 9, 26), date(2026, 9, 27)), 3, Decimal("1200"), "en")),
+    ("padel a Lloret de Mar a ottobre in 2",
+     ("padel", "ES", (date(2026, 10, 1), date(2026, 10, 31)), 2, None, "it")),
+    ("vorrei giocare a padel il 12 ott, sotto i 900 euro, da solo",
+     ("padel", None, (date(2026, 10, 12), date(2026, 10, 12)), 1, Decimal("900"), "it")),
+    ("tennis Oct 3rd in Madrid for four players",
+     ("tennis", "ES", (date(2026, 10, 3), date(2026, 10, 3)), 4, None, "en")),
+    ("padel in primavera in Grecia, due coppie, massimo 3000 euro",
+     ("padel", "GR", (date(2027, 3, 1), date(2027, 5, 31)), 4, Decimal("3000"), "it")),
+    ("tennis on 2026-11-07 - 2026-11-09 in Emilia-Romagna, we are 2, max 1.200 euros",
+     ("tennis", "IT", (date(2026, 11, 7), date(2026, 11, 9)), 2, Decimal("1200"), "en")),
+    ("padel dal 10/10 al 13/10, siamo in 4",
+     ("padel", None, (date(2026, 10, 10), date(2026, 10, 13)), 4, None, "it")),
+    ("tennis tra il 1 e il 5 giugno in Toscana per due",
+     ("tennis", "IT", (date(2027, 6, 1), date(2027, 6, 5)), 2, None, "it")),
+    ("tennis in Zanzibar between 14 and 20 November for 2 people",
+     ("tennis", "TZ", (date(2026, 11, 14), date(2026, 11, 20)), 2, None, "en")),
+    ("padel from the 3rd to the 7th of December in Cyprus, 2 adults",
+     ("padel", "CY", (date(2026, 12, 3), date(2026, 12, 7)), 2, None, "en")),
 ]
+
+
+class TableSizeTest(unittest.TestCase):
+    def test_at_least_thirty_cases_in_both_languages(self):
+        self.assertGreaterEqual(len(TABLE), 30)
+        langs = [row[1][5] for row in TABLE]
+        self.assertGreaterEqual(langs.count("en"), 10)
+        self.assertGreaterEqual(langs.count("it"), 15)
 
 
 class TableTest(unittest.TestCase):
@@ -80,6 +134,71 @@ class PeriodTest(unittest.TestCase):
     def test_none(self):
         self.assertIsNone(parse_period("padel in Spagna", TODAY))
 
+    def span(self, text, today=TODAY):
+        p = parse_period(text, today)
+        return (p.start, p.end) if p else None
+
+    def test_ranges(self):
+        cases = [
+            ("dal 10 al 14 ottobre", (date(2026, 10, 10), date(2026, 10, 14))),
+            ("20-23 novembre", (date(2026, 11, 20), date(2026, 11, 23))),
+            ("from 10 to 14 October", (date(2026, 10, 10), date(2026, 10, 14))),
+            ("from the 3rd to the 7th of December", (date(2026, 12, 3), date(2026, 12, 7))),
+            ("tra il 5 e l'8 dicembre", (date(2026, 12, 5), date(2026, 12, 8))),
+            ("between 14 and 20 November", (date(2026, 11, 14), date(2026, 11, 20))),
+            ("October 10-12", (date(2026, 10, 10), date(2026, 10, 12))),
+            ("oct 10 to nov 2", (date(2026, 10, 10), date(2026, 11, 2))),
+            ("dal 10/10 al 13/10", (date(2026, 10, 10), date(2026, 10, 13))),
+            ("2026-11-07 - 2026-11-09", (date(2026, 11, 7), date(2026, 11, 9))),
+            ("dal 28 ottobre al 3 novembre", (date(2026, 10, 28), date(2026, 11, 3))),
+        ]
+        for text, expected in cases:
+            with self.subTest(text=text):
+                self.assertEqual(self.span(text), expected)
+
+    def test_range_across_new_year(self):
+        self.assertEqual(self.span("dal 28 dicembre al 3 gennaio"),
+                         (date(2026, 12, 28), date(2027, 1, 3)))
+
+    def test_past_range_is_next_year(self):
+        self.assertEqual(self.span("dal 1 al 5 giugno"), (date(2027, 6, 1), date(2027, 6, 5)))
+
+    def test_impossible_range_falls_through(self):
+        p = parse_period("dal 30 al 31 febbraio", TODAY)
+        self.assertEqual(p.label, "febbraio")
+
+    def test_abbreviations_and_ordinals(self):
+        self.assertEqual(self.span("il 12 ott"), (date(2026, 10, 12), date(2026, 10, 12)))
+        self.assertEqual(self.span("the 10th of October"), (date(2026, 10, 10), date(2026, 10, 10)))
+        self.assertEqual(self.span("Oct 3rd"), (date(2026, 10, 3), date(2026, 10, 3)))
+
+    def test_abbreviation_only_next_to_a_day(self):
+        self.assertEqual(parse_period("Lloret de Mar a ottobre", TODAY).label, "ottobre")
+        self.assertIsNone(parse_period("padel a Lloret de Mar", TODAY))
+
+    def test_month_first_is_not_people(self):
+        p = parse_period("October 2 people", TODAY)
+        self.assertEqual((p.start, p.end), (date(2026, 10, 1), date(2026, 10, 31)))
+
+    def test_month_parts(self):
+        self.assertEqual(self.span("a inizio ottobre"), (date(2026, 10, 1), date(2026, 10, 10)))
+        self.assertEqual(self.span("a metà marzo"), (date(2027, 3, 11), date(2027, 3, 20)))
+        self.assertEqual(self.span("a fine ottobre"), (date(2026, 10, 21), date(2026, 10, 31)))
+        self.assertEqual(self.span("early November"), (date(2026, 11, 1), date(2026, 11, 10)))
+        self.assertEqual(self.span("mid-October"), (date(2026, 10, 11), date(2026, 10, 20)))
+        self.assertEqual(self.span("late February"), (date(2027, 2, 21), date(2027, 2, 28)))
+
+    def test_fine_settimana_is_still_weekend(self):
+        self.assertEqual(parse_period("fine settimana", TODAY).label, "fine settimana")
+
+    def test_next_month(self):
+        self.assertEqual(self.span("il mese prossimo"), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual(self.span("next month", date(2026, 12, 10)),
+                         (date(2027, 1, 1), date(2027, 1, 31)))
+
+    def test_impossible_single_date_falls_through(self):
+        self.assertEqual(parse_period("il 31/02 a marzo", TODAY).label, "marzo")
+
 
 class PaxTest(unittest.TestCase):
     def test_forms(self):
@@ -93,6 +212,22 @@ class PaxTest(unittest.TestCase):
         self.assertIsNone(parse_pax("for 800 euro"))
         self.assertIsNone(parse_pax("per ottobre"))
         self.assertIsNone(parse_pax("padel in Spagna"))
+
+    def test_new_forms(self):
+        for text, pax in [("in coppia", 2), ("siamo una coppia", 2), ("as a couple", 2),
+                          ("a couple", 2), ("io e mia moglie", 2), ("io e il mio compagno", 2),
+                          ("me and my wife", 2), ("my husband and I", 2), ("da solo", 1),
+                          ("da sola", 1), ("just me", 1), ("on my own", 1), ("alone", 1),
+                          ("famiglia di 4", 4), ("a family of five", 5), ("group of 6", 6),
+                          ("due coppie", 4), ("three couples", 6)]:
+            with self.subTest(text=text):
+                self.assertEqual(parse_pax(text), pax)
+
+    def test_number_beats_phrase(self):
+        self.assertEqual(parse_pax("io e mia moglie, in tutto siamo in 4"), 4)
+
+    def test_couple_of_days_is_not_pax(self):
+        self.assertIsNone(parse_pax("a couple of days of padel"))
 
 
 class BudgetTest(unittest.TestCase):
@@ -111,12 +246,44 @@ class BudgetTest(unittest.TestCase):
     def test_none(self):
         self.assertIsNone(parse_budget("siamo in 2 a ottobre"))
 
+    def test_new_forms(self):
+        for text, budget in [("budget 2k", 2000), ("max 1,5k", 1500), ("1.5k euro", 1500),
+                             ("sotto i 900 euro", 900), ("sotto 900", 900), ("non oltre 700", 700),
+                             ("below 650", 650), ("at most 1000", 1000), ("tetto di 1200", 1200)]:
+            with self.subTest(text=text):
+                self.assertEqual(parse_budget(text), Decimal(budget))
+
+    def test_number_before_people_is_not_budget(self):
+        self.assertIsNone(parse_budget("massimo 4 persone"))
+        self.assertIsNone(parse_budget("max 3 nights"))
+        self.assertIsNone(parse_budget("massimo 40 persone"))
+        self.assertEqual(parse_intent("padel a ottobre, massimo 4 persone", today=TODAY).criteria.pax, 4)
+
+    def test_per_person(self):
+        self.assertTrue(is_per_person("500 euro a testa"))
+        self.assertTrue(is_per_person("400 euros each"))
+        self.assertTrue(is_per_person("600 per person"))
+        self.assertFalse(is_per_person("per persone 4"))
+        self.assertFalse(is_per_person("massimo 800 euro"))
+
+    def test_per_person_budget(self):
+        c = parse_intent("padel a ottobre, 500 euro a testa, siamo in 3", today=TODAY).criteria
+        self.assertEqual(c.budget, Decimal("1500"))
+        c = parse_intent("padel a ottobre, 500 euro a testa", today=TODAY).criteria
+        self.assertEqual(c.budget, Decimal("500"))
+        self.assertIsNone(c.pax)
+
 
 class LanguageTest(unittest.TestCase):
     def test_detect(self):
         self.assertEqual(detect_language("un weekend di padel, siamo in due"), "it")
         self.assertEqual(detect_language("a weekend of padel for the two of us"), "en")
         self.assertEqual(detect_language("padel"), "it")
+
+    def test_new_markers(self):
+        self.assertEqual(detect_language("tennis in early November, just me"), "en")
+        self.assertEqual(detect_language("padel tra il 5 e l'8 dicembre, in coppia"), "it")
+        self.assertEqual(detect_language("padel a Lloret de Mar a ottobre in 2"), "it")
 
 
 class QuestionTest(unittest.TestCase):
@@ -143,7 +310,88 @@ class QuestionTest(unittest.TestCase):
         self.assertIsNone(r.question)
         self.assertIsNone(r.criteria.sport)
 
+    def test_questions_in_english(self):
+        self.assertEqual(parse_intent("a trip to Spain for the two of us", today=TODAY).question,
+                         QUESTION_SPORT_OR_PERIOD_EN)
+        self.assertEqual(parse_intent("we want padel in October", today=TODAY).question,
+                         QUESTION_PAX_EN)
+
     def test_area_and_period_objects(self):
         c = parse_intent("padel in Spagna a ottobre per due", today=TODAY).criteria
         self.assertEqual(c.area, Area("country", "Spagna", "ES"))
         self.assertEqual(c.period, Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"))
+
+
+class FakeExtractor:
+    def __init__(self, result=None, error=None):
+        self.result, self.error, self.calls = result, error, []
+
+    def extract(self, text, today):
+        self.calls.append((text, today))
+        if self.error:
+            raise self.error
+        return self.result
+
+
+VAGUE = "una vacanza con la racchetta in Spagna per due"   # né sport né periodo
+GOOD = {"sport": "padel", "area": "Greece", "period_start": "2026-11-01",
+        "period_end": "2026-11-30", "pax": 3, "budget": 1500}
+
+
+class FallbackTest(unittest.TestCase):
+    def test_not_called_when_sport_found(self):
+        fx = FakeExtractor(GOOD)
+        parse_intent("padel in Spagna per due", today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [])
+
+    def test_not_called_when_period_found(self):
+        fx = FakeExtractor(GOOD)
+        parse_intent("qualcosa a ottobre per due", today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [])
+
+    def test_called_when_both_missing_and_overrides(self):
+        fx = FakeExtractor(GOOD)
+        r = parse_intent(VAGUE, today=TODAY, extractor=fx)
+        self.assertEqual(fx.calls, [(VAGUE, TODAY)])
+        c = r.criteria
+        self.assertEqual(c.sport, "padel")
+        self.assertEqual(c.area, Area("country", "Grecia", "GR"))
+        self.assertEqual(c.period, Period(date(2026, 11, 1), date(2026, 11, 30), "llm"))
+        self.assertEqual(c.pax, 3)
+        self.assertEqual(c.budget, Decimal("1500"))
+        self.assertEqual(c.language, "it")
+        self.assertIsNone(r.question)
+
+    def test_null_fields_keep_parser_values(self):
+        fx = FakeExtractor({"sport": "tennis", "area": None, "period_start": None,
+                            "period_end": None, "pax": None, "budget": None})
+        c = parse_intent(VAGUE, today=TODAY, extractor=fx).criteria
+        self.assertEqual((c.sport, c.area.country_code, c.pax), ("tennis", "ES", 2))
+
+    def test_invalid_fields_are_ignored(self):
+        baseline = parse_intent(VAGUE, today=TODAY).criteria
+        for bad in [
+            {"sport": "golf", "area": "Atlantide", "period_start": "2026-12-10",
+             "period_end": "2026-12-01", "pax": 0, "budget": -5},
+            {"sport": 7, "area": 3, "period_start": "2025-01-01", "period_end": "2025-01-05",
+             "pax": True, "budget": "abc"},
+            {"period_start": "ieri", "period_end": "domani", "pax": 50, "budget": True},
+            {"period_start": "2026-11-01"},
+        ]:
+            with self.subTest(bad=bad):
+                r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(bad))
+                self.assertEqual(r.criteria, baseline)
+                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_extractor_error_is_ignored(self):
+        r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(error=RuntimeError("boom")))
+        self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_extractor_returning_none_or_junk(self):
+        for result in (None, "testo", ["x"]):
+            with self.subTest(result=result):
+                r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(result))
+                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+
+    def test_no_extractor_no_error(self):
+        self.assertEqual(parse_intent(VAGUE, today=TODAY).question, QUESTION_SPORT_OR_PERIOD)

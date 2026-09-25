@@ -37,8 +37,12 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, BookingRunner,
         raise RuntimeError("VELA_UPSTREAM_MODE=%s non disponibile prima di M5: usare replay"
                            % settings.vela_upstream_mode)
     hofj = ReplayHofJ()
+    extractor = None
+    if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
+        from vela.adapters.haiku import HaikuExtractor
+        extractor = HaikuExtractor.from_api_key(settings.anthropic_api_key)
     vela = Vela(PostgresRepositories(engine), hofj, FakePayments(settings.vela_public_url),
-                DEFAULT_TRAVELER)
+                DEFAULT_TRAVELER, extractor=extractor)
     return vela, BookingRunner(vela.orders), hofj.load_catalog
 
 

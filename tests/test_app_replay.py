@@ -124,6 +124,15 @@ class ModeTest(unittest.TestCase):
         with TestClient(app) as c:
             self.assertEqual(c.get("/replay/checkout/x").status_code, 503)
 
+    def test_no_key_no_extractor(self):
+        app = create_app(Settings(database_url="sqlite://"))
+        self.assertIsNone(app.state.vela.extractor)
+
+    def test_key_builds_haiku_extractor_without_calling_it(self):
+        from vela.adapters.haiku import HaikuExtractor
+        app = create_app(Settings(database_url="sqlite://", anthropic_api_key="sk-ant-test"))
+        self.assertIsInstance(app.state.vela.extractor, HaikuExtractor)
+
     def test_replay_with_database_builds_domain(self):
         app = create_app(Settings(database_url="sqlite://"))
         self.assertIsNotNone(app.state.vela)

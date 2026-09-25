@@ -101,52 +101,67 @@ def _within_budget(product: Product, criteria: Criteria) -> bool:
     return criteria.budget is None or _total(product, criteria) <= criteria.budget
 
 
-def _area_sentence(product: Product, area: Optional[Area], score: int) -> Optional[str]:
+def _area_sentence(product: Product, area: Optional[Area], score: int, lang: str) -> Optional[str]:
+    en = lang == "en"
+
+    def where(a: Area) -> str:
+        return geo.where(a, lang)
+
     place = place_of(product)
     if area is None:
-        return "È %s." % geo.where(place) if place else None
+        return ("It's %s." if en else "È %s.") % where(place) if place else None
     if score == INSIDE:
         if place is None or place == area:
-            return "È %s, come hai chiesto." % geo.where(area)
-        return "È %s, %s come hai chiesto." % (geo.where(place), geo.where(area))
-    head = "Non ho partenze compatibili %s" % geo.where(area)
+            return ("It's %s, as you asked." if en else "È %s, come hai chiesto.") % where(area)
+        return (("It's %s, %s as you asked." if en else "È %s, %s come hai chiesto.")
+                % (where(place), where(area)))
+    head = ("I have no compatible departures %s" if en
+            else "Non ho partenze compatibili %s") % where(area)
     if place is None:
-        return head + ": ti propongo comunque questo viaggio."
-    here = geo.where(place)
+        return head + (": I'm suggesting this trip anyway." if en
+                       else ": ti propongo comunque questo viaggio.")
+    here = where(place)
     if score == SAME_REGION:
         region = geo.common_region(place, area)
         if region != place:
-            here += ", " + geo.where(region)
+            here += ", " + where(region)
     elif place.kind != "country":
         country = geo.country_area(place.country_code)
         if country is not None:
-            here += (", sempre " if score == SAME_COUNTRY else ", ") + geo.where(country)
-    return "%s: questa è %s." % (head, here)
+            still = (", still " if en else ", sempre ") if score == SAME_COUNTRY else ", "
+            here += still + where(country)
+    return ("%s: this one is %s." if en else "%s: questa è %s.") % (head, here)
 
 
 def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, score: int,
                            within: bool) -> str:
-    text = "Parte %s" % on_date(start)
+    lang = criteria.language
+    en = lang == "en"
+    text = ("It leaves %s" if en else "Parte %s") % on_date(start, lang)
     if criteria.period is not None:
-        text += ", nel periodo che hai chiesto,"
-    total = fmt_money(_total(product, criteria))
+        text += ", in the period you asked for," if en else ", nel periodo che hai chiesto,"
+    total = fmt_money(_total(product, criteria), lang)
+    cheapest = "it's the cheapest compatible option" if en else "è la più economica compatibile"
     if criteria.budget is None:
         if criteria.area is None:
-            return text + " ed è la più economica compatibile."
-        return text + " e costa %s in totale." % total
-    budget = fmt_money(criteria.budget)
+            return text + (" and %s." if en else " ed %s.") % cheapest
+        return text + (" and costs %s in total." if en else " e costa %s in totale.") % total
+    budget = fmt_money(criteria.budget, lang)
     if within:
-        return text + " e costa %s in totale, dentro il tuo budget di %s." % (total, budget)
-    text += " e costa %s in totale, oltre il tuo budget di %s" % (total, budget)
+        return text + ((" and costs %s in total, within your budget of %s." if en
+                        else " e costa %s in totale, dentro il tuo budget di %s.") % (total, budget))
+    text += ((" and costs %s in total, over your budget of %s" if en
+              else " e costa %s in totale, oltre il tuo budget di %s") % (total, budget))
     if criteria.area is None:
-        return text + ", ma è la più economica compatibile."
+        return text + (", but %s." if en else ", ma %s.") % cheapest
     if score == INSIDE:
-        return text + ", ma è la più economica %s." % geo.where(criteria.area)
+        return text + ((", but it's the cheapest %s." if en else ", ma è la più economica %s.")
+                       % geo.where(criteria.area, lang))
     return text + "."
 
 
 def _reason(product: Product, criteria: Criteria, start: date, score: int, within: bool) -> str:
-    first = _area_sentence(product, criteria.area, score)
+    first = _area_sentence(product, criteria.area, score, criteria.language)
     second = _dates_budget_sentence(product, criteria, start, score, within)
     return second if first is None else first + " " + second
 

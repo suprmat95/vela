@@ -253,3 +253,28 @@ class ReasonTest(unittest.TestCase):
         p = make_product(1, windows=(("2026-10-08", "2026-10-11"),))
         r = choose([p], crit(), set(), TODAY)
         self.assertIn("Parte l'8 ottobre 2026", r.reason)
+
+    def test_m9_region_contains_its_cities(self):
+        p = make_product(1, price=300, destination="Malaga")
+        self.assertEqual(area_score(p, Area("region", "Andalusia", "ES")), INSIDE)
+        r = choose([p], crit(area=Area("region", "Andalusia", "ES")), set(), TODAY)
+        self.assertTrue(r.reason.startswith("È a Malaga, in Andalusia come hai chiesto."), r.reason)
+
+    def test_reason_in_english(self):
+        en = dict(language="en")
+        self.assertTrue(self.reason(crit(**en)).startswith(
+            "It's in Lanzarote, in Spain as you asked."))
+        self.assertTrue(self.reason(crit(area=CANARIE, **en)).startswith(
+            "It's in Lanzarote, in the Canary Islands as you asked."))
+        self.assertTrue(self.reason(crit(area=LANZAROTE, **en), {"1", "2"}).startswith(
+            "I have no compatible departures in Lanzarote: this one is in Madrid, still in Spain."))
+        within = self.reason(crit(**en))
+        self.assertIn("It leaves on 1 October 2026, in the period you asked for,", within)
+        self.assertIn("costs 600 euros in total, within your budget of 800 euros.", within)
+        self.assertEqual(self.reason(crit(area=None, budget=None, period=None, **en)),
+                         "It's in Lanzarote. It leaves on 1 October 2026 and it's the cheapest "
+                         "compatible option.")
+
+    def test_italian_reason_is_unchanged_by_language_default(self):
+        self.assertEqual(self.reason(crit(area=None, budget=None, period=None, language="it")),
+                         "È a Lanzarote. Parte il 1 ottobre 2026 ed è la più economica compatibile.")
