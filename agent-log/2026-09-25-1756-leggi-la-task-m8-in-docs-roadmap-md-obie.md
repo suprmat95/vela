@@ -3130,3 +3130,37 @@ Task 16 fatto. Passo al **Task 18**: il flusso completo e lo scenario del lancio
 I 6 test passano in circa un secondo. Faccio il commit del Task 18.
 
 - 🔧 Bash: Run suite and commit Task 18
+
+Ultimo task, il **19**: documentazione, decisioni di esecuzione e verifica finale, compresa la suite su Postgres. Cerco nei documenti i riferimenti al contratto vecchio.
+
+- 🔧 Bash: Find stale documentation references
+
+- 🔧 Bash: Read docs to update
+
+Aggiorno `docs/rest.md`, il `README.md` e `docs/stripe.md` al nuovo flusso.
+
+- 🔧 Bash: Update REST, README and Stripe docs
+
+- 🔧 Bash: Check README section order
+
+- 🔧 Bash: Move health paragraph back into local section
+
+Documentazione aggiornata. Ora la verifica finale: suite completa senza e con Postgres (schema isolato), controllo degli import vietati nel dominio e delle dipendenze.
+
+- 🔧 Bash: Run suite and static checks
+
+- 🔧 Bash: Run full suite against Postgres in isolated schema
+
+Mentre la suite su Postgres gira (qualche minuto), scrivo le decisioni prese durante l'esecuzione.
+
+- 🔧 Bash: Record execution decisions
+
+Aspetto l'esito della suite su Postgres prima di fare il commit finale.
+
+## Utente 21:35
+
+salta l'esito fai il commit
+
+## Agente 21:35
+
+- 🔧 Bash: Commit Task 19 docs and decisions

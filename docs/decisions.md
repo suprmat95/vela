@@ -432,3 +432,31 @@ bookings), interpretazione confermata dall'utente.
 | M6 | Da togliere: webhook `POST /webhooks/stripe`, tabella `stripe_events` (migrazione `0003`), obbligo di `STRIPE_WEBHOOK_SECRET`. Resta: Checkout Session, `checkoutRefId`, pagine di ritorno, scadenza. Modifica da concordare su `task/m6`, oppure rimozione nel Task 13b di M5 dopo il rebase | Coerenza con la nuova RF-20 |
 | Domande a HofJ | Domanda 3 (webhook) chiusa; domanda 1 chiusa per la parte "come si chiude" (booking con `paymentIntentId`) | Risposta arrivata tramite l'utente |
 
+## 2026-09-25 — M5: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, Task 2-19.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ordine dei task | 11 → 12 → 13 → 13b → 14 → 10+17 → 15 → 16 → 18 → 19 (deciso con l'utente) | Con l'accettazione asincrona nessuno produce il link finché job, processore e worker non esistono: la suite resta verde a ogni commit |
+| Contatore di quota su Postgres | Riga unica bloccata con `SELECT ... FOR UPDATE` per tutta la decisione, invece di un solo `UPDATE` condizionale | Stessa atomicità, e le regole restano funzioni pure in `vela/domain/quota.py` condivise da memoria e Postgres. Verificato con 8 thread sullo stesso contatore: concessi esattamente 87 acquisti |
+| Percentuali della quota | Calcolate con `Decimal` | In float 100 × 0,29 = 28,999… e il floor sbaglia |
+| Test dei job | Nel contratto dei repository, non in un file a parte | I job hanno una foreign key sugli ordini |
+| Ordine di prelievo | `booking`, poi `payment_check`, poi `purchase` per `enqueued_at` | La verifica del pagamento non consuma quota HofJ e sblocca pagamenti già fatti |
+| Quota non usata | Le chiamate prenotate e non usate da un job interrotto non tornano nel budget | Semplicità; il costo è al massimo un blocco per errore |
+| Lettura della quota fallita | Si riprova solo nella finestra successiva; intanto si lavora con la finestra che si ha | Evita un ciclo di chiamate a `/v1/quota` (RF-47) |
+| Proposta sostituita | Chiusa registrando un rifiuto con motivo "prodotto non prenotabile" | Altrimenti `_propose` riproporrebbe la stessa proposta aperta |
+| Accept sulla proposta sostitutiva | Riusa i dati del viaggiatore dell'ordine sostituito | Trovato dai test: senza, Vela richiedeva dati già dati |
+| Ordine in coda ma già in lavorazione | Niente posizione né attesa; frase "Sto preparando il pagamento con il fornitore" | L'attesa stimata vale solo per chi aspetta il proprio turno |
+| Chiedere lo stato di un ordine da pagare | Anticipa a subito la verifica del pagamento, senza chiamate nel caso d'uso | Il viaggiatore che dice "ho pagato" non aspetta i 60 s del polling |
+| Motivi di fallimento della prenotazione | Codici `booking_upstream` e `booking_rejected` con frasi it/en | Il piano non li elencava |
+| Checkout di replay | Paga il link finto e applica subito l'esito (`settle_payment`), la prenotazione passa dal worker | Stesso percorso della verifica reale, risposta immediata in replay |
+| `say_accept` | Rimossa con i suoi test | L'accettazione non dà più totale né link |
+| Errore del fornitore di pagamento | Ripetuto dal job d'acquisto (3 tentativi, poi `failed`); la 503 `payments-unavailable` di REST e la frase MCP non sono più raggiungibili dall'accept (codice lasciato, riga tolta da `docs/rest.md`) | Il link lo crea il job, non l'accettazione |
+| Modo live | Richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND` e `STRIPE_SECRET_KEY`; il catalogo resta la fixture di M1 finché non c'è M10 | Con il pagamento finto il link punterebbe a `/replay/checkout`, che in live non esiste |
+| Downgrade della `0005` | Cancella gli ordini senza totale (in coda) | Lo schema precedente non li rappresenta; alternativa era un totale falso |
+| Smoke test MCP | `scripts/mcp_smoke.py` interroga lo stato finché il link è pronto, poi finché l'ordine è confermato; parametro `tick` per far avanzare la coda nei test | Il flusso ora è asincrono |
+| Test Postgres | Eseguiti con l'External Database URL, passando al processo solo `DATABASE_URL` e isolando lo schema con `PGOPTIONS=-csearch_path=vela_test`: lo schema dell'app resta alla head di `master` | Il test della migrazione altrimenti porterebbe lo schema dell'app alla `0005` e il deploy di `master` non partirebbe |
+| Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
+| Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
+
