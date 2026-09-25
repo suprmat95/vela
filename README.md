@@ -28,13 +28,15 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
-Al primo avvio con la tabella `products` vuota, l'app carica `fixtures/catalog.json` (110
-prodotti). A ogni avvio legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
+A ogni avvio l'app riallinea la tabella `products` alla fixture dell'ambiente
+(`fixtures/catalog.json`, 110 prodotti, in replay): se i prodotti attivi sono diversi carica la
+fixture e archivia gli altri, senza cancellarli; se sono gli stessi non tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
 prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
 
 `VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
-`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo resta
-quello della fixture finché non c'è il sync (M10).
+`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo è la
+fixture `fixtures/catalog*.json` registrata su `HOFJ_BASE_URL` (senza, l'app non parte), e le
+chiamate del carrello usano il suo locale; resta così finché non c'è il sync (M10).
 
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.

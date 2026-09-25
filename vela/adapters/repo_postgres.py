@@ -89,6 +89,15 @@ class PostgresProducts:
             conn.execute(update(products_t).where(products_t.c.id == product_id)
                          .values(bookable=bookable, bookable_checked_at=checked_at))
 
+    def archive_missing(self, keep_ids: Iterable[str]) -> int:
+        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`."""
+        stmt = update(products_t).where(products_t.c.archived.is_(False))
+        keep = list(keep_ids)
+        if keep:
+            stmt = stmt.where(products_t.c.id.notin_(keep))
+        with self.engine.begin() as conn:
+            return conn.execute(stmt.values(archived=True)).rowcount
+
 
 class PostgresIntents:
     def __init__(self, engine: Engine):

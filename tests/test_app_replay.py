@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW, inline_worker
+from support import NOW, inline_worker, make_product
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -94,6 +94,74 @@ class BootstrapTest(unittest.TestCase):
             self.assertTrue(app.state.bootstrap["quota_synced"])
             snap = vela.repos.quota.snapshot(vela.now())
             self.assertEqual((snap["limit_per_minute"], snap["needs_refresh"]), (120, False))
+
+
+STAGING = [make_product("118", destination="Barcellona", country="ES", price=245),
+           make_product("119", destination="Madrid", country="ES", price=300),
+           make_product("120", archived=True)]
+
+
+def app_with_catalog(repos, loader):
+    vela = Vela(repos, ReplayHofJ(rng=random.Random(7)), FakePayments("http://test"), DEFAULT_TRAVELER,
+                now=Clock())
+    app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
+                     vela=vela, worker=inline_worker(vela), catalog_loader=loader)
+    return app, vela
+
+
+def active_ids(vela):
+    return sorted(p.id for p in vela.repos.products.list_all() if not p.archived)
+
+
+class CatalogRealignTest(unittest.TestCase):
+    """Decisione M7: al boot il DB si riallinea alla fixture dell'ambiente, senza DELETE."""
+
+    def setUp(self):
+        self.production = ReplayHofJ().load_catalog
+        self.production_active = sorted(p.id for p in self.production() if not p.archived)
+
+    def test_switch_to_another_catalog_archives_the_old_one(self):
+        repos = MemoryRepositories()
+        repos.products.upsert_many(self.production())
+        app, vela = app_with_catalog(repos, lambda: STAGING)
+        with TestClient(app):
+            self.assertEqual(app.state.bootstrap["catalog_loaded"], 3)
+            self.assertEqual(app.state.bootstrap["catalog_archived"], len(self.production_active))
+            self.assertEqual(active_ids(vela), ["118", "119"])
+            self.assertEqual(vela.repos.products.count(), 110 + 3)   # nessun prodotto cancellato
+
+    def test_proposals_on_archived_products_stay_readable_and_new_intents_use_the_new_catalog(self):
+        repos = MemoryRepositories()
+        app, vela = app_with_catalog(repos, self.production)
+        with TestClient(app):
+            old = vela.get_proposal(vela.create_intent(INTENT, FULL).intent_id).proposal
+        self.assertIn(old.product_id, self.production_active)
+        app, vela = app_with_catalog(repos, lambda: STAGING)
+        with TestClient(app):
+            self.assertEqual(vela.repos.proposals.get(old.id).product_id, old.product_id)
+            self.assertTrue(vela.repos.products.get(old.product_id).archived)
+            new = vela.get_proposal(vela.create_intent(INTENT, FULL).intent_id).proposal
+            self.assertIn(new.product_id, ("118", "119"))
+
+    def test_same_catalog_is_not_reloaded_and_keeps_bookable_flags(self):
+        repos = MemoryRepositories()
+        repos.products.upsert_many(STAGING)
+        repos.products.set_bookable("118", False, NOW)
+        app, vela = app_with_catalog(repos, lambda: STAGING)
+        with TestClient(app):
+            self.assertEqual((app.state.bootstrap["catalog_loaded"],
+                              app.state.bootstrap["catalog_archived"]), (0, 0))
+            self.assertFalse(vela.repos.products.get("118").bookable)
+
+    def test_back_to_the_production_catalog_archives_the_staging_one(self):
+        repos = MemoryRepositories()
+        repos.products.upsert_many(self.production())
+        repos.products.archive_missing([p.id for p in STAGING])
+        repos.products.upsert_many(STAGING)
+        app, vela = app_with_catalog(repos, self.production)
+        with TestClient(app):
+            self.assertEqual(app.state.bootstrap["catalog_archived"], 2)
+            self.assertEqual(active_ids(vela), self.production_active)
 
 
 class CheckoutTest(unittest.TestCase):

@@ -262,3 +262,67 @@ Rossi per il motivo giusto: il locale resta `it`. GREEN:
 Il fallback `or "it"` non ha un test che lo richieda, e le fixture scritte da `record_catalog.py` hanno sempre `locale`. Lo tolgo:
 
 - 🔧 Bash: Drop untested fallback, run suite, commit Task 4
+
+- 🔧 Bash: Read bootstrap and product repositories
+
+Task 4 è fatto: commit `fb15848`, suite verde con 730 test e 40 saltati.
+
+**Cosa ho fatto**
+- In live, `HofJHttp` riceve il `locale` della fixture registrata su `HOFJ_BASE_URL`: con il catalogo di staging `en` le chiamate del carrello partono con `locale=en`.
+- `build_hofj` ora restituisce l'adapter insieme al loader del catalogo. Il suo unico chiamante è `build_vela`, quindi nessun'altra parte del codice cambia.
+- In `tests/test_app_replay.py`: un test nuovo con fixture `en` e `it`, e un'asserzione aggiornata in `test_live_builds_http_adapter_and_m6_payments`, che passa da `it` a `en`. Prima del codice fallivano entrambi.
+
+**Cosa ho deciso**
+- Non ho scritto il test end-to-end con `MockTransport` che avevo proposto. Avrebbe richiesto di iniettare un transport in un attributo privato di httpx. La catena è coperta lo stesso: il test di wiring verifica il locale passato al costruttore, e il test esistente `test_locale_comes_from_the_constructor` verifica che il costruttore lo metta nella richiesta.
+- Avevo scritto un fallback `or "it"` per le fixture senza `locale`. L'ho tolto perché nessun test lo richiedeva e `record_catalog.py` scrive sempre `locale`.
+
+**Su cosa ho dubbi**
+- `build_hofj` restituisce la tupla con tipo `Tuple[object, CatalogLoader]`, perché non esiste un tipo comune ai due adapter HofJ. È un dettaglio.
+
+**Proposta per il Task 5 (riallineo del catalogo al boot), aspetto il tuo OK:**
+- Nuovo metodo `ProductRepository.archive_missing(keep_ids) -> int` sulla porta interna:
+  - in memoria: `replace(p, archived=True)` sui prodotti non archiviati assenti da `keep_ids`;
+  - su Postgres: `UPDATE products SET archived = true WHERE archived = false AND id NOT IN (...)`, che restituisce `rowcount`.
+- `bootstrap` in `vela/app.py` confronta gli id non archiviati nel DB con quelli non archiviati della fixture:
+  - se sono diversi, o il DB è vuoto: `upsert_many(fixture)` e poi `archive_missing(tutti gli id della fixture)`;
+  - se sono uguali non fa niente, e i flag `bookable=false` di RF-33 sopravvivono al riavvio.
+
+  Il risultato aggiunge `catalog_archived` a `catalog_loaded`. Per leggere gli id dal DB uso `list_all()`, che esiste già e non legge il JSON grezzo.
+- Test prima del codice:
+  - Contratto in `tests/repo_contract.py`, che gira sempre in memoria e su Postgres con `DATABASE_URL`: archivia solo gli assenti non archiviati e restituisce il conteggio; gli archiviati già presenti non vengono contati; `keep_ids` vuoto archivia tutto.
+  - Bootstrap in `tests/test_app_replay.py`:
+    - DB vuoto → carica;
+    - stessa fixture → nessun upsert, e `bookable=false` di un prodotto resta;
+    - DB con il catalogo di produzione e una proposta che ne referenzia un prodotto, fixture di staging finta → i prodotti di produzione vengono archiviati, la proposta resta leggibile, e un intento nuovo non propone prodotti archiviati;
+    - ritorno alla fixture di produzione → riallineo opposto.
+- Una nota per il Task 8: `/health` riporta `catalog.products = count()`, che include gli archiviati. Dopo lo switch mostrerà 110 + prodotti di staging, non solo quelli di staging. Nel Task 8 verificherei il riallineo con `catalog_loaded` e `catalog_archived` nel log di boot, senza cambiare `/health`. In alternativa `/health` può contare solo i non archiviati, ma è un'altra modifica alla risposta: dimmi tu.
+
+## Utente 21:53
+
+ok, procedi con il Task 5
+
+## Agente 21:54
+
+Per `/health` tengo la mia raccomandazione: nessuna modifica. Guardo il contratto dei repository:
+
+- 🔧 Bash: Read repo contract and product test helpers
+
+- 🔧 Bash: Read product contract tests and bootstrap tests
+
+RED: contratto di `archive_missing` e test del bootstrap.
+
+- 🔧 Bash: Add contract and realign tests, expect red
+
+Rossi per i motivi attesi: manca il metodo, manca la chiave `catalog_archived`, il catalogo non viene riallineato. GREEN:
+
+- 🔧 Bash: Check postgres imports and set_bookable impl
+
+- 🔧 Bash: Implement archive_missing and realign, run suite
+
+- 🔧 Bash: Simplify condition, fix docstring, rerun suite
+
+- 🔧 Bash: Find docs describing empty-table catalog load
+
+- 🔧 Bash: Read README catalog paragraph
+
+- 🔧 Bash: Read rest of README live paragraph

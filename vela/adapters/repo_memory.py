@@ -38,6 +38,13 @@ class MemoryProducts:
         if p is not None:
             self._items[product_id] = replace(p, bookable=bookable, bookable_checked_at=checked_at)
 
+    def archive_missing(self, keep_ids: Iterable[str]) -> int:
+        keep = set(keep_ids)
+        gone = [p for p in self._items.values() if not p.archived and p.id not in keep]
+        for p in gone:
+            self._items[p.id] = replace(p, archived=True)
+        return len(gone)
+
 
 class MemoryIntents:
     def __init__(self):
