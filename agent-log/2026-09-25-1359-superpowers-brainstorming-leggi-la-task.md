@@ -104,3 +104,9 @@ RED confermato con il 3.7. Ora pyproject, lock e venv.
 - 🔧 Bash: Rename agents-log to agent-log, update script defaults, slash-command parsing and docs; run tests on 3.12 and 3.7
 
 - 🔧 Bash: Commit the agent-log rename, verify history follows, record T2 in ledger
+
+T2 chiusa: rinomina fatta, storia preservata, e l'hook ora logga anche questa sessione. Passo a T3 (configurazione): prima il test, poi il codice.
+
+- 🔧 Bash: Write failing tests for vela.config
+
+- 🔧 Bash: Implement vela.config, verify green, commit T3 and record in ledger
