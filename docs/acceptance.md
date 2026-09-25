@@ -10,6 +10,7 @@ Esito: `ok`, `parziale` (con il motivo nelle note), `fallito`, `da eseguire`.
 | 2 | Flusso da agente vocale ElevenLabs, link per testo | — | live | MCP (ElevenLabs) | da eseguire | M12 |
 | 3 | Flusso via REST con `curl` e token | — | replay | REST | da eseguire | M4 |
 | 3 | idem | — | live | REST | da eseguire | M7 |
+| 3 | idem, con Stripe reale in test (HofJ replay): pagamento `4242…` e webhook → `confirmed` | — | replay + Stripe test | REST | da eseguire | M6, guida in `docs/stripe.md` |
 | 4 | Prodotto che fallisce al carrello sostituito senza errore visibile | — | live | MCP/REST | da eseguire | M5, M7 |
 | 5 | Suite verde e load test in replay, quota HofJ invariata | — | replay | REST | da eseguire | M13 |
 | 6 | Nessuna risposta con più di un prodotto, su nessuna superficie | — | replay | MCP | da eseguire | M3: test automatici `tests/test_mcp_tools.py` e smoke `scripts/mcp_smoke.py`; REST in M4 |

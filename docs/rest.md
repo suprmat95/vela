@@ -32,7 +32,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché |
 | `order` | 201 | ordine creato (o lo stesso ordine a un secondo accept) con `payment_url` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
-| `order_status` | 200 | stato dell'ordine e `booking_code` quando `confirmed` |
+| `order_status` | 200 | stato dell'ordine, `total`, `currency`, `payment_url` (solo `awaiting_payment`, altrimenti `null`) e `booking_code` quando `confirmed` |
 
 ## Errori (RFC 7807)
 
@@ -47,6 +47,7 @@ Solo sotto `/v1`: `content-type: application/problem+json`, corpo
 | 422 | `/problems/invalid-request` | body o parametri non validi, JSON malformato; campo `errors` |
 | 503 | `/problems/rest-not-configured` | `VELA_API_TOKEN` non impostata |
 | 503 | `/problems/domain-unavailable` | `DATABASE_URL` non impostata |
+| 503 | `/problems/payments-unavailable` | Stripe non ha creato il link: ripetere l'accept sulla stessa proposta (l'ordine resta unico) |
 | 500 | `/problems/internal-error` | errore inatteso; il dettaglio è solo nei log |
 
 Ordine dei controlli: token configurato (503), token valido (401), validazione (422), dominio (503).
@@ -81,6 +82,7 @@ echo "$ORDER" | jq '{outcome, order_id, total, payment_url, say}'
 OID=$(echo "$ORDER" | jq -r .order_id)
 
 curl -s "$(echo "$ORDER" | jq -r .payment_url)" | jq      # replay: simula il pagamento
+# con STRIPE_SECRET_KEY: aprire payment_url nel browser e pagare con 4242 4242 4242 4242 (docs/stripe.md)
 sleep 2
 curl -s "$VELA_URL/v1/orders/$OID" -H "$H" | jq          # atteso: confirmed, booking_code R-xxxxxx
 

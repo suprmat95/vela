@@ -44,9 +44,16 @@ class RejectionRepository(Protocol):
     def proposal_ids_for_intent(self, intent_id: str) -> Set[str]: ...
 
 
+class WebhookEventRepository(Protocol):
+    """Eventi Stripe già presi in carico (RNF-03): il primo claim vince, release lo annulla."""
+    def claim(self, event_id: str, event_type: str, at: datetime) -> bool: ...
+    def release(self, event_id: str) -> None: ...
+
+
 class Repositories(Protocol):
     products: ProductRepository
     intents: IntentRepository
     proposals: ProposalRepository
     orders: OrderRepository
     rejections: RejectionRepository
+    webhook_events: WebhookEventRepository

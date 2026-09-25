@@ -126,7 +126,7 @@ class Vela:
         lang = intent.criteria.language
         existing = self.repos.orders.get_by_proposal(proposal_id)
         if existing is not None:
-            return self._accepted(existing, lang)
+            return self._accepted(self._ensure_link(existing), lang)
         profile = intent.profile.merged_with(traveler or TravelerProfile())
         missing = profile.missing_fields(proposal.pax)
         if missing:
@@ -153,11 +153,19 @@ class Vela:
             self.repos.orders.add(order)
         except DuplicateOrder:
             return self._accepted(self.repos.orders.get_by_proposal(proposal_id), lang)
-        link = self.payments.create_payment_link(order)
+        return self._accepted(self._ensure_link(order), lang)
+
+    def _ensure_link(self, order: Order) -> Order:
+        """Crea il link di pagamento se manca (RF-18). Se il fornitore fallisce, `PaymentsError`
+        risale alla superficie e l'ordine resta senza link: un nuovo accept riprova."""
+        if order.payment_url or order.status != OrderStatus.AWAITING_PAYMENT:
+            return order
+        product = self.repos.products.get(order.product_id)
+        link = self.payments.create_payment_link(order, product.title)
         order = replace(order, payment_url=link.url, payment_ref=link.reference,
                         updated_at=self.now())
         self.repos.orders.save(order)
-        return self._accepted(order, lang)
+        return order
 
     def _accepted(self, order: Order, lang: str = "it") -> AcceptResponse:
         estimate = order.price_from * order.pax
@@ -172,6 +180,8 @@ class Vela:
         order = self.orders.get(order_id)
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
-        return OrderStatusResponse(order.id, order.status, order.booking_code,
+        payable = order.status == OrderStatus.AWAITING_PAYMENT
+        return OrderStatusResponse(order.id, order.status, order.booking_code, order.total,
+                                   order.currency, order.payment_url if payable else None,
                                    say.say_status(order.status, order.booking_code,
-                                                  order.failure_reason, lang))
+                                                  order.failure_reason, lang, order.total))

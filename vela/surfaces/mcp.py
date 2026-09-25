@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from vela.domain import say
 from vela.domain.models import Participant, TravelerProfile
 from vela.domain.usecases import NotFound, Vela
+from vela.ports.payments import PaymentsError
 
 log = logging.getLogger("vela.mcp")
 
@@ -66,7 +67,9 @@ DESCRIPTIONS = {
     "get_order_status": (
         "Check an order when the user says they paid or asks how it is going. Returns `status` "
         "(awaiting_payment, paid_pending_booking, confirmed, booking_failed, expired) and, when "
-        "confirmed, `booking_code`." + _VOICE),
+        "confirmed, `booking_code`. While awaiting_payment it also returns `payment_url` and "
+        "`total`: show the link in the chat again if the user lost it, never read it aloud."
+        + _VOICE),
 }
 
 
@@ -120,6 +123,9 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
             return ok(use_case(vela))
         except NotFound as exc:
             return fail(say.say_not_found(exc.kind))
+        except PaymentsError:
+            log.warning("tool MCP %s: link di pagamento non creato", name)
+            return fail(say.say_payments_unavailable())
         except Exception:   # noqa: BLE001 - nessun dettaglio interno verso il modello
             log.exception("tool MCP %s fallito", name)
             return fail(say.say_error())

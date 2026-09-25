@@ -270,6 +270,38 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m11-chooser-v2.md` in TDD.
 | Verifica delle proprietà | Spostando il filtro `rejected` in testa falliscono `test_rejected_is_reported_only_when_compatible_products_were_all_rejected`, `test_failed_criterion_is_the_first_emptying_filter` e le proprietà su tutti gli 11 intenti della tabella; `test_filter_order` no, perché controlla la costante `FILTERS` e non l'ordine dei `steps` | Il piano citava `test_filter_order` tra quelli che dovevano fallire: correzione del piano, nessun cambio di codice |
 | Bytecode dopo una mutazione | Dopo un ripristino con `git checkout` nello stesso secondo e con la stessa dimensione del file, Python riusa il `.pyc` della versione mutata: va cancellato `vela/domain/__pycache__/chooser.cpython-312.pyc` | L'invalidazione dei `.pyc` usa mtime in secondi e dimensione; evita falsi rossi dopo le prove di mutazione |
 
+## 2026-09-25 — M6: Stripe, link di pagamento e webhook
+
+Origine: intervista sulla macro task M6, piano in `docs/plans/2026-09-25-m6-stripe.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Tipo di link | Checkout Session, una per ordine, `mode=payment`, solo carta, un line item `price_data` in EUR per il totale reale, `metadata` `{order_id, itinerary_id}` sulla sessione e sul PaymentIntent, `expires_at` = creazione dell'ordine + 24 h − 1 min | I Payment Link non scadono da soli (RF-21). Stripe genera `checkout.session.expired` e accetta al massimo 24 h |
+| Idempotenza verso Stripe | `idempotency_key = "vela-order-<order_id>"`, parametri deterministici: `expires_at` dipende da `order.created_at`, non dall'ora corrente | Stripe rifiuta una chiave ripetuta con parametri diversi; così un nuovo tentativo restituisce la stessa sessione e non nascono due link pagabili |
+| Scelta dell'adapter | `STRIPE_SECRET_KEY` impostata → `StripePayments`, indipendente da `VELA_UPSTREAM_MODE`; senza `STRIPE_WEBHOOK_SECRET` o `VELA_PUBLIC_URL` l'app non parte (`RuntimeError`). Chiave assente → `FakePayments` | Nessuna variabile nuova (spec §6); il test manuale gira con HofJ in replay e Stripe reale |
+| Ritorno dal Checkout | Due pagine HTML statiche servite da Vela: `/checkout/success` e `/checkout/cancel`, in italiano, senza JS, senza leggere il DB né mostrare dati | Scelta dell'utente. Deroga a spec §6 ("la sola pagina web è il Checkout di Stripe"), che viene aggiornata |
+| Idempotenza del webhook | Tabella `stripe_events(id PK, type, received_at)` (migrazione `0003`), porta `WebhookEventRepository` con `claim` e `release`. Claim prima di elaborare; duplicato → 200 senza effetti; eccezione → release e 500 perché Stripe ripeta | Copre anche due consegne concorrenti dello stesso evento: vince il primo INSERT |
+| Eventi non applicabili | Ordine sconosciuto, metadata mancante, `payment_status` diverso da `paid`, valuta o importo diversi dall'ordine → nessuna transizione, log di warning con id di evento e ordine, evento registrato, 200 | Ripetere l'evento non cambierebbe l'esito |
+| Tipi non gestiti | 200 `ignored`, non registrati | Nessun effetto; l'endpoint va configurato su Stripe solo per i due tipi |
+| RF-19 | `OrderStatusResponse` guadagna `total`, `currency`, `payment_url` (valorizzato solo per `awaiting_payment`, altrimenti `null`); `say` in `awaiting_payment` dice l'importo, mai l'URL | Campi additivi sull'interfaccia pubblica REST e MCP, approvati |
+| Errore di Stripe in `accept` | L'adapter solleva `PaymentsError`; REST → 503 `/problems/payments-unavailable`; MCP → frase `say_payments_unavailable()`. Un nuovo accept sulla stessa proposta trova l'ordine senza link e lo ricrea | L'ordine resta unico; M5 poi sposterà tutto nel job d'acquisto con retry |
+| Setup Stripe e test manuale | Fatti dall'utente seguendo `docs/stripe.md`; gli agenti non chiamano mai Stripe | Nessuna chiamata a servizi esterni durante l'esecuzione del piano |
+| Etichetta del line item | `create_payment_link(order, description)`: il caso d'uso passa il titolo del prodotto | Il viaggiatore vede nel Checkout che cosa paga; modifica interna della porta |
+
+## 2026-09-25 — M6: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m6-stripe.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Logging di Alembic | `alembic/env.py` chiama `fileConfig(..., disable_existing_loggers=False)`; nuovo test `test_upgrade_keeps_existing_loggers_enabled` | Le migrazioni lanciate nello stesso processo dei test (`test_migrations`) spegnevano i logger `vela.*` già creati: gli `assertLogs` dei moduli eseguiti dopo (`test_webhooks`) fallivano solo nella suite completa. In produzione le migrazioni girano in un processo separato (`docker-entrypoint.sh`), quindi nessun effetto lì |
+| Log nei test | `test_thread_runner_swallows_unexpected_errors` e i test del webhook e di MCP che producono warning ora li verificano con `assertLogs` | Con i logger non più spenti il traceback finiva in console; ora il log è un'asserzione e l'output della suite è pulito |
+| Valori attesi letterali | `test_stripe_links.py` e `test_checkout_pages.py` usano URL, path e scadenza letterali (`2026-09-26 11:59 UTC`) invece delle costanti del modulo | Un'aspettativa ricavata dal codice sotto test passa sempre; i path letterali legano anche i `success_url`/`cancel_url` alle route reali |
+| Test delle route montate | `test_webhook_and_checkout_routes_always_mounted` verifica le risposte HTTP (503/200) invece di `app.routes` | In questa versione di FastAPI le route dei router inclusi non espongono `path` in `app.routes`. Lo stesso motivo rende vuoto il test esistente `test_replay_router_absent_in_live` (fuori scope M6, da correggere a parte) |
+| Test Postgres | Non eseguiti: `DATABASE_URL` non è nell'ambiente di questo worktree, quindi il contratto `claim`/`release` su Postgres e la migrazione `0003` su Postgres sono saltati | Il `.env` non va aperto. Da eseguire dove `DATABASE_URL` è disponibile |
+| Merge con `master` (M9) | Fatto con merge, su richiesta dell'utente. 7 file in conflitto, tutti con entrambe le parti tenute. `vela/app.py`: `build_payments(settings)` più `extractor=extractor`. `say_status(status, booking_code, failure_reason, lang="it", total=None)`: il `lang` di M9 resta il quarto argomento, l'importo di M6 viene dopo, con la frase `_AWAITING_AMOUNT` in italiano e in inglese ("waiting for payment of …", compatibile con il test di lingua di M9). `usecases.py`: `_ensure_link` e `lang` insieme | Il merge non riscrive la storia; la suite dopo il merge è verde (534 test, 14 saltati) |
+| Suite finale | 445 test, 13 saltati (Postgres), verde (erano 390 a inizio M6) | — |
+
 ## 2026-09-25 — M9: parser completo, rifiuto con motivo, fallback Haiku
 
 Origine: intervista sulla macro task M9, piano in `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md`.

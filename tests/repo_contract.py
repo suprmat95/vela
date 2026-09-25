@@ -126,3 +126,13 @@ class RepositoryContract:
         self.assertEqual(self.repos.rejections.product_ids_for_intent("i1"), {"1", "2"})
         self.assertEqual(self.repos.rejections.proposal_ids_for_intent("i1"), {"p1", "p2"})
         self.assertEqual(self.repos.rejections.product_ids_for_intent("other"), set())
+
+    # eventi webhook (RNF-03)
+    def test_webhook_events_claim_once_and_release(self):
+        events = self.repos.webhook_events
+        self.assertTrue(events.claim("evt_1", "checkout.session.completed", NOW))
+        self.assertFalse(events.claim("evt_1", "checkout.session.completed", NOW))
+        self.assertTrue(events.claim("evt_2", "checkout.session.expired", NOW))
+        events.release("evt_1")
+        self.assertTrue(events.claim("evt_1", "checkout.session.completed", NOW))
+        events.release("sconosciuto")   # nessun errore

@@ -2,12 +2,14 @@ import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from support import NOW, FakeHofJ, StubPayments, assert_single_product, make_product
+from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
+                     make_product)
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.models import (Area, IntentCreated, IntentQuestion, NoMatch, ProposalMade,
                                 TravelerProfile)
 from vela.domain.usecases import NotFound, Vela
+from vela.ports.payments import PaymentsError, to_cents
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 
@@ -214,8 +216,8 @@ from vela.domain.models import (AcceptResponse, MissingTravelerData, OrderStatus
 FULL = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
 
 
-def accepted_vela(hofj=None):
-    vela = make_vela(hofj=hofj)
+def accepted_vela(hofj=None, payments=None):
+    vela = make_vela(hofj=hofj, payments=payments)
     iid = vela.create_intent(INTENT).intent_id
     proposal = vela.get_proposal(iid)
     return vela, iid, proposal
@@ -288,16 +290,74 @@ class AcceptProposalTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             make_vela().accept_proposal("nope", FULL)
 
+    def test_link_description_is_the_product_title(self):
+        vela, _, proposal = accepted_vela()
+        vela.accept_proposal(proposal.proposal.id, FULL)
+        product = vela.repos.products.get(proposal.proposal.product_id)
+        self.assertEqual(vela.payments.descriptions, [product.title])
+
+    def test_payments_error_then_retry_creates_the_link_once(self):
+        vela, _, proposal = accepted_vela(payments=FlakyPayments(failures=1))
+        with self.assertRaises(PaymentsError):
+            vela.accept_proposal(proposal.proposal.id, FULL)
+        order = vela.repos.orders.get_by_proposal(proposal.proposal.id)
+        self.assertIsNone(order.payment_url)
+        r = vela.accept_proposal(proposal.proposal.id)
+        self.assertEqual(r.order_id, order.id)
+        self.assertEqual(r.payment_url, "http://pay.test/" + order.id)
+        self.assertEqual(vela.repos.orders.get(order.id).payment_url, r.payment_url)
+        self.assertEqual(len([c for c in vela.hofj.calls if c[0] == "create_itinerary"]), 1)
+        self.assertEqual(len(vela.payments.links), 1)
+        self.assertEqual(vela.payments.attempts, 2)
+
+    def test_existing_link_is_not_recreated(self):
+        vela, _, proposal = accepted_vela()
+        vela.accept_proposal(proposal.proposal.id, FULL)
+        vela.accept_proposal(proposal.proposal.id)
+        self.assertEqual(len(vela.payments.descriptions), 1)
+
+
+class ToCentsTest(unittest.TestCase):
+    def test_to_cents(self):
+        self.assertEqual(to_cents(Decimal("700")), 70000)
+        self.assertEqual(to_cents(Decimal("799.9")), 79990)
+        self.assertEqual(to_cents(Decimal("0.01")), 1)
+
 
 class OrderStatusTest(unittest.TestCase):
     def test_awaiting_payment(self):
         vela, _, proposal = accepted_vela()
-        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
-        r = vela.get_order_status(oid)
+        accepted = vela.accept_proposal(proposal.proposal.id, FULL)
+        r = vela.get_order_status(accepted.order_id)
         self.assertIsInstance(r, OrderStatusResponse)
         self.assertEqual((r.status, r.booking_code), (OrderStatus.AWAITING_PAYMENT, None))
+        self.assertEqual((r.total, r.currency, r.payment_url),
+                         (Decimal("700"), "EUR", "http://pay.test/" + accepted.order_id))
         self.assertIn("attesa", r.say)
-        assert_single_product(self, r.to_dict())
+        self.assertIn("700 euro", r.say)
+        d = r.to_dict()
+        self.assertEqual((d["total"], d["currency"], d["payment_url"]),
+                         ("700.00", "EUR", "http://pay.test/" + accepted.order_id))
+        assert_single_product(self, d)
+
+    def test_link_is_hidden_once_not_payable(self):
+        vela, _, proposal = accepted_vela()
+        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
+        vela.orders.expire(oid)
+        r = vela.get_order_status(oid)
+        self.assertEqual(r.status, OrderStatus.EXPIRED)
+        self.assertIsNone(r.payment_url)
+        self.assertIsNone(r.to_dict()["payment_url"])
+        self.assertIn("scaduto", r.say)
+
+    def test_confirmed_keeps_total(self):
+        vela, _, proposal = accepted_vela()
+        oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
+        vela.orders.mark_paid(oid, "pi_1")
+        vela.orders.complete_booking(oid)
+        r = vela.get_order_status(oid)
+        self.assertEqual((r.status, r.total, r.payment_url),
+                         (OrderStatus.CONFIRMED, Decimal("700"), None))
 
     def test_unknown(self):
         with self.assertRaises(NotFound):

@@ -340,9 +340,13 @@ class OrderStatusResponse:
     order_id: str
     status: OrderStatus
     booking_code: Optional[str]
+    total: Decimal
+    currency: str
+    payment_url: Optional[str]   # solo per awaiting_payment (RF-19)
     say: str
 
     def to_dict(self) -> dict:
         return {"order_id": self.order_id, "status": self.status.value,
-                "booking_code": self.booking_code, "say": self.say}
+                "booking_code": self.booking_code, "total": money_str(self.total),
+                "currency": self.currency, "payment_url": self.payment_url, "say": self.say}
 

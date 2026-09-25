@@ -14,7 +14,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException
 
+from vela.domain import say
 from vela.domain.orders import NotFound
+from vela.ports.payments import PaymentsError
 
 PROBLEM_JSON = "application/problem+json"
 REST_PREFIX = "/v1"
@@ -64,6 +66,12 @@ def not_found(kind: str, id: str) -> Problem:
                    "Id sconosciuto (%s): %s" % (KINDS_IT.get(kind, kind), id), SAY_NOT_FOUND)
 
 
+def payments_unavailable() -> Problem:
+    return Problem(503, "payments-unavailable", "Pagamento non disponibile",
+                   "Il link di pagamento non è stato creato: ripetere l'accettazione tra poco, "
+                   "l'ordine resta unico.", say.say_payments_unavailable())
+
+
 def is_rest(request: Request) -> bool:
     path = request.url.path
     return path == REST_PREFIX or path.startswith(REST_PREFIX + "/")
@@ -84,6 +92,9 @@ def install_problem_handlers(app: FastAPI) -> None:
 
     async def on_not_found(request: Request, exc: NotFound):
         return problem_response(request, not_found(exc.kind, exc.id))
+
+    async def on_payments(request: Request, exc: PaymentsError):
+        return problem_response(request, payments_unavailable())
 
     async def on_http(request: Request, exc: HTTPException):
         if not is_rest(request):
@@ -113,4 +124,5 @@ def install_problem_handlers(app: FastAPI) -> None:
     app.add_exception_handler(NotFound, on_not_found)
     app.add_exception_handler(HTTPException, on_http)
     app.add_exception_handler(RequestValidationError, on_validation)
+    app.add_exception_handler(PaymentsError, on_payments)
     app.add_exception_handler(Exception, on_error)

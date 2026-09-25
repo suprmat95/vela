@@ -2,12 +2,13 @@
 from datetime import date, datetime
 from typing import Iterable, List, Optional, Set
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from vela.adapters.schema import intents_t, orders_t, products_t, proposals_t, rejections_t
+from vela.adapters.schema import (intents_t, orders_t, products_t, proposals_t, rejections_t,
+                                  stripe_events_t)
 from vela.domain.models import (Availability, Criteria, Intent, Order, OrderStatus, Product,
                                 Proposal, Rejection, criteria_from_dict, criteria_to_dict,
                                 profile_from_dict, profile_to_dict)
@@ -214,6 +215,22 @@ class PostgresRejections:
         return {r[0] for r in rows}
 
 
+class PostgresWebhookEvents:
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def claim(self, event_id: str, event_type: str, at: datetime) -> bool:
+        stmt = pg_insert(stripe_events_t).values(
+            id=event_id, type=event_type, received_at=at).on_conflict_do_nothing(
+            index_elements=[stripe_events_t.c.id])
+        with self.engine.begin() as conn:
+            return conn.execute(stmt).rowcount == 1
+
+    def release(self, event_id: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(delete(stripe_events_t).where(stripe_events_t.c.id == event_id))
+
+
 class PostgresRepositories:
     def __init__(self, engine: Engine):
         self.engine = engine
@@ -222,3 +239,4 @@ class PostgresRepositories:
         self.proposals = PostgresProposals(engine)
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
+        self.webhook_events = PostgresWebhookEvents(engine)

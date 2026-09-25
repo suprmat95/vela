@@ -14,7 +14,8 @@ from vela.config import Settings  # noqa: E402
 
 config = context.config
 if config.config_file_name is not None:
-    logging.config.fileConfig(config.config_file_name)
+    # False: le migrazioni lanciate nello stesso processo (test) non spengono i logger di vela.
+    logging.config.fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = metadata
 

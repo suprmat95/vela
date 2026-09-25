@@ -64,13 +64,13 @@ class FakePaymentsTest(unittest.TestCase):
                      Decimal("1000"), "EUR", TravelerProfile(), NOW, NOW)
 
     def test_link_points_to_replay_checkout(self):
-        link = FakePayments("https://vela.test/", now=lambda: NOW).create_payment_link(self.order())
+        link = FakePayments("https://vela.test/", now=lambda: NOW).create_payment_link(self.order(), "Padel")
         self.assertEqual(link.url, "https://vela.test/replay/checkout/o1")
         self.assertEqual(link.reference, "pi_replay_o1")
         self.assertEqual(link.expires_at, NOW + timedelta(hours=24))
 
     def test_default_public_url(self):
-        link = FakePayments(None).create_payment_link(self.order())
+        link = FakePayments(None).create_payment_link(self.order(), "Padel")
         self.assertEqual(link.url, "http://localhost:8000/replay/checkout/o1")
 
 

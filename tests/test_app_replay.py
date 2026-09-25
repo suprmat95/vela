@@ -124,6 +124,38 @@ class ModeTest(unittest.TestCase):
         with TestClient(app) as c:
             self.assertEqual(c.get("/replay/checkout/x").status_code, 503)
 
+    def test_no_stripe_key_keeps_fake_payments(self):
+        app = create_app(Settings(database_url="sqlite://"))
+        self.assertIsInstance(app.state.vela.payments, FakePayments)
+
+    def test_stripe_key_selects_stripe_payments(self):
+        from vela.adapters.stripe_links import StripePayments
+        app = create_app(Settings(database_url="sqlite://", stripe_secret_key="sk_test_x",
+                                  stripe_webhook_secret="whsec_x",
+                                  vela_public_url="https://vela.test"))
+        self.assertIsInstance(app.state.vela.payments, StripePayments)
+        self.assertEqual(app.state.vela.payments.base, "https://vela.test")
+
+    def test_stripe_key_without_webhook_secret_is_refused(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            create_app(Settings(database_url="sqlite://", stripe_secret_key="sk_test_x",
+                                vela_public_url="https://vela.test"))
+        self.assertIn("STRIPE_WEBHOOK_SECRET", str(ctx.exception))
+        self.assertNotIn("sk_test_x", str(ctx.exception))
+
+    def test_stripe_key_without_public_url_is_refused(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            create_app(Settings(database_url="sqlite://", stripe_secret_key="sk_test_x",
+                                stripe_webhook_secret="whsec_x"))
+        self.assertIn("VELA_PUBLIC_URL", str(ctx.exception))
+
+    def test_webhook_and_checkout_routes_always_mounted(self):
+        for mode in ("replay", "live"):
+            with self.subTest(mode), TestClient(create_app(Settings(vela_upstream_mode=mode))) as c:
+                self.assertEqual(c.post("/webhooks/stripe").status_code, 503)   # senza secret
+                self.assertEqual(c.get("/checkout/success").status_code, 200)
+                self.assertEqual(c.get("/checkout/cancel").status_code, 200)
+
     def test_no_key_no_extractor(self):
         app = create_app(Settings(database_url="sqlite://"))
         self.assertIsNone(app.state.vela.extractor)

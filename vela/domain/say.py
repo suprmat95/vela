@@ -212,8 +212,16 @@ _STATUS = {
 }
 
 
+_AWAITING_AMOUNT = {
+    "it": "L'ordine è in attesa del pagamento di %s: usa il link che ti ho mandato.",
+    "en": "The order is waiting for payment of %s: use the link I sent you.",
+}
+
+
 def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
-               lang: str = "it") -> str:
+               lang: str = "it", total: Optional[Decimal] = None) -> str:
+    if status == OrderStatus.AWAITING_PAYMENT and total is not None:
+        return _AWAITING_AMOUNT.get(lang, _AWAITING_AMOUNT["it"]) % fmt_money(total, lang)
     texts = _STATUS.get(lang, _STATUS["it"])
     text = texts.get(status, texts[None])
     return text % booking_code if status == OrderStatus.CONFIRMED else text
@@ -241,3 +249,8 @@ def say_unavailable() -> str:
 
 def say_error() -> str:
     return "Qualcosa non ha funzionato dalla mia parte: riprova tra poco."
+
+
+def say_payments_unavailable() -> str:
+    return ("Non riesco a preparare il link di pagamento in questo momento: riprova tra poco, "
+            "la proposta resta valida.")

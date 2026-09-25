@@ -7,6 +7,8 @@ lifespan.
 In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan carica il
 catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
 La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RFC 7807.
+Il webhook Stripe (``/webhooks/stripe``) è sempre montato; senza ``STRIPE_WEBHOOK_SECRET`` risponde 503.
+Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 """
 from contextlib import asynccontextmanager
 from typing import Callable, List, Optional, Tuple
@@ -19,17 +21,35 @@ from vela.adapters.db import make_engine
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.stripe_fake import FakePayments
+from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.models import Product
 from vela.domain.usecases import Vela
+from vela.ports.payments import PaymentsPort
+from vela.surfaces.checkout_pages import router as checkout_router
 from vela.surfaces.health import router as health_router
 from vela.surfaces.mcp import build_mcp, mcp_routes
 from vela.surfaces.problems import install_problem_handlers
 from vela.surfaces.replay import router as replay_router
 from vela.surfaces.rest import router as rest_router
+from vela.surfaces.webhooks import router as webhooks_router
 
 REPLAY = "replay"
 CatalogLoader = Callable[[], List[Product]]
+
+
+def build_payments(settings: Settings) -> PaymentsPort:
+    """Stripe se `STRIPE_SECRET_KEY` è impostata (indipendente dall'upstream HofJ), altrimenti
+    il pagamento finto. Una configurazione Stripe incompleta blocca l'avvio."""
+    if not settings.stripe_secret_key:
+        return FakePayments(settings.vela_public_url)
+    if not settings.stripe_webhook_secret:
+        raise RuntimeError("STRIPE_SECRET_KEY è impostata ma STRIPE_WEBHOOK_SECRET no: "
+                           "i pagamenti non verrebbero mai confermati")
+    if not settings.vela_public_url:
+        raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
+                           "del Checkout")
+    return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
 
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, BookingRunner, CatalogLoader]:
@@ -41,8 +61,8 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, BookingRunner,
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
         from vela.adapters.haiku import HaikuExtractor
         extractor = HaikuExtractor.from_api_key(settings.anthropic_api_key)
-    vela = Vela(PostgresRepositories(engine), hofj, FakePayments(settings.vela_public_url),
-                DEFAULT_TRAVELER, extractor=extractor)
+    vela = Vela(PostgresRepositories(engine), hofj, build_payments(settings), DEFAULT_TRAVELER,
+                extractor=extractor)
     return vela, BookingRunner(vela.orders), hofj.load_catalog
 
 
@@ -82,6 +102,8 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     app.include_router(health_router)
     install_problem_handlers(app)
     app.include_router(rest_router)
+    app.include_router(webhooks_router)
+    app.include_router(checkout_router)
     if settings.vela_upstream_mode == REPLAY:
         app.include_router(replay_router)
     app.router.routes.extend(mcp_routes(app.state.mcp, settings.vela_public_url))
