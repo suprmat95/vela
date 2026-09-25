@@ -28,9 +28,23 @@ differiscono vale questa tabella.
 | `PUT /v1/itineraries/{id}/pax` (array completo, `refId` invariati) | 200 `{data: {now}, meta: {}}` |
 | `GET /v1/itineraries/{id}` | 200. `checkout {total: {amount: "368"}, openAmount: {amount: "337"}, originalTotal: {amount: "337"}, status: "BookingInitiated", refId}`, `totalPrice {amount: "368.00"}`. `Money.amount` è una stringa, a volte senza decimali |
 | `POST /v1/bookings` `{itineraryId, paymentType: "full", paymentIntentId, paymentStatus: "succeeded"}` | 200 `{data: "<itineraryId>", meta: {now}}`: **nessun codice `R-…`**, il dato è l'`itineraryId` |
-| `GET /v1/itineraries/{id}` dopo il booking | 200, `checkout.status` ancora `BookingInitiated`, `openAmount` ancora 337: il pagamento non risulta registrato |
+| `GET /v1/itineraries/{id}` dopo il booking | 200, `checkout.status` ancora `BookingInitiated`, `openAmount` ancora 337. I valori di `checkout.status` non sono documentati (OAS: stringa libera), quindi il dato non prova né esclude che il booking sia registrato |
 
 Content-type sempre `application/json; charset=utf-8`, anche sugli errori.
+
+Cosa dicono OAS e DOCS sul pagamento (riletti il 2026-09-25):
+- Flusso previsto (DOCS "Checkout flow (internal)", diagramma di sequenza): `POST
+  /v1/itineraries/{id}/payment {paymentType}` → il brand site restituisce il
+  `stripe_client_secret` di un PaymentIntent creato **dal brand site sul proprio account
+  Stripe** → il client conferma con Stripe.js (`confirmCardPayment`) → `POST /v1/bookings
+  {itineraryId, paymentType}` → il brand restituisce il `reservationCode`.
+- `paymentType: "full"` = "Charge the entire open amount now": l'importo pagato è
+  `openAmount`, non `total`.
+- OAS oggi include in `CreateBookingRequest` anche `paymentIntentId` e `paymentStatus`,
+  entrambi "Optional; forwarded to the brand site when present". Nessuna validazione
+  documentata. Nel diagramma DOCS il booking non li manda.
+- `BookingStatus` (schema `Booking`, lettura user-scoped): `pending | payment_failed |
+  confirmed | cancelled`. `Checkout.status` non ha enum.
 
 ## POST /v1/oauth/token — non chiamato (POST)
 

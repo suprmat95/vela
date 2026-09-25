@@ -1326,3 +1326,109 @@ Nessuna novità dopo il booking: `checkout.status` è ancora `BookingInitiated` 
 - 🔧 Bash: Record section 8 results in docs
 
 - 🔧 Bash: Commit Task 1 results
+
+Ho chiuso il Task 1 con il commit `7204fd9`. Ho usato 9 chiamate HofJ, dopo che hai alzato il budget, e 1 chiamata Stripe in modalità test. I risultati sono in `docs/api/internal-checkout.md` e in una nuova sezione di `docs/decisions.md`.
+
+**Cosa abbiamo verificato:**
+- **Riga 1 di §8, superata:** la chiave crea carrelli (nessun 403).
+- **Riga 4, superata:** 120 chiamate al minuto su una finestra fissa di 60 secondi, come avevamo modellato lo scheduler.
+- **Riga 3, non dimostrata:** il booking con il nostro `paymentIntentId` risponde 200, ma dopo il carrello è ancora `BookingInitiated` e l'importo ancora da pagare resta 337 €. HofJ sembra ignorare il nostro pagamento.
+
+**Cosa cambia per M5:**
+- Come codice di prenotazione HofJ restituisce l'`itineraryId`, non un codice `R-…`. Nella frase vocale andrà letto lettera per lettera.
+- Il totale da usare è `checkout.total`.
+- Sul prodotto di staging, `locale=it` dà 502 con un 404 dentro. Per l'adapter è un vero caso di errore del prodotto. In produzione è un rischio se un prodotto non è tradotto in italiano.
+
+**Resta aperto: cosa fare della riga 3.** Il piano prevedeva di fermarsi qui e chiedere a te, perché la risposta cambia M6. Per M5 invece cambia poco: il job di prenotazione chiama comunque `create_booking` e i pagamenti passano per la porta `PaymentsPort`.
+
+1. **Proseguire con M5 e decidere in M6.** Nel frattempo M5 annota il rischio. All'inizio di M6 decidiamo tra il fallback della spec (pagina con Stripe.js che conferma il `client_secret` restituito da `POST …/payment` di HofJ) e altre strade. Ti consiglio questa: non blocca M5 e la decisione spetta a chi progetta i pagamenti.
+2. **Fare adesso un'altra sonda da 1 chiamata.** Rileggo il carrello tra qualche minuto, nel caso HofJ registri il pagamento in modo asincrono. Oppure provo un booking con un `paymentIntentId` inventato, e se risponde 200 anche quello la conclusione è certa.
+3. **Fermarsi e ripensare subito il flusso di pagamento** prima di andare avanti con M5.
+
+Se scegli la prima, il prossimo è il Task 2 (i nuovi parametri in `Settings`), di cui ti riferisco appena finito.
+
+## Utente 18:47
+
+sei sicuro che il carrello è rimasto BookingInitiated? come dovrebbe variare?
+
+## Agente 18:47
+
+- 🔧 Bash: Look for checkout status documentation and recheck raw results
+
+- 🔧 Bash: Read Checkout and Booking schema notes
+
+Sul dato sì: le due letture del carrello, prima del booking (chiamata 7) e dopo (chiamata 9), danno lo stesso valore. Le ho ricontrollate nelle risposte salvate:
+
+| Chiamata | `checkout.status` | `openAmount` |
+|---|---|---|
+| 7 (prima del booking) | `BookingInitiated` | 337 |
+| 9 (dopo il booking) | `BookingInitiated` | 337 |
+
+**Sull'interpretazione invece sono stato troppo sicuro.** Non sappiamo come dovrebbe cambiare:
+- **Il contratto non elenca i valori possibili.** Nell'OAS `Checkout.status` è una stringa semplice. Non esistono documenti su quali stati esistano né su quando cambino. Mi aspettavo un passaggio a qualcosa come "Booked" o "Paid", ma era una mia supposizione.
+- **`openAmount` non è "quanto resta da pagare".** Prima del booking valeva già 337 contro un totale di 368, quindi non misura il residuo. Il fatto che non sia cambiato non prova nulla.
+- **Il booking potrebbe vivere altrove.** Lo schema `Booking` ha un proprio `status` e un `reservationCode`. Si legge però da rotte che richiedono il token dell'utente finale (`X-End-User-Authorization`), a cui non abbiamo accesso. Può darsi che il carrello resti `BookingInitiated` mentre il booking vero è registrato lì, o viene elaborato in modo asincrono.
+
+La conclusione corretta è quindi più debole di quella che ho scritto: il 200 del booking è l'unico segnale positivo, e dal carrello non si capisce se il nostro `paymentIntentId` sia stato usato, verificato o ignorato.
+
+**Come scoprirlo davvero:** un secondo booking su un carrello nuovo, con un `paymentIntentId` inventato (`pi_fake_…`). Costa 3 chiamate:
+
+| # | Chiamata |
+|---|---|
+| 1 | creazione del carrello |
+| 2 | customer (serve prima del booking) |
+| 3 | booking con l'id inventato |
+
+Il `PUT pax` si può forse saltare, visto che il primo passeggero viene precompilato dal customer. Se il booking risponde 200 anche così, HofJ non controlla il pagamento: la riga 3 di §8 è confermata come «ignora» e il fallback per M6 diventa necessario. Se invece lo rifiuta, HofJ lo verifica e il nostro flusso Stripe regge.
+
+Correggo intanto `docs/decisions.md` e `docs/api/internal-checkout.md` con questa formulazione più prudente. Poi vuoi che faccia la sonda da 3 chiamate?
+
+## Utente 18:48
+
+controlla estensivamente documentazioni endpoint e vai su docs.api.hofj.com  e scopri perche
+
+## Agente 18:48
+
+- 🔧 ToolSearch
+
+- 🔧 Bash: Find doc site references and payment notes in repo
+
+- 🔧 Bash: Download public OpenAPI specs and docs homepage
+
+- 🔧 Bash: Extract booking and payment ops from OpenAPI
+
+- 🔧 Bash: Show booking request/response and docs site links
+
+- 🔧 Bash: Download docs site pages as markdown
+
+Sto leggendo la documentazione di HofJ. Il contratto OpenAPI l'ho già scaricato; le versioni markdown delle pagine del sito rispondono 404, quindi passo a leggerle come pagine web.
+
+- 🔧 WebFetch
+
+- 🔧 WebFetch
+
+- 🔧 WebFetch
+
+- 🔧 Bash: List relevant docs pages and fetch the public changelog
+
+- 🔧 Bash: List all docs pages from sitemap
+
+- 🔧 Bash: Find API reference page paths
+
+- 🔧 Bash: Extract API reference links from page source
+
+- 🔧 Bash: Probe docs paths and Stripe mentions in checkout page
+
+Il sito ha una pagina interna per il booking e una sequenza del checkout con Stripe. Ne estraggo il testo integrale.
+
+- 🔧 Bash: Extract checkout sequence and payment notes text
+
+- 🔧 WebFetch
+
+- 🔧 Bash: Read full Operational notes section
+
+I have enough to explain why. I'll update the docs and give you the full picture.
+
+- 🔧 Bash: Correct overstated conclusions in docs with doc findings
+
+- 🔧 Bash: Commit corrected findings
