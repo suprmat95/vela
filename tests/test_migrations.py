@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,9 +15,7 @@ INI = os.path.join(ROOT, "alembic.ini")
 
 
 def alembic_config():
-    cfg = Config(INI)
-    cfg.set_main_option("script_location", os.path.join(ROOT, "alembic"))
-    return cfg
+    return Config(INI)
 
 
 def versions(url):
@@ -30,6 +30,13 @@ class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
         self.assertEqual(heads, ["0001"])
+
+    def test_ini_paths_do_not_depend_on_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
+                                 cwd=tmp, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertIn("0001", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):

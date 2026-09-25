@@ -13,7 +13,7 @@ from vela.surfaces.health import router as health_router
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    app = FastAPI(title="Vela", version="0.1.0", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Vela", version="0.1.0")
     app.state.settings = settings
     app.state.engine = make_engine(settings.database_url) if settings.database_url else None
     app.include_router(health_router)

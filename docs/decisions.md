@@ -70,3 +70,14 @@ Origine: intervista sulla task M0 di `docs/roadmap.md`, piano in
 | Lingua | `README.md` in italiano | Coerente con `docs/`. |
 | Configurazione | `vela/config.py` legge le variabili di spec §6 con `os.environ`, nessuna libreria extra; `DATABASE_URL` normalizzata (`postgres://`, `postgresql://` → `postgresql+psycopg://`) | Render fornisce `postgres://`; SQLAlchemy 2 con psycopg 3 vuole il driver esplicito. Il codice non legge mai `.env`. |
 | Rinomina log | Solo la cartella `agents-log/` → `agent-log/`; `scripts/agents_log.py` e `docs/agents-log.md` mantengono il nome (spec §9) | Minimo cambiamento; il brief chiede solo la cartella. |
+
+## 2026-09-25 — M0: decisioni prese durante l'esecuzione e la revisione
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Pagine OpenAPI | `/docs`, `/redoc`, `/openapi.json` restano ai default FastAPI | Sono strumenti per sviluppatori, non un'interfaccia per il viaggiatore (spec §6 vieta pagine di ricerca, liste, filtri). Utili per rivedere la superficie REST di M4. Una prima versione le disabilitava; il reviewer ha fatto notare che `/openapi.json` restava comunque esposto. |
+| `.dockerignore` | Esclude `.git`, `.venv`, `.env*`, `agent-log`, `docs`, `tests`, `scripts`, `loadtest`, `.claude`, `.superpowers`; tiene `fixtures/` | L'immagine contiene solo ciò che serve al runtime; M2 in replay legge `fixtures/catalog.json` dentro il container. |
+| Pool Postgres | `pool_timeout` = 3 s (come `connect_timeout`), solo sul dialetto Postgres | Con il pool esaurito `/health` risponde 503 entro pochi secondi invece di attendere 30 s e far scattare l'health check di Render. SQLite in memoria non accetta l'opzione. |
+| Percorsi Alembic | `script_location = %(here)s/alembic`, `prepend_sys_path = %(here)s` | Le migrazioni funzionano da qualunque directory di lavoro, non solo dalla radice del repo o da `/app` nel container. |
+| Sessioni slash command | `scripts/agents_log.py` logga anche le sessioni il cui unico messaggio utente è uno slash command con argomenti | La sessione di brainstorm di M0 non aveva prodotto alcun log (primo messaggio filtrato come rumore, poi solo risposte ad `AskUserQuestion`). |
+| Storia di `agent-log/` | `git log --follow agent-log/<file>` su un singolo file | `--follow` accetta un solo path e non segue una directory attraverso la rinomina. |

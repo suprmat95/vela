@@ -19,8 +19,18 @@ def connect_args_for(url: str) -> dict:
     return {}
 
 
+def engine_kwargs_for(url: str) -> dict:
+    """Opzioni di engine per dialetto: su Postgres l'attesa di una connessione dal pool è
+    limitata, così ``/health`` risponde 503 in tempo anche con il pool esaurito. SQLite in
+    memoria usa un pool senza timeout e non accetta l'opzione."""
+    if make_url(url).get_backend_name() == "postgresql":
+        return {"pool_timeout": CONNECT_TIMEOUT_SECONDS}
+    return {}
+
+
 def make_engine(url: str) -> Engine:
-    return create_engine(url, pool_pre_ping=True, connect_args=connect_args_for(url))
+    return create_engine(url, pool_pre_ping=True, connect_args=connect_args_for(url),
+                         **engine_kwargs_for(url))
 
 
 def check_db(engine: Engine) -> bool:

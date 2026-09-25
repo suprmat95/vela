@@ -51,6 +51,11 @@ class AppFactoryTest(unittest.TestCase):
         self.assertIsNone(app.state.engine)
         self.assertEqual(app.state.settings.vela_upstream_mode, "replay")
 
+    def test_openapi_and_docs_are_served(self):
+        c = client("sqlite://")
+        self.assertIn("/health", c.get("/openapi.json").json()["paths"])
+        self.assertEqual(c.get("/docs").status_code, 200)
+
     def test_settings_and_engine_on_state(self):
         app = create_app(Settings(database_url="sqlite://"))
         self.assertEqual(app.state.settings.database_url, "sqlite://")

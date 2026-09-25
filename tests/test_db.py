@@ -23,6 +23,14 @@ class MakeEngineTest(unittest.TestCase):
         self.assertIsInstance(metadata, MetaData)
 
 
+class PoolTimeoutTest(unittest.TestCase):
+    def test_waiting_for_a_postgres_pooled_connection_is_bounded(self):
+        self.assertEqual(make_engine(UNREACHABLE).pool.timeout(), 3)
+
+    def test_in_memory_sqlite_engine_still_builds(self):
+        self.assertTrue(check_db(make_engine("sqlite://")))
+
+
 class ConnectArgsTest(unittest.TestCase):
     def test_postgres_gets_connect_timeout(self):
         self.assertEqual(connect_args_for(UNREACHABLE), {"connect_timeout": 3})
