@@ -299,3 +299,11 @@ Ora il contratto dei repository su Postgres. Carico `.env` nella stessa riga del
 - 🔧 Bash: Implement Postgres repositories and run repo and migration tests with and without the DB
 
 - 🔧 Bash: Commit Task 11
+
+**Task 12 (wiring dell'app e `GET /replay/checkout/{order_id}`)**.
+
+- 🔧 Bash: TDD Task 12 and run the full suite
+
+Suite verde. Faccio il commit e poi provo il flusso completo sull'app vera con Postgres. Uso lo schema `vela_test`, non quello dell'app.
+
+- 🔧 Bash: Commit Task 12, then run the full replay flow through the real app on Postgres in the test schema
