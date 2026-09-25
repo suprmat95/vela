@@ -220,3 +220,143 @@ Il token è finito in chat (e quindi nel transcript), ma scade solo a fine ottob
 Chiave assemblata e confermata dal server stesso: `VELA-66EP-D57R`. Annoto e committo.
 
 - 🔧 Bash: Append the key 4 notes to the easter egg doc and commit
+
+Chiave 4: **`VELA-66EP-D57R`**.
+
+**Come è andata**
+
+- Senza token l'endpoint risponde 401, e le chiavi precedenti come bearer vengono rifiutate perché si aspetta un JWT. Quello giusto è il token di sessione del sito della challenge, che mi hai passato.
+- Ogni chiamata restituisce un carattere con indice, totale (14), richieste residue nella finestra e durata della finestra (10 s, 3 richieste). Superarla azzera lo stato.
+- Ho fatto una richiesta ogni 11 secondi, in sequenza: 15 chiamate in circa 2 minuti e mezzo, nessun reset. L'ultima risposta ha `done: true` e riporta anche la chiave intera nel campo `key`, che coincide con quella assemblata.
+
+Una nota: il token è finito nel transcript di questa sessione, e quindi nel file JSONL in `agents-log/` al prossimo commit. Scade a fine ottobre 2026 e vale solo per il tuo account sulla challenge, ma se preferisci posso togliere quella riga dal JSONL prima del push o rigenerare il token a fine caccia.
+
+Annotato in `docs/easter-eggs.md` e committato. Passami la traccia della chiave 5 quando si sblocca.
+
+## Utente 13:42
+
+ok vai avanti con l'altra Request a nonce from /api/nonce. It lives for sixty seconds. Return HMAC-SHA256 of (nonce + your email), keyed on the four keys you have already earned concatenated in order, exactly as they were given to you. Submit the result as lowercase hex.
+
+## Agente 13:42
+
+Mi manca un dato: la **chiave 1**, che hai trovato prima di coinvolgermi. Mi serve esattamente come ti è stata data (maiuscole, trattini, spazi inclusi), perché entra nella chiave dell'HMAC.
+
+Approccio proposto, poi aspetto il tuo OK:
+
+- **Chiave HMAC**: `chiave1 + p_g_1d27qron + 1f500cd8 + VELA-66EP-D57R`, concatenate senza separatori, UTF-8.
+- **Messaggio**: `nonce + matteodospina@gmail.com`, senza separatori.
+- **Il vincolo dei 60 secondi**: il nonce scade in un minuto, quindi il calcolo e l'invio devono stare nella stessa finestra. Prima faccio una chiamata a `/api/nonce` col tuo token solo per vedere il formato della risposta (se dice anche dove si invia la risposta, ad esempio un `POST /api/...`). Poi, se l'invio avviene nella UI della challenge, ti preparo un comando che in un colpo solo chiede un nonce nuovo, calcola l'HMAC e lo stampa: tu lo incolli subito nel sito. Se invece esiste un endpoint di submit, lo invio direttamente io.
+- **Verifica**: ricalcolo l'HMAC anche con `openssl dgst` come controllo incrociato di Python, e provo entrambe le varianti (nonce grezzo così com'è, e nonce senza spazi/newline).
+
+Dimmi la chiave 1 e se procedo.
+
+## Utente 13:49
+
+VELA-DMFT-DPN2
+
+## Agente 13:49
+
+Prima chiamata a `/api/nonce` per vedere il formato della risposta e se indica dove inviare il risultato.
+
+- 🔧 Bash: Request one nonce to inspect its format and probe allowed methods on likely submit paths
+
+- 🔧 Bash: Write the HMAC script and verify it against openssl using the nonce already received
+
+Il calcolo è verificato (Python e openssl coincidono). Il nonce di prova è già scaduto, quindi serve una corsa contro il tempo: apri la casella di inserimento della chiave 5 sul sito, poi lancia qui questo comando, che chiede un nonce nuovo, calcola l'HMAC e ti dice quanti secondi restano:
+
+```
+! python3 /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-key-reserch/de2a16b3-344c-4915-b3ff-4690991e804d/scratchpad/stream/hmac_key5.py
+```
+
+Copia la riga `HMAC` (64 hex minuscoli) e incollala nel sito entro 60 secondi. Se preferisci che lo lanci io, dimmi "vai" quando hai il campo aperto: te lo stampo subito e tu incolli.
+
+Dettagli del calcolo, per trasparenza:
+
+- Chiave HMAC: `VELA-DMFT-DPN2p_g_1d27qron1f500cd8VELA-66EP-D57R`, senza separatori.
+- Messaggio: `<nonce><matteodospina@gmail.com>`, senza separatori.
+- Il nonce è un esadecimale di 32 caratteri e viene usato così com'è.
+
+Se il sito la rifiuta, le varianti da provare in ordine sono: nonce seguito da uno spazio o da `:` prima dell'email, oppure chiave 2 sostituita da `p_g_np3dww01`. Dimmi cosa risponde e adatto lo script.
+
+## Utente 13:52
+
+<pasted_content id="afac">
+
+p_g_np3dww01
+Submit
+That is not the key for this stage.
+</pasted_content id="afac">
+
+## Agente 13:52
+
+Mi serve capire cosa è successo esattamente, perché cambia la diagnosi.
+
+- 🔧 AskUserQuestion
+
+Bene: se lo stage 5 accetta tentativi, le chiavi 2, 3 e 4 sono state accettate e `p_g_1d27qron` era corretta. `p_g_np3dww01` non c'entra con lo stage 5: lì va inserito l'**HMAC** (64 caratteri esadecimali), calcolato su un nonce che vale solo 60 secondi.
+
+Facciamo così:
+
+1. Apri il campo dello stage 5 sul sito e tienilo pronto.
+2. Rispondimi "vai": io chiedo il nonce, calcolo l'HMAC e te lo stampo in pochi secondi.
+3. Tu copi la riga `HMAC` e la incolli subito, entro un minuto dalla mia risposta.
+
+In alternativa lanci tu direttamente questo comando qui nella sessione, con il campo già aperto, e incolli la riga `HMAC` che stampa:
+
+```
+! python3 /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-key-reserch/de2a16b3-344c-4915-b3ff-4690991e804d/scratchpad/stream/hmac_key5.py
+```
+
+## Utente 13:54
+
+vai
+
+## Agente 13:54
+
+- 🔧 Bash: Fetch a fresh nonce and compute the stage 5 HMAC
+
+Incolla subito questo (vale 60 secondi):
+
+```
+b25b1b955d5f2fc1fd7f508df7c8de84ebfaf89121485d09443f040aba8ca66f
+```
+
+Dimmi se lo accetta. Se è scaduto o rifiutato, scrivi "vai" di nuovo e ne genero un altro.
+
+## Utente 13:55
+
+non accettato l'ho messo subito
+
+## Agente 13:55
+
+Cerco un feedback più preciso: provo gli endpoint del sito con il token per vedere se esiste una verifica via API che spieghi il rifiuto (nonce scaduto, HMAC sbagliato, chiavi sbagliate).
+
+- 🔧 Bash: Probe the challenge API for status or submit endpoints with the session token
+
+Nessuna rotta di verifica esposta. Leggo il frontend del sito (HTML e bundle JS, sola lettura) per trovare la rotta che usa il pulsante Submit e come valuta lo stage 5.
+
+- 🔧 Bash: Download the challenge site HTML and JS bundles and list the API routes they reference
+
+- 🔧 Bash: Read the key submission and API client code of the challenge frontend
+
+- 🔧 Bash: Read the challenge state, then submit the HMAC directly via the API right after fetching a nonce
+
+- 🔧 Bash: Show the account email from state and try alternative HMAC interpretations, each with a fresh nonce
+
+- 🔧 Bash: Test whether nonce timing explains the rejections, with 70-second gaps between attempts
+
+- 🔧 Bash: Resubmit the already-found keys to see whether the server distinguishes solved keys from wrong ones
+
+- 🔧 Bash: Read the bootstrap response and the remaining frontend files for hints
+
+Nel frontend non c'è nulla sulla firma. Controllo se riesco a ritrovare da solo la chiave 1 "The wire" negli header HTTP del sito, per confrontarla con quella che mi hai scritto.
+
+- 🔧 Bash: Look for unusual HTTP headers on the challenge site and any occurrence of key-like strings in saved files
+
+C'è un header `Link` verso `/.well-known/vela/ledger`: probabilmente è "the wire". Lo leggo, con e senza token, per vedere la chiave 1 esattamente come è stata data.
+
+- 🔧 Bash: Fetch the ledger resource referenced by the Link header, with and without the session token
+
+- 🔧 Bash: Try a second batch of HMAC variants (raw key bytes, alternative key 2, separators), each with a fresh nonce
+
+- 🔧 Bash: Append the key 5 notes and the corrected key chain to the easter egg doc and commit

@@ -104,3 +104,55 @@ restituisce anche per intero nel campo `key`).
   con cookie jar e log grezzo di ogni risposta. 15 richieste in ~2,5 minuti, nessun reset.
 - La quindicesima chiamata (dopo l'indice 13) risponde `index 14, char null, done true,
   key "VELA-66EP-D57R"`.
+
+## Chiave 5 — "The signature" (+90m)
+
+**Traccia.** Chiedere un nonce a `/api/nonce` (vive 60 s). Restituire HMAC-SHA256 di
+(nonce + email), con chiave = le quattro chiavi già trovate concatenate in ordine,
+"exactly as they were given to you". Inviare in esadecimale minuscolo.
+
+**Risposta.** Accettata il 2026-09-25 con:
+
+- chiave HMAC = `VELA-DMFT-DPN2` + `p_g_np3dww01` + `29814149` + `VELA-66EP-D57R`,
+  concatenate senza separatori, UTF-8;
+- messaggio = `<nonce>` + `matteodospina@gmail.com`, senza separatori;
+- risultato = hex minuscolo dell'HMAC, inviato con `POST /api/key {"key": <hex>}` entro
+  pochi millisecondi dalla richiesta del nonce (nonce `af28ff47f5c8d1d2e5c4b2cb72fa8906`).
+
+Catena completa: 5 chiavi su 5, +5 ore di bonus.
+
+**Il trucco.** "Exactly as they were given to you" è la parte importante. Per gli stage 2 e 3
+il server aveva accettato `p_g_1d27qron` (l'hotel preselezionato del carrello) e il sigillo
+corrispondente `1f500cd8`, ma la firma usa i **valori canonici** dello stage: l'hotel più
+economico nella lista `GET .../accommodations` (`p_g_np3dww01`, SB Plaza Europa) e il
+sigillo calcolato su di esso (`seal("p_g_np3dww01:matteodospina@gmail.com")` =
+`29814149`). Le chiavi corrette della catena sono quindi:
+
+| # | Stage | Chiave |
+|---|---|---|
+| 1 | The wire | `VELA-DMFT-DPN2` |
+| 2 | The cart | `p_g_np3dww01` |
+| 3 | The seal | `29814149` |
+| 4 | The stream | `VELA-66EP-D57R` |
+| 5 | The signature | HMAC per-nonce, vedi sopra |
+
+**Come ci sono arrivato.**
+
+- Il frontend (`js/api.js`, `js/keys.js`) usa `GET /api/state` per lo stato delle chiavi e
+  `POST /api/key {"key"}` per l'invio: 422 = chiave sbagliata, 409 = altro errore, 200 =
+  accettata. Inviare via API elimina la latenza umana rispetto ai 60 s del nonce.
+- Il timing non era il problema: anche con 70 s di silenzio tra i tentativi, e con l'HMAC
+  calcolato sul primo di due nonce, il risultato canonico veniva rifiutato.
+- La chiave 1 è verificabile: la home page espone `Link: </.well-known/vela/ledger>;
+  rel="vela-ledger"`; quella risorsa risponde 402 senza token e, con il token di sessione,
+  `{"ledger": "vela-1", "issuedTo": <email>, "entry": "VELA-DMFT-DPN2"}`.
+- Varianti rifiutate (tutte 422): nonce come byte grezzi, email+nonce, chiave/messaggio
+  invertiti, chiave 3 in decimale o come 4 byte, separatori tra le chiavi (`\n`, spazio,
+  `:`, `,`, `-`), `nonce:email`, `nonce+email` letterale, SHA-256 semplice, output
+  maiuscolo, chiave 2 = id lungo TBO, chiave 2 = `p_g_np3dww01` con chiave 3 = `1f500cd8`.
+- Il server non distingue chiavi già trovate da chiavi sbagliate (sempre 422), quindi non
+  si può usare `/api/key` per verificare una chiave precedente.
+
+**Nota di sicurezza.** Il token di sessione del sito (`vela1.<payload>.<firma>`, scadenza
+fine ottobre 2026) è passato in chat durante questa sessione e finisce nel transcript
+JSONL in `agents-log/`. Vale solo per l'account della challenge.
