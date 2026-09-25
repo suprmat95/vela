@@ -295,4 +295,4 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md`
 |---|---|---|
 | Versione SDK | `anthropic>=1.8.0` (installata 1.8.0, basata su `httpx2`); i test costruiscono le eccezioni con un `Request` di `httpx2` | Nessuna deviazione dal piano; l'SDK 1.x non usa più `httpx` |
 | Test Postgres di `update_criteria` | Eseguiti con `DATABASE_URL` (External Database URL di Render, schema `vela_test`): suite completa 353 test verdi, nessuno saltato | L'URL interno di Render (`dpg-…-a`) non si risolve fuori da Render: in locale serve l'External Database URL |
-| Prova reale di Haiku | Non eseguita: `scripts/try_haiku.py` richiede l'OK dell'utente per 1 chiamata | Regola del repo sulle chiamate a servizi a pagamento |
+| Prova reale di Haiku | Eseguita il 2026-09-25 con OK dell'utente, 1 chiamata: "un'idea per il ponte dei morti con la racchetta, siamo in 2" → periodo 2026-11-01/02 (`llm`), sport `null`, pax 2, nessuna domanda | Il fallback riconosce una festività che il parser non conosce e non inventa lo sport quando il testo è ambiguo |
