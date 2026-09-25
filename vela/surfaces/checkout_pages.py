@@ -2,7 +2,8 @@
 
 Statiche: non leggono l'ordine, non riflettono parametri e non mostrano dati. Stripe manda a
 ``/checkout/success`` solo a pagamento riuscito e a ``/checkout/cancel`` quando il viaggiatore
-torna indietro. La conferma vera arriva dal webhook; la pagina rimanda alla conversazione.
+torna indietro. La conferma vera arriva dal job di verifica della sessione (M5); la pagina rimanda
+alla conversazione.
 """
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse

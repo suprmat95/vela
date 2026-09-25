@@ -65,8 +65,8 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
 | `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
-| `STRIPE_SECRET_KEY` | per Stripe reale | Chiave segreta Stripe (account di test). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; vedi `docs/stripe.md`. |
-| `STRIPE_WEBHOOK_SECRET` | con `STRIPE_SECRET_KEY` | Segreto per verificare la firma dei webhook su `/webhooks/stripe`. Senza, con la chiave impostata l'app non parte. |
+| `STRIPE_SECRET_KEY` | per Stripe reale | Chiave Stripe di test (una `rk_test` fornita da HofJ). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; richiede `VELA_PUBLIC_URL`. Vedi `docs/stripe.md`. |
+| `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe, il pagamento si chiude con le API di HofJ (M5). |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
 | `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. Obbligatoria con `STRIPE_SECRET_KEY`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) quando il parser non trova né sport né periodo; timeout 5 s, 1 retry. Prova manuale (una chiamata): `uv run python scripts/try_haiku.py "testo"`. |
@@ -124,7 +124,7 @@ l'interpretazione del motivo del rifiuto arriva con M9.
 vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2)
 vela/ports      HofJPort, PaymentsPort, repository (M2)
 vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto, runner (M2); HofJ HTTP (M5), Stripe (M6)
-vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), webhook (M6)
+vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), checkout_pages.py (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per la modalità replay (M1)

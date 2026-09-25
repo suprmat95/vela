@@ -1,56 +1,53 @@
-# Stripe: link di pagamento e webhook (M6)
+# Stripe: link di pagamento (M6)
 
 Vela crea una Checkout Session di Stripe per ogni ordine (RF-18): totale reale in EUR,
-`metadata` con `order_id` e `itinerary_id`, scadenza 24 ore dalla creazione dell'ordine
-(RF-21). Il pagamento viene confermato solo dal webhook firmato (RF-20). Nessun dato di carta
-passa da Vela. Codice: `vela/adapters/stripe_links.py`, `vela/surfaces/webhooks.py`,
+`metadata` con `order_id` e `itinerary_id` (sul PaymentIntent anche `checkoutRefId` =
+itinerario), scadenza 24 ore meno un minuto dalla creazione dell'ordine (RF-21), idempotency
+key per ordine. Nessun dato di carta passa da Vela. Codice: `vela/adapters/stripe_links.py`,
 `vela/surfaces/checkout_pages.py`.
+
+La chiave Stripe è una `rk_test` fornita da HofJ: le Checkout Session nascono sull'account
+Stripe di HofJ.
+
+## Nessun webhook
+
+Deciso con HofJ: il pagamento si chiude unicamente con le API di HofJ. Vela non espone un
+endpoint webhook e non serve registrare nulla nel Dashboard Stripe né un signing secret.
+
+- Vela scopre che il viaggiatore ha pagato leggendo lo stato della Checkout Session
+  (`checkout.sessions.retrieve`) con un job del worker: M5, Task 13b.
+- Il pagamento si chiude con `POST /v1/bookings` di HofJ, inoltrando `paymentIntentId` e
+  `paymentStatus`: M5, nel job di prenotazione.
+
+Finché M5 non è mergiata, un ordine pagato su Stripe resta `awaiting_payment`.
 
 ## Attivazione
 
 | Variabile | Effetto |
 |---|---|
-| `STRIPE_SECRET_KEY` | Se impostata (`sk_test_...`), i link sono Stripe reali; altrimenti restano i link finti di replay. Indipendente da `VELA_UPSTREAM_MODE` |
-| `STRIPE_WEBHOOK_SECRET` | Obbligatoria con la chiave (`whsec_...`); senza, l'app non parte. Senza chiave, il webhook risponde 503 |
-| `VELA_PUBLIC_URL` | Obbligatoria con la chiave: base di `/checkout/success` e `/checkout/cancel` |
-
-## Setup dell'account Stripe di test (una volta)
-
-1. Dashboard Stripe in modalità **test** → Developers → API keys: copiare la secret key `sk_test_...`.
-2. Developers → Webhooks → Add endpoint:
-   - URL: `<VELA_PUBLIC_URL>/webhooks/stripe`
-   - Eventi: `checkout.session.completed`, `checkout.session.expired` (nessun altro)
-3. Aprire l'endpoint creato e copiare il signing secret `whsec_...`.
-4. Render → servizio Vela → Environment: impostare `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
-   e verificare `VELA_PUBLIC_URL`. Salvare: Render ridistribuisce.
+| `STRIPE_SECRET_KEY` | Se impostata (la `rk_test` di HofJ), i link sono Checkout Session reali; altrimenti restano i link finti di replay. Indipendente da `VELA_UPSTREAM_MODE` |
+| `VELA_PUBLIC_URL` | Obbligatoria con la chiave (senza, l'app non parte): base di `/checkout/success` e `/checkout/cancel` |
 
 Mai incollare le chiavi in chat, nei commit o in `docs/`.
 
-## Test manuale (HofJ in replay, Stripe reale)
+## Pagine di ritorno
 
-Costo: 1 Checkout Session e 1 pagamento di test sull'account Stripe di test; nessuna chiamata a HofJ.
+`/checkout/success` e `/checkout/cancel` sono statiche: non leggono l'ordine e non mostrano
+dati. La conferma del pagamento non arriva da lì ma dal job di verifica di M5.
+
+## Test manuale
+
+Il test end-to-end (ordine `confirmed` dopo un pagamento reale) si esegue **dopo M5**, quando
+esiste il job che verifica la sessione. Con la sola M6 si può verificare la prima metà:
+
+Costo: 1 Checkout Session e 1 pagamento di test sull'account Stripe di test di HofJ; nessuna
+chiamata a HofJ in replay.
 
 1. Flusso REST fino all'ordine (vedi `docs/rest.md`, sezione del flusso con `curl`): `payment_url`
    deve iniziare con `https://checkout.stripe.com/`.
 2. Aprire `payment_url`, pagare con `4242 4242 4242 4242`, una data futura, un CVC qualsiasi.
 3. Il browser arriva su `/checkout/success`.
-4. `GET /v1/orders/<order_id>` entro qualche secondo: `confirmed` con un codice `R-xxxxxx` finto.
-5. Nel Dashboard → Webhooks → endpoint: l'evento `checkout.session.completed` risulta consegnato
-   con risposta 200 `{"received": true, "outcome": "paid"}`.
-6. Facoltativo: "Resend" dello stesso evento dal Dashboard → 200 `duplicate`, ordine invariato.
+4. Con M5: `GET /v1/orders/<order_id>` passa a pagato quando il job di verifica legge la
+   sessione, poi a `confirmed` con il codice di HofJ. Senza M5 resta `awaiting_payment`.
 
 Registrare l'esito in `docs/acceptance.md` (registro delle esecuzioni) senza chiavi né dati personali.
-
-## Risposte del webhook
-
-| HTTP | Corpo | Quando |
-|---|---|---|
-| 200 | `{"received": true, "outcome": "paid"}` | pagamento applicato, prenotazione avviata |
-| 200 | `outcome` `expired` | ordine non pagato portato a `expired` |
-| 200 | `outcome` `duplicate` | evento già elaborato |
-| 200 | `outcome` `noop` | evento valido ma l'ordine era già oltre (es. già pagato) |
-| 200 | `outcome` `rejected` | ordine sconosciuto, importo, valuta o stato del pagamento non coerenti (warning nei log) |
-| 200 | `outcome` `ignored` | tipo di evento non gestito |
-| 400 | `{"error": "firma non valida"}` | firma mancante, errata o più vecchia di 300 s |
-| 500 | `{"error": "elaborazione non riuscita"}` | errore interno: Stripe ripete l'evento |
-| 503 | `{"error": "webhook non configurato"}` | `STRIPE_WEBHOOK_SECRET` o `DATABASE_URL` assenti |

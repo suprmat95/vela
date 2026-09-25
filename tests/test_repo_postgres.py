@@ -39,11 +39,9 @@ class PostgresRepositoriesTest(RepositoryContract, unittest.TestCase):
     def make_repos(self):
         from sqlalchemy import delete
         from vela.adapters.repo_postgres import PostgresRepositories
-        from vela.adapters.schema import (intents_t, orders_t, products_t, proposals_t,
-                                           rejections_t, stripe_events_t)
+        from vela.adapters.schema import intents_t, orders_t, products_t, proposals_t, rejections_t
         with self.engine.begin() as conn:
-            for table in (stripe_events_t, rejections_t, orders_t, proposals_t, intents_t,
-                          products_t):
+            for table in (rejections_t, orders_t, proposals_t, intents_t, products_t):
                 conn.execute(delete(table))
         return PostgresRepositories(self.engine)
 

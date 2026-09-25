@@ -1,8 +1,9 @@
 """Link di pagamento Stripe (RF-18, RF-21, RF-22): una Checkout Session per ordine.
 
 Session ``mode=payment``, solo carta, un line item ``price_data`` in EUR per il totale reale,
-``metadata`` con ordine e itinerario (anche sul PaymentIntent). La scadenza è calcolata dalla
-creazione dell'ordine (24 h meno un minuto: Stripe rifiuta oltre le 24 h), così i parametri
+``metadata`` con ordine e itinerario (anche sul PaymentIntent, che porta in più
+``checkoutRefId`` = itinerario, l'etichetta con cui HofJ lega il pagamento al carrello).
+La scadenza è calcolata dalla creazione dell'ordine (24 h meno un minuto: Stripe rifiuta oltre le 24 h), così i parametri
 sono deterministici e ``idempotency_key`` = ordine restituisce sempre la stessa sessione.
 Nessun dato di carta né personale passa da Vela (RNF-07). Il client è iniettabile: i test
 non vanno in rete.
@@ -40,7 +41,8 @@ class StripePayments:
                 "currency": "eur", "unit_amount": to_cents(order.total),
                 "product_data": {"name": description}}}],
             "metadata": metadata,
-            "payment_intent_data": {"metadata": metadata},
+            # HofJ lega il PaymentIntent al carrello con checkoutRefId (verifica M5, §8).
+            "payment_intent_data": {"metadata": {**metadata, "checkoutRefId": metadata["itinerary_id"]}},
             "client_reference_id": order.id,
             "expires_at": int((order.created_at + LINK_TTL).timestamp()),
             "success_url": self.base + SUCCESS_PATH,

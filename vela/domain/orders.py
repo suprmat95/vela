@@ -1,8 +1,9 @@
 """Macchina a stati dell'ordine (RF-20, RF-23, RF-25, RF-27, RNF-03).
 
 `awaiting_payment` → `paid_pending_booking` (mark_paid) → `confirmed` | `booking_failed`
-(complete_booking); `awaiting_payment` → `expired` (expire, webhook di scadenza). Ogni transizione è idempotente: uno
-stato diverso da quello atteso lascia l'ordine com'è. Retry con backoff: M5.
+(complete_booking); `awaiting_payment` → `expired` (expire, dalla verifica della sessione in
+M5). Ogni transizione è idempotente: uno stato diverso da quello atteso lascia l'ordine com'è.
+Retry con backoff: M5.
 """
 from dataclasses import replace
 from datetime import datetime

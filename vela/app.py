@@ -1,4 +1,4 @@
-"""App FastAPI di Vela: un solo processo per REST, MCP e webhook (RNF-02).
+"""App FastAPI di Vela: un solo processo per REST e MCP (RNF-02).
 
 La superficie MCP (M3) è innestata su ``/mcp`` in ogni modalità; il suo session manager gira nel
 lifespan.
@@ -7,7 +7,8 @@ lifespan.
 In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan carica il
 catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
 La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RFC 7807.
-Il webhook Stripe (``/webhooks/stripe``) è sempre montato; senza ``STRIPE_WEBHOOK_SECRET`` risponde 503.
+Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ e Vela lo scopre
+interrogando la Checkout Session (job di M5).
 Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 """
 from contextlib import asynccontextmanager
@@ -32,7 +33,6 @@ from vela.surfaces.mcp import build_mcp, mcp_routes
 from vela.surfaces.problems import install_problem_handlers
 from vela.surfaces.replay import router as replay_router
 from vela.surfaces.rest import router as rest_router
-from vela.surfaces.webhooks import router as webhooks_router
 
 REPLAY = "replay"
 CatalogLoader = Callable[[], List[Product]]
@@ -40,12 +40,9 @@ CatalogLoader = Callable[[], List[Product]]
 
 def build_payments(settings: Settings) -> PaymentsPort:
     """Stripe se `STRIPE_SECRET_KEY` è impostata (indipendente dall'upstream HofJ), altrimenti
-    il pagamento finto. Una configurazione Stripe incompleta blocca l'avvio."""
+    il pagamento finto. Senza `VELA_PUBLIC_URL` l'avvio si blocca: servono i ritorni del Checkout."""
     if not settings.stripe_secret_key:
         return FakePayments(settings.vela_public_url)
-    if not settings.stripe_webhook_secret:
-        raise RuntimeError("STRIPE_SECRET_KEY è impostata ma STRIPE_WEBHOOK_SECRET no: "
-                           "i pagamenti non verrebbero mai confermati")
     if not settings.vela_public_url:
         raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
                            "del Checkout")
@@ -102,7 +99,6 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     app.include_router(health_router)
     install_problem_handlers(app)
     app.include_router(rest_router)
-    app.include_router(webhooks_router)
     app.include_router(checkout_router)
     if settings.vela_upstream_mode == REPLAY:
         app.include_router(replay_router)

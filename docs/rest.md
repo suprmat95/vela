@@ -89,5 +89,6 @@ curl -s "$VELA_URL/v1/orders/$OID" -H "$H" | jq          # atteso: confirmed, bo
 curl -s -o /dev/null -w '%{http_code}\n' -X POST "$VELA_URL/v1/intents"   # atteso: 401
 ```
 
-In replay nessuna chiamata va a HofJ o Stripe. In `live` (da M7) il link di pagamento è Stripe:
-si paga con `4242 4242 4242 4242` e si interroga lo stato finché diventa `confirmed`.
+In replay nessuna chiamata va a HofJ o Stripe. Con `STRIPE_SECRET_KEY` il link di pagamento è Stripe:
+si paga con `4242 4242 4242 4242` e si interroga lo stato finché diventa `confirmed`. Il passaggio a
+pagato lo rileva il job di verifica della sessione di M5 (niente webhook, `docs/stripe.md`).
