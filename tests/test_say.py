@@ -258,7 +258,8 @@ class QueueSayTest(unittest.TestCase):
         self.assertIn("the supplier did not answer after three attempts", en)
 
     def test_every_failure_reason_has_both_languages(self):
-        for code in ("upstream", "config", "no_alternative", "payments"):
+        for code in ("upstream", "config", "no_alternative", "payments", "booking_upstream",
+                     "booking_rejected"):
             self.assertTrue(say.failure_reason(code))
             self.assertTrue(say.failure_reason(code, "en"))
             self.assertNotEqual(say.failure_reason(code), say.failure_reason(code, "en"))

@@ -1,15 +1,16 @@
 """Macchina a stati dell'ordine (RF-20, RF-23, RF-25, RF-27, RNF-03).
 
-`awaiting_payment` → `paid_pending_booking` (mark_paid) → `confirmed` | `booking_failed`
-(complete_booking); `awaiting_payment` → `expired` (expire, dalla verifica della sessione in
-M5). Ogni transizione è idempotente: uno stato diverso da quello atteso lascia l'ordine com'è.
-Retry con backoff: M5.
+`awaiting_payment` → `paid_pending_booking` (mark_paid, che accoda il job `booking`) →
+`confirmed` | `booking_failed` (job di prenotazione, `vela.domain.booking`);
+`awaiting_payment` → `expired` (expire, dalla verifica della sessione). Ogni transizione è
+idempotente: uno stato diverso da quello atteso lascia l'ordine com'è.
 """
+import uuid
 from dataclasses import replace
 from datetime import datetime
 from typing import Callable, List
 
-from vela.domain.models import Order, OrderStatus
+from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
 from vela.ports.hofj import HofJError, HofJPort, PaymentProof
 from vela.ports.repositories import Repositories
 
@@ -22,10 +23,12 @@ class NotFound(Exception):
 
 
 class OrderService:
-    def __init__(self, repos: Repositories, hofj: HofJPort, now: Callable[[], datetime]):
+    def __init__(self, repos: Repositories, hofj: HofJPort, now: Callable[[], datetime],
+                 new_id: Callable[[], str] = lambda: str(uuid.uuid4())):
         self.repos = repos
         self.hofj = hofj
         self.now = now
+        self.new_id = new_id
 
     def get(self, order_id: str) -> Order:
         order = self.repos.orders.get(order_id)
@@ -41,7 +44,20 @@ class OrderService:
         order = replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref=payment_ref,
                         paid_at=now, updated_at=now)
         self.repos.orders.save(order)
+        self._enqueue_booking(order.id, now)
         return order
+
+    def _enqueue_booking(self, order_id: str, now: datetime) -> bool:
+        """RF-51: un solo job di prenotazione attivo per ordine."""
+        if self.repos.jobs.active_for_order(order_id, JobKind.BOOKING) is not None:
+            return False
+        self.repos.jobs.enqueue(Job(self.new_id(), JobKind.BOOKING, order_id, JobStatus.PENDING, now, now))
+        return True
+
+    def resume_bookings(self) -> List[str]:
+        """RF-27: al boot, ogni ordine pagato senza job di prenotazione attivo ne riceve uno."""
+        now = self.now()
+        return [oid for oid in self.pending_booking_ids() if self._enqueue_booking(oid, now)]
 
     def expire(self, order_id: str) -> Order:
         """Link scaduto (RF-21): solo un ordine ancora da pagare passa a `expired`."""

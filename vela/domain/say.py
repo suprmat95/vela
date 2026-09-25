@@ -288,12 +288,16 @@ _FAILURE_REASONS = {
         "config": "il collegamento con il fornitore non è configurato correttamente",
         "no_alternative": "il viaggio non è più prenotabile e non ho trovato alternative",
         "payments": "il servizio di pagamento non ha risposto dopo tre tentativi",
+        "booking_upstream": "il fornitore non ha confermato la prenotazione dopo cinque tentativi",
+        "booking_rejected": "il fornitore ha rifiutato la prenotazione",
     },
     "en": {
         "upstream": "the supplier did not answer after three attempts",
         "config": "the connection to the supplier is not configured correctly",
         "no_alternative": "the trip can no longer be booked and I found no alternative",
         "payments": "the payment service did not answer after three attempts",
+        "booking_upstream": "the supplier did not confirm the booking after five attempts",
+        "booking_rejected": "the supplier rejected the booking",
     },
 }
 

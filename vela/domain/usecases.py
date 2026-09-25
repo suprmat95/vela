@@ -49,7 +49,7 @@ class Vela:
         self.new_id = new_id or random_id
         self.extractor = extractor
         self.defaults = defaults or TravelerDefaults()
-        self.orders = OrderService(repos, hofj, self.now)
+        self.orders = OrderService(repos, hofj, self.now, self.new_id)
 
     # --- RF-01..05 -----------------------------------------------------------
 

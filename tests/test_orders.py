@@ -20,7 +20,9 @@ def service(*orders, hofj=None):
     repos = MemoryRepositories()
     for o in orders:
         repos.orders.add(o)
-    return OrderService(repos, hofj or FakeHofJ(code="R-123456"), now=lambda: NOW + timedelta(minutes=1))
+    ids = iter("job%d" % i for i in range(1, 100))
+    return OrderService(repos, hofj or FakeHofJ(code="R-123456"), now=lambda: NOW + timedelta(minutes=1),
+                        new_id=lambda: next(ids))
 
 
 class MarkPaidTest(unittest.TestCase):
@@ -45,6 +47,30 @@ class MarkPaidTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             service().mark_paid("nope", "pi")
 
+
+    def test_mark_paid_enqueues_booking_once(self):
+        from vela.domain.models import JobKind, JobStatus
+        s = service(order())
+        s.mark_paid("o1", "pi_1")
+        s.mark_paid("o1", "pi_1")
+        job = s.repos.jobs.active_for_order("o1", JobKind.BOOKING)
+        self.assertEqual((job.id, job.status, job.run_after, job.enqueued_at),
+                         ("job1", JobStatus.PENDING, NOW + timedelta(minutes=1), NOW + timedelta(minutes=1)))
+        self.assertIsNone(s.repos.jobs.get("job2"))
+
+    def test_mark_paid_on_cancelled_order_is_ignored(self):
+        from vela.domain.models import JobKind
+        s = service(order(status=OrderStatus.CANCELLED))
+        self.assertEqual(s.mark_paid("o1", "pi").status, OrderStatus.CANCELLED)
+        self.assertIsNone(s.repos.jobs.active_for_order("o1", JobKind.BOOKING))
+
+    def test_enqueue_booking_for_paid_order_without_job(self):
+        """RF-27: al boot un ordine pagato senza job attivo riceve il suo job di prenotazione."""
+        from vela.domain.models import JobKind
+        s = service(order(status=OrderStatus.PAID_PENDING_BOOKING), order("o2"))
+        self.assertEqual(s.resume_bookings(), ["o1"])
+        self.assertEqual(s.resume_bookings(), [])
+        self.assertIsNotNone(s.repos.jobs.active_for_order("o1", JobKind.BOOKING))
 
 class ExpireTest(unittest.TestCase):
     def test_awaiting_becomes_expired(self):

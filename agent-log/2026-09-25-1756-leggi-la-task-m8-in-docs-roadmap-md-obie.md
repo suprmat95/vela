@@ -2862,3 +2862,77 @@ Il test fallisce perché il modulo non esiste. Lo scrivo.
 I 20 test passano. Rilancio la suite completa e faccio il commit.
 
 - 🔧 Bash: Run suite and commit Task 11
+
+Task 11 fatto (commit `7bff76d`): la suite passa da 602 a **622 test, verde**. Nello stesso commit c'è il nuovo ordine di esecuzione annotato nel piano.
+
+**Cosa ho fatto.** Ho creato `vela/domain/purchase.py`, con `PurchaseJob.run(job, finestra_successiva)` e `calls_needed(job)`.
+
+**I passi** (ognuno viene salvato prima del successivo):
+
+| Passo | Cosa fa | Chiamate HofJ da prenotare |
+|---|---|---|
+| 0 | crea l'itinerario | 5 |
+| 1 | cliente | 4 |
+| 2 | passeggeri (lettura + scrittura) | 3 |
+| 3 | importo da pagare | 1 |
+| 4 | link di pagamento | 0 |
+
+- Prima di ogni passo il job rilegge l'ordine: se nel frattempo è stato annullato, si ferma senza fare altre chiamate.
+- Il nome del viaggio passato a Stripe è il titolo del prodotto.
+- Cliente e passeggeri vengono dall'ordine, più gli indirizzi di default (RF-13).
+
+**Come gestisce gli errori:**
+
+| Errore | Esito |
+|---|---|
+| rete, timeout, 5xx | ripete nella finestra successiva; al 3° tentativo ordine `failed` con «il fornitore non ha risposto dopo tre tentativi» |
+| Stripe non risponde | come sopra, con il motivo «servizio di pagamento» |
+| 429 | ripete nella finestra successiva **senza contare il tentativo** e segnala il 429 al processore |
+| errore del prodotto sulla creazione dell'itinerario | prodotto non prenotabile, proposta chiusa, ordine `replaced` con la proposta successiva; se non c'è alternativa, `failed` «non ho trovato alternative» |
+| errore del prodotto nei passi successivi | trattato come errore di rete |
+| 401/403 | `failed` «collegamento non configurato», prodotto non toccato |
+| riuscita su un prodotto marcato non prenotabile | il prodotto torna prenotabile (RF-34) |
+
+**Test.** Sono 20, tutti con ordini e job creati a mano, senza passare dall'accettazione:
+- sequenza dei passi e salvataggio passo per passo;
+- ripresa dal passo 2, 3 e 4 senza ricreare l'itinerario;
+- i tre tentativi e il motivo nella lingua dell'intento;
+- 429, pagamenti, errore del prodotto con e senza alternativa, 401/403;
+- annullamento prima di partire e a metà.
+
+Li ho visti fallire perché il modulo non esisteva. Poi sono passati tutti al primo colpo.
+
+**Cosa ho deciso:**
+- **Proposta sostituita chiusa come rifiutata.** Registro un rifiuto con motivo «prodotto non prenotabile» sulla proposta sostituita. Risolve il dubbio del Task 8: altrimenti `_propose` riproporrebbe la stessa.
+- **Registrare la verifica del pagamento (Task 13b) toccherà il passo del link.** Lì aggiungerò l'accodamento del job `payment_check`.
+
+**Dubbi.** Visto che i test sono passati tutti al primo colpo, li ho riletti per controllare che verifichino qualcosa di reale. Per esempio, il salvataggio passo per passo è verificato facendo fallire il job al passo dei passeggeri e controllando che `itinerary_id` e il passo 2 fossero già salvati.
+
+Il prossimo è il **Task 12**, il `BookingJob`:
+- prenotazione su HofJ con 5 tentativi e attese di 5, 10, 20 e 40 secondi;
+- `booking_failed` con il motivo;
+- `mark_paid` che accoda il job `booking`.
+
+Per ora resta anche il vecchio `BookingRunner`, che sparirà nel Task 14. Vado?
+
+## Utente 21:03
+
+procedi con tutte le task senza chiedere
+
+## Agente 21:04
+
+Procedo con tutti i task rimanenti senza fermarmi, nell'ordine concordato: 12 → 13 → 13b → 14 → 10+17 → 15 → 16 → 18 → 19. Mi fermo solo davanti a qualcosa che richiede chiamate esterne o una decisione fuori dal piano.
+
+- 🔧 Bash: Read order service and its tests
+
+Task 12. Prima i test: job di prenotazione, `mark_paid` che accoda il job e i motivi di fallimento della prenotazione.
+
+- 🔧 Bash: Write failing booking job and mark_paid tests
+
+Falliscono come atteso: mancano `vela.domain.booking` e il parametro `new_id`. Implemento.
+
+- 🔧 Bash: Implement BookingJob and mark_paid enqueue, run tests
+
+Tutti verdi: 632 test. Faccio il commit del Task 12.
+
+- 🔧 Bash: Commit Task 12
