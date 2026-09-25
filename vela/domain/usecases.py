@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Callable, Optional, Union
 
-from vela.domain import say
+from vela.domain import geo, say
 from vela.domain.chooser import Choice, choose
 from vela.domain.intent import parse_intent
 from vela.domain.models import (AcceptResponse, Intent, IntentCreated, IntentQuestion,
@@ -16,6 +16,7 @@ from vela.domain.models import (AcceptResponse, Intent, IntentCreated, IntentQue
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
                                 ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
+from vela.domain.refine import refine
 from vela.ports.hofj import Customer, HofJPort
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
@@ -77,7 +78,17 @@ class Vela:
         intent = self.repos.intents.get(proposal.intent_id)
         self.repos.rejections.add(Rejection(intent.id, proposal.id, proposal.product_id,
                                             reason or "", self.now()))
-        return self._propose(intent)
+        return self._propose(self._refined(intent, proposal, reason or ""))
+
+    def _refined(self, intent: Intent, proposal: Proposal, reason: str) -> Intent:
+        """RF-08: il motivo aggiorna i criteri dell'intento, persistiti prima della nuova scelta."""
+        product = self.repos.products.get(proposal.product_id)
+        area = geo.area_of_destination(product.destination, product.country) if product else None
+        criteria = refine(intent.criteria, reason, proposal, area, self.now().date())
+        if criteria == intent.criteria:
+            return intent
+        self.repos.intents.update_criteria(intent.id, criteria)
+        return replace(intent, criteria=criteria)
 
     def _propose(self, intent: Intent) -> Union[ProposalMade, NoMatch]:
         rejected_proposals = self.repos.rejections.proposal_ids_for_intent(intent.id)
