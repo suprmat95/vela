@@ -193,3 +193,17 @@ Inizio il **Task 1**. Fase RED: scrivo i test.
 RED confermato: il test fallisce perché `PaymentsError` non esiste. Fase GREEN:
 
 - 🔧 Bash: cat > vela/ports/payments.py <<'EOF' """Porta verso il pagamento (RF-18, RF-19, …
+
+Suite verde: 394 test. Committo il Task 1.
+
+- 🔧 Bash: git add vela/ports/payments.py vela/adapters/stripe_fake.py vela/domain/usecases…
+
+**Task 2** — adapter Stripe. Fase RED:
+
+- 🔧 Bash: cat > tests/test_stripe_links.py <<'EOF' """Adapter Stripe (RF-18, RF-21, RF-22)…
+
+RED confermato. Rispetto al piano ho reso letterali i valori attesi (scadenza e URL di ritorno), invece di ricavarli dalle costanti del codice sotto test. Fase GREEN:
+
+- 🔧 Bash: cat > vela/adapters/stripe_links.py <<'EOF' """Link di pagamento Stripe (RF-18, …
+
+- 🔧 Bash: git add vela/adapters/stripe_links.py tests/test_stripe_links.py && git commit -…
