@@ -1,7 +1,9 @@
 # Vela — specifica dei requisiti
 
 Data: 2026-09-25. Stato: bozza da rivedere; RF-43 e RNF-09 aggiornati il 2026-09-25 con la
-roadmap (`docs/roadmap.md`). Origine: `docs/brief.md` e intervista del 2026-09-25
+roadmap (`docs/roadmap.md`); §4.10, RF-14, RF-16, RF-17, RF-19, RF-25, RF-27, RF-37, RF-39,
+RF-41, RNF-04, RNF-05, RNF-10, RNF-12, RNF-13 e §10.1 aggiornati il 2026-09-25 per il twist
+(50.000 viaggiatori in dieci minuti). Origine: `docs/brief.md` e intervista del 2026-09-25
 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -94,29 +96,32 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-13** Indirizzo, paese e altri campi richiesti da HofJ ma non chiesti al viaggiatore sono
   compilati con valori di default dichiarati nella configurazione e documentati in
   `ARCHITECTURE.md` come vincolo del prototipo.
-- **RF-14** All'accettazione Vela crea l'itinerario HofJ (`POST /v1/itineraries` con prodotto,
+- **RF-14** Il job d'acquisto (RF-46) crea l'itinerario HofJ (`POST /v1/itineraries` con prodotto,
   data di inizio, adulti, camere, valuta EUR), imposta il cliente (`PUT .../customer`), legge
   gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`).
 - **RF-15** Vela accetta la sistemazione di default dell'itinerario. Non sceglie hotel
   alternativi né aggiunge attività: il prodotto HofJ è già "esperienza + hotel".
 - **RF-16** Vela legge il totale reale dall'itinerario. Se differisce dal prezzo "a partire da"
-  della proposta, la risposta di accettazione lo dichiara esplicitamente prima del link di
+  della proposta, la risposta di stato (RF-25) lo dichiara esplicitamente prima del link di
   pagamento. Il link porta sempre il totale reale.
 - **RF-17** Se la creazione dell'itinerario fallisce per un errore del prodotto (4xx/5xx da
-  HofJ riconducibile al prodotto, non alla quota o alla rete), Vela segna il prodotto come non
-  prenotabile, sceglie la proposta successiva per lo stesso intento e la restituisce con la
-  stessa forma di RF-06, senza esporre l'errore al viaggiatore. L'agente riceve un flag che
-  indica che la proposta è cambiata.
+  HofJ riconducibile al prodotto, non alla quota o alla rete), il job d'acquisto segna il
+  prodotto come non prenotabile, sceglie la proposta successiva per lo stesso intento e porta
+  l'ordine in stato `replaced` con la proposta sostitutiva. `get_order_status` la restituisce
+  con la stessa forma di RF-06 e un flag `proposal_changed`, senza esporre l'errore al
+  viaggiatore. Un nuovo `accept_proposal` sulla proposta sostitutiva crea un ordine che entra
+  in testa alla coda (posizione ereditata dall'ordine sostituito).
 
 ### 4.4 Pagamento
 
 - **RF-18** Il pagamento avviene con uno Stripe Payment Link (Checkout) sull'account Stripe di
   test del progetto, per l'importo totale reale in EUR, con `metadata` contenente l'id
   dell'ordine e dell'itinerario HofJ.
-- **RF-19** La risposta di accettazione contiene l'URL del link, l'importo, l'id ordine e una
-  frase pronta da leggere al viaggiatore. È compito dell'agente consegnare il link nel canale
-  del viaggiatore (messaggio, SMS, lettura ad alta voce dell'importo con link inviato via
-  testo).
+- **RF-19** La risposta di `get_order_status` per un ordine `awaiting_payment` contiene l'URL
+  del link, l'importo, l'id ordine e una frase pronta da leggere al viaggiatore. La risposta di
+  accettazione contiene solo id ordine, stato `queued`, attesa stimata e frase (RF-45). È
+  compito dell'agente consegnare il link nel canale del viaggiatore (messaggio, SMS, lettura ad
+  alta voce dell'importo con link inviato via testo).
 - **RF-20** Vela riceve la conferma di pagamento tramite webhook Stripe firmato
   (`checkout.session.completed`), verifica la firma con `STRIPE_WEBHOOK_SECRET`, aggiorna
   l'ordine a `paid_pending_booking` e avvia la prenotazione. Eventi duplicati non producono
@@ -134,16 +139,20 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-24** La chiamata di prenotazione è ripetibile: HofJ tratta `POST /v1/bookings` come
   upsert per itinerario, e Vela ripete la chiamata su errore di rete o 5xx con backoff, fino a
   un numero massimo configurato, poi marca l'ordine `booking_failed` con il motivo.
-- **RF-25** L'agente del viaggiatore ottiene il codice interrogando lo stato dell'ordine.
-  La risposta contiene lo stato, il codice di prenotazione se presente, e una frase pronta da
-  leggere ("La tua prenotazione è confermata, codice R-789012"). Stati possibili:
-  `awaiting_payment`, `paid_pending_booking`, `confirmed`, `booking_failed`, `expired`.
+- **RF-25** L'agente del viaggiatore ottiene link e codice interrogando lo stato dell'ordine.
+  La risposta contiene lo stato, l'attesa stimata se `queued` (RF-48), link e importo se
+  `awaiting_payment`, la proposta sostitutiva se `replaced` (RF-17), il codice di prenotazione
+  se `confirmed`, il motivo leggibile se `failed` o `booking_failed`, e una frase pronta da
+  leggere ("La tua prenotazione è confermata, codice R-789012"). Stati possibili: `queued`,
+  `awaiting_payment`, `paid_pending_booking`, `confirmed`, `replaced`, `cancelled`, `failed`,
+  `booking_failed`, `expired`.
 - **RF-26** Il codice di prenotazione resta disponibile tramite `get_order_status` senza
   limite di tempo, così il viaggiatore può richiederlo al proprio agente anche in seguito.
   L'invio del codice via email non è nelle 24 ore (richiederebbe un servizio non concordato)
   ed è elencato in `ARCHITECTURE.md` tra i prossimi passi.
 - **RF-27** All'avvio Vela riprende gli ordini in stato `paid_pending_booking` e completa la
-  prenotazione (RF-23, RF-24).
+  prenotazione (RF-23, RF-24), e riprende i job d'acquisto degli ordini `queued` dal primo
+  passo non completato (RF-46), senza ricreare itinerari già creati.
 
 ### 4.6 Catalogo e sincronizzazione
 
@@ -179,11 +188,12 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-36** Ogni chiamata a HofJ passa da un guardiano della quota: contatore condiviso in
   Postgres per finestra mobile di 60 secondi, inizializzato da `GET /v1/quota` all'avvio e
   aggiornato a ogni chiamata (inclusa quella di quota).
-- **RF-37** Quando la finestra è quasi esaurita (soglia configurabile), le chiamate non urgenti
-  (sync) attendono la fine della finestra; le chiamate urgenti (accettazione, prenotazione)
-  restano possibili fino all'esaurimento, poi falliscono con un errore esplicito che l'agente
-  può leggere al viaggiatore ("riprovo tra un minuto") e Vela riprova da sé per la
-  prenotazione (RF-24).
+- **RF-37** Il guardiano è lo scheduler della quota di RF-47: nessuna chiamata a HofJ parte
+  senza un blocco di budget prenotato nella finestra corrente. Le chiamate di prenotazione
+  degli ordini pagati hanno una riserva garantita per finestra; i job d'acquisto usano il
+  resto in ordine di arrivo; il sync gira solo a coda vuota e sopra la soglia. Nessuna
+  chiamata del viaggiatore fallisce per quota esaurita: l'ordine aspetta in coda e l'attesa è
+  dichiarata (RF-48).
 - **RF-38** Una risposta 429 da HofJ aggiorna il contatore e non viene mai ripetuta
   immediatamente.
 
@@ -196,8 +206,8 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   | `create_intent` | testo, profilo opzionale | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
   | `get_proposal` | id intento | una proposta (RF-06) oppure "niente di compatibile" (RF-09) |
   | `reject_proposal` | id proposta, motivo | la proposta successiva (RF-08) |
-  | `accept_proposal` | id proposta, dati viaggiatore mancanti | id ordine, totale reale, link di pagamento, frase da leggere; oppure una proposta sostitutiva (RF-17) |
-  | `get_order_status` | id ordine | stato, codice, frase da leggere (RF-25) |
+  | `accept_proposal` | id proposta, dati viaggiatore mancanti | id ordine, stato `queued`, posizione e attesa stimata, frase da leggere (RF-45) |
+  | `get_order_status` | id ordine | stato, attesa stimata oppure link e importo oppure codice oppure proposta sostitutiva, frase da leggere (RF-25) |
 
 - **RF-40** REST: `POST /v1/intents`, `GET /v1/intents/{id}/proposal`,
   `POST /v1/proposals/{id}/reject`, `POST /v1/proposals/{id}/accept`,
@@ -205,7 +215,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-41** MCP: server remoto con trasporto Streamable HTTP su `/mcp`, cinque tool con gli
   stessi nomi di RF-39, descrizioni scritte per un modello che parla con un umano a voce:
   ogni tool dice esplicitamente di non elencare alternative e di leggere la frase pronta.
-  Compatibile con Claude (claude.ai, Claude Desktop) ed ElevenLabs Conversational AI.
+  La descrizione di `accept_proposal` dice che la risposta è un'attesa, non un link, e che il
+  link va letto con `get_order_status` dopo l'attesa dichiarata o quando il viaggiatore lo
+  chiede. Compatibile con Claude (claude.ai, Claude Desktop) ed ElevenLabs Conversational AI.
 - **RF-42** Ogni risposta dei casi d'uso include un campo `say`: una frase in lingua
   dell'intento, pronta per essere letta ad alta voce, senza markdown, senza URL letti per
   esteso (l'URL sta in un campo separato).
@@ -221,6 +233,43 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   aggiungere l'adapter A2A (agent card, mapping dei task sui cinque casi d'uso). Se resta
   tempo, si implementa come quarta superficie senza toccare il dominio.
 
+### 4.10 Coda d'acquisto e scheduler della quota
+
+Origine: twist del 2026-09-25 ("Vela ha appena chiuso un accordo di distribuzione": 50.000
+viaggiatori in dieci minuti). Analisi e decisioni in `docs/decisions.md`. Il vincolo che non
+si sposta è la quota HofJ: con 120 chiamate al minuto e 5 chiamate per acquisto prima del link
+più una per la prenotazione, Vela completa al massimo 20 acquisti al minuto per client. Il
+design trasforma questo tetto in attesa dichiarata invece che in errori.
+
+- **RF-45** `accept_proposal` è sempre asincrono: valida i dati del viaggiatore (RF-12), crea
+  l'ordine in stato `queued` con posizione in coda e attesa stimata, e risponde senza chiamare
+  HofJ né Stripe. La frase `say` dichiara l'attesa in minuti, arrotondata per eccesso.
+- **RF-46** Un job d'acquisto per ordine esegue in sequenza: creazione itinerario, cliente,
+  lettura pax, scrittura pax, lettura del totale reale, creazione del link di pagamento; poi
+  l'ordine passa a `awaiting_payment`. Ogni passo salva il proprio esito (`itineraryId`
+  compreso) così che un'interruzione riprenda dal passo successivo. Un passo fallito per rete,
+  timeout o 5xx viene ripetuto fino a tre volte nelle finestre successive; poi l'ordine passa a
+  `failed` con un motivo leggibile. Un errore del prodotto segue RF-17.
+- **RF-47** Lo scheduler della quota è unico per il cluster: un contatore per finestra di 60 s
+  in Postgres (RF-36), tre classi in ordine di priorità: `booking` (prenotazioni di ordini
+  pagati, riserva garantita del 20% della finestra, configurabile), `purchase` (job
+  d'acquisto, il resto della finestra, in ordine di arrivo), `sync` (solo a coda `purchase`
+  vuota e sopra la soglia di RF-37). Un job prenota atomicamente il blocco di chiamate che gli
+  serve (5 per un acquisto, 1 per una prenotazione) oppure attende la finestra successiva. Una
+  risposta 429 azzera il budget residuo della finestra (RF-38). `GET /v1/quota` si chiama al
+  boot e dopo un 429, mai in ciclo.
+- **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti per finestra, con acquisti
+  per finestra = (limite − riserva `booking`) ÷ 5. Ricalcolata a ogni `get_order_status`. Non
+  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
+- **RF-49** `reject_proposal` sulla proposta di un ordine `queued` porta l'ordine a
+  `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08).
+- **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
+  tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
+  istanza configurabile (default 4). Un job è idempotente e ripartibile (RF-27).
+- **RF-51** Un ordine pagato viene prenotato entro la finestra successiva al webhook, salvo
+  errori di RF-24: la riserva `booking` garantisce che la prenotazione avvenga anche a coda
+  d'acquisto piena.
+
 ## 5. Requisiti non funzionali
 
 - **RNF-01 Stateless.** Il processo non tiene stato tra richieste: intenti, proposte, ordini,
@@ -230,11 +279,13 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   girano in background nello stesso processo (RF-27 copre il crash).
 - **RNF-03 Idempotenza.** Webhook duplicati, ripetizioni di `POST /v1/bookings`, doppio
   `accept` sulla stessa proposta non creano ordini o prenotazioni doppie.
-- **RNF-04 Timeout.** Le chiamate a HofJ hanno timeout di 15 secondi; il caso d'uso
-  `accept_proposal` risponde entro 30 secondi o restituisce un errore leggibile.
-- **RNF-05 Latenza.** `create_intent`, `get_proposal`, `reject_proposal`, `get_order_status`
-  non chiamano servizi esterni (eccetto il fallback LLM di RF-03) e rispondono sotto i
-  500 ms al 95° percentile in modalità replay sul load test.
+- **RNF-04 Timeout.** Le chiamate a HofJ hanno timeout di 15 secondi. Nessun caso d'uso
+  aspetta HofJ: il job d'acquisto (RF-46) assorbe i 2-6 secondi della ricerca di
+  disponibilità live e i timeout, con ripetizione per passo e stato `failed` come esito
+  finale leggibile.
+- **RNF-05 Latenza.** I cinque casi d'uso non chiamano servizi esterni (eccetto il fallback
+  LLM di RF-03) e rispondono sotto i 500 ms al 95° percentile in modalità replay sul load
+  test.
 - **RNF-06 Osservabilità.** Log strutturati JSON su stdout con id intento/ordine, chiamate
   HofJ con esito e quota residua. `GET /health` riporta stato DB, età del catalogo, quota
   residua nota.
@@ -250,9 +301,19 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RNF-10 Load test.** `loadtest/locustfile.py` esercita il flusso completo in replay contro
   l'URL live o locale. `loadtest/RESULTS.md` riporta utenti simulati, RPS, p50/p95/p99, errori,
   più i numeri reali di `GET /v1/quota` (limite per minuto) e la latenza misurata di un
-  flusso di prenotazione reale.
+  flusso di prenotazione reale. Uno scenario "twist" simula 50.000 viaggiatori in dieci
+  minuti in replay, con HofJ finto che impone 120 chiamate al minuto e 2-6 secondi di latenza
+  per chiamata: riporta p95 dei casi d'uso, acquisti completati al minuto (atteso ≈ 20),
+  scarto tra attesa stimata e reale, tempo tra pagamento simulato e prenotazione (atteso
+  < 60 s), errori di quota (atteso 0).
 - **RNF-11 Deploy.** Dockerfile, deploy su Render con Postgres gestito, migrazioni al boot,
   variabili d'ambiente documentate in `README.md`.
+- **RNF-12 Degradazione sotto carico.** Il fallback LLM di RF-03 ha un interruttore a
+  concorrenza limitata (configurabile): oltre il limite, Vela pone la domanda di RF-04 invece
+  di chiamare il modello. Il catalogo è tenuto in memoria per istanza e ricaricato da Postgres
+  ogni minuto, così la proposta non legge il DB.
+- **RNF-13 MCP stateless.** La superficie MCP non tiene sessioni in memoria: ogni richiesta è
+  servibile da qualunque istanza.
 
 ## 6. Vincoli di progetto
 
@@ -319,8 +380,9 @@ ARCHITECTURE.md README.md Dockerfile
 
 1. Con `VELA_UPSTREAM_MODE=live`, da Claude collegato all'MCP: l'intento "un weekend di
    padel in Spagna a ottobre, siamo in due, massimo 800 euro" produce una proposta singola;
-   "troppo caro" ne produce un'altra singola più economica; "sì" produce un link Stripe;
-   pagando con la carta di test `4242 4242 4242 4242` lo stato dell'ordine diventa
+   "troppo caro" ne produce un'altra singola più economica; "sì" produce uno stato `queued`
+   con attesa dichiarata e, interrogando lo stato dell'ordine, un link Stripe con il totale
+   reale; pagando con la carta di test `4242 4242 4242 4242` lo stato dell'ordine diventa
    `confirmed` con il codice di prenotazione reale restituito da `POST /v1/bookings`.
 2. Lo stesso flusso funziona da un agente vocale ElevenLabs, a voce, con il link consegnato
    per testo.

@@ -1,7 +1,9 @@
 # Vela — roadmap in macro task
 
 Data: 2026-09-25. Origine: `docs/spec.md` e intervista del 2026-09-25 (decisioni in
-`docs/decisions.md`, sezione "Roadmap in macro task").
+`docs/decisions.md`, sezione "Roadmap in macro task"). Aggiornata il 2026-09-25 per il twist
+(50.000 viaggiatori in dieci minuti, spec §4.10): M2 era già conclusa, quindi coda d'acquisto,
+scheduler della quota e accettazione asincrona entrano in M5, lo scenario di carico in M13.
 
 ## Come usare questo file
 
@@ -40,7 +42,7 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M2 | Dominio, casi d'uso e modalità replay | L | M0, M1 | 1 / — |
 | M3 | Superficie MCP e primo test da claude.ai | M | M2 | 2 / M4, M9, M11 |
 | M4 | Superficie REST | S | M2 | 2 / M3, M9, M11 |
-| M5 | HofJ reale: carrello, prenotazione, quota | L | M2 | 3 / M6, M8 |
+| M5 | HofJ reale: coda d'acquisto, scheduler della quota, prenotazione | L | M2 | 3 / M6, M8 |
 | M6 | Stripe: link di pagamento e webhook | M | M2, M4 | 3 / M5, M8 |
 | M7 | Prima prenotazione reale end-to-end | S | M3, M4, M5, M6 | 4 / — |
 | M8 | OAuth 2.1 sulla superficie MCP | M | M3 | 3 / M5, M6 |
@@ -181,7 +183,7 @@ simulato, stato `confirmed` con codice).
 
 **Scope.**
 - Server MCP con trasporto Streamable HTTP montato su `/mcp` nella stessa app FastAPI (SDK
-  `mcp`), senza auth (ponte fino a M8).
+  `mcp`), senza auth (ponte fino a M8), senza sessioni in memoria (RNF-13).
 - Cinque tool con i nomi di RF-39; descrizioni per un modello che parla a voce: mai
   elencare alternative, leggere `say`, non leggere gli URL.
 - Deploy su Render in replay; connector configurato in claude.ai; esecuzione del flusso.
@@ -226,42 +228,67 @@ arricchito.
 
 ---
 
-## M5 — HofJ reale: carrello, prenotazione, quota
+## M5 — HofJ reale: coda d'acquisto, scheduler della quota, prenotazione
 
-**Risultato.** Con `VELA_UPSTREAM_MODE=live` l'accettazione crea un itinerario vero, imposta
-cliente e pax, legge il totale reale; dopo il pagamento la prenotazione viene creata con retry;
-ogni chiamata passa dal guardiano della quota.
+**Risultato.** L'accettazione è asincrona (spec §4.10): risponde subito con stato `queued` e
+attesa stimata; un job d'acquisto crea itinerario, cliente, pax, legge il totale reale e
+produce il link; la prenotazione degli ordini pagati ha una riserva di quota garantita. Con
+`VELA_UPSTREAM_MODE=live` tutto questo avviene contro HofJ vero. Il twist (50.000
+viaggiatori in dieci minuti) diventa attesa dichiarata, non errori.
 
 **Scope.**
 - Primo passo, le verifiche di spec §8 (dichiarare ≤ 8 chiamate): `GET /v1/quota`,
   `POST /v1/itineraries` sul prodotto `t0054825`, `PUT customer`, `GET/PUT pax`,
   `POST /v1/bookings` con un `paymentIntentId` di un Checkout di test creato a mano. Esito e
   fallback (§8 riga 3) registrati in `docs/decisions.md`.
+- Dominio (partendo da M2, già su `master`): `accept_proposal` diventa asincrono (RF-45);
+  nuovi stati `queued`, `replaced`, `cancelled`, `failed` (RF-25); job d'acquisto a passi
+  ripartibili (RF-46) al posto dell'accettazione sincrona; sostituzione in coda (RF-17);
+  rinuncia (RF-49); ripresa al boot dei job (RF-27); attesa stimata (RF-48) e frasi `say`
+  per attesa, sostituzione, fallimento.
+- Scheduler della quota (RF-47, RF-36..38): contatore per finestra in Postgres, classi
+  `booking`/`purchase`/`sync`, riserva configurabile, prenotazione atomica dei blocchi, 429,
+  `/v1/quota` solo al boot e dopo un 429.
+- Worker (RF-50): tabella `jobs`, prelievo con `FOR UPDATE SKIP LOCKED`, concorrenza per
+  istanza; sostituisce `BookingRunner` di M2 (la prenotazione diventa un job di classe
+  `booking`, RF-51). Migrazione `0003`.
 - `vela/adapters/hofj_http.py` (httpx, timeout 15 s, envelope, RFC 7807, 502 `upstream-error`
   indistinguibile da id sbagliato, indirizzo `Address` da OAS non da DOCS).
-- Guardiano quota in Postgres (RF-36..38): finestra 60 s, init da `/v1/quota`, soglia, chiamate
-  urgenti vs non urgenti, 429 mai ripetuto subito.
-- Accettazione live (RF-14..17): sostituzione silenziosa con flag, `bookable=false` e riabilitazione
-  dopo 24 h (RF-33..35).
-- Prenotazione (RF-23, RF-24): backoff, massimo tentativi, `booking_failed`; ripresa al boot.
+- Prodotti non prenotabili: `bookable=false` e riabilitazione dopo 24 h (RF-33..35).
+- Prenotazione (RF-23, RF-24): backoff, massimo tentativi, `booking_failed`.
+- Adapter replay aggiornato: latenza e quota simulate configurabili (default zero e
+  illimitata), così M13 può imporre 120/min e 2-6 s.
+- Superfici già mergiate (M3, M4) adattate al nuovo contratto di `accept_proposal` e
+  `get_order_status` (RF-19, RF-39), descrizione del tool `accept_proposal` aggiornata (RF-41).
 
 **Test di completamento.**
-- Adapter con `httpx.MockTransport`: timeout, 429, 502, mapping errori prodotto/quota/rete.
-- Guardiano con orologio finto: finestra, soglia, urgente/non urgente, 429.
-- Orchestratore con porta che fallisce su un prodotto: proposta sostitutiva con flag,
-  prodotto marcato, riabilitato dopo 24 h.
+- Accettazione: risponde `queued` con attesa senza chiamare le porte; doppio accept → stesso
+  ordine; rinuncia → `cancelled` e proposta successiva.
+- Job d'acquisto con porte in memoria: passi in sequenza, esito salvato per passo,
+  interruzione a metà e ripresa senza ricreare l'itinerario, tre tentativi poi `failed`,
+  errore prodotto → `replaced` con proposta sostitutiva, nuovo accept in testa alla coda.
+- Scheduler con orologio finto: riserva `booking` rispettata a finestra piena, `purchase`
+  FIFO, `sync` solo a coda vuota, blocco atomico, 429 azzera il budget, nessuna chiamata a
+  `/v1/quota` in ciclo. Con due worker concorrenti sullo stesso contatore (test Postgres,
+  saltato senza `DATABASE_URL`) il totale per finestra non supera mai il limite.
+- Attesa stimata: posizione × 60 ÷ ((limite − riserva) ÷ 5); ricalcolata a ogni stato.
+- Adapter HTTP con `httpx.MockTransport`: timeout, 429, 502, mapping errori prodotto/quota/rete.
+- Prodotti: marcato al primo errore prodotto, riabilitato dopo 24 h.
 - Booking: retry con backoff su 5xx, stop dopo N, `booking_failed` con motivo.
 - Manuale: un itinerario reale creato e un booking reale su itinerario di test, chiamate
   contate in `docs/decisions.md`.
 
-**Copre.** RF-14, RF-16, RF-17, RF-23, RF-24, RF-27, RF-33..38, RNF-04, spec §8.
+**Copre.** RF-14, RF-16, RF-17, RF-19, RF-23, RF-24, RF-25, RF-27, RF-33..38, RF-45..51,
+RNF-04, spec §8.
 
 **Prompt.**
-> Leggi docs/spec.md (§4.3, §4.5, §4.7, §4.8, §8, RNF-04), docs/api/internal-checkout.md,
-> docs/api/differences.md, docs/api/quota-health.md e docs/roadmap.md M5. Obiettivo:
-> adapter HofJ HTTP, guardiano della quota, accettazione e prenotazione reali con
-> sostituzione dei prodotti non prenotabili. Prima le verifiche di §8, dichiarando le
-> chiamate. Test: M5.
+> Leggi docs/spec.md (§4.3, §4.5, §4.7, §4.8, §4.10, §8, RNF-04), docs/decisions.md (sezioni
+> "Roadmap" e "Twist"), docs/api/internal-checkout.md, docs/api/differences.md,
+> docs/api/quota-health.md, il dominio di M2 in `vela/domain` e `vela/adapters`, e
+> docs/roadmap.md M5. Obiettivo: accettazione asincrona con coda d'acquisto, scheduler della
+> quota a tre classi, worker in ogni istanza, adapter HofJ HTTP, prenotazione con retry,
+> superfici adattate al nuovo contratto. Prima le verifiche di §8, dichiarando le chiamate.
+> Test: M5.
 
 ---
 
@@ -276,6 +303,8 @@ pagamento arriva via webhook firmato, idempotente, e avvia la prenotazione; i li
   con ordine e itinerario, `VELA_PUBLIC_URL` per il ritorno.
 - `vela/surfaces/webhooks.py`: `checkout.session.completed` e `checkout.session.expired`,
   firma con `STRIPE_WEBHOOK_SECRET`, tabella eventi per l'idempotenza, transizioni di stato.
+- Il trigger della prenotazione usa il runner di M2; quando M5 è mergiata diventa un job di
+  classe `booking` (RF-51): chi arriva secondo tra M5 e M6 fa l'adattamento.
 - Nessun dato di carta in Vela (RF-21, RNF-07).
 
 **Test di completamento.**
@@ -357,7 +386,8 @@ motivi di rifiuto che modificano i criteri, fallback Claude Haiku 4.5 solo con c
   cambia area, "a novembre" cambia periodo, motivo non riconosciuto → esclude solo il prodotto.
 - Fallback: SDK `anthropic` (dipendenza da concordare), modello `claude-haiku-4-5-20251001`,
   schema identico, attivo solo se manca sport o periodo e `ANTHROPIC_API_KEY` esiste; chiamate
-  dichiarate nei test manuali.
+  dichiarate nei test manuali. Interruttore a concorrenza limitata (RNF-12): oltre il limite
+  si pone la domanda di RF-04.
 
 **Test di completamento.**
 - Tabelle parser it/en (≥ 30 casi); rifiuti con motivo → criteri attesi; fallback con client
@@ -449,20 +479,28 @@ voce; il link di pagamento viene consegnato per testo.
 riporta i numeri richiesti da RNF-10.
 
 **Scope.**
-- Locust su REST: intento → proposta → rifiuto → accettazione → checkout replay → stato.
+- Locust su REST: intento → proposta → rifiuto → accettazione (`queued`) → stato finché
+  `awaiting_payment` → checkout replay → stato finché `confirmed`.
 - Esecuzione locale e contro Render; `GET /v1/quota` reale prima e dopo (2 chiamate).
+- Scenario "twist" (RNF-10, spec §4.10): 50.000 viaggiatori in dieci minuti, adapter replay
+  con quota simulata 120/min e latenza 2-6 s per chiamata. Misure: p95 dei cinque casi
+  d'uso, acquisti completati al minuto (atteso ≈ 20), scarto tra attesa stimata e reale,
+  tempo tra pagamento simulato e prenotazione (atteso < 60 s), errori di quota (atteso 0).
 - `RESULTS.md`: utenti, RPS, p50/p95/p99, errori, `limitPerMinute`, latenza del flusso reale
-  misurata in M7.
+  misurata in M7, più la tabella dello scenario twist e la risposta alla domanda del twist
+  ("regge?") con i numeri.
 
 **Test di completamento.**
-- Locust headless termina senza errori; p95 < 500 ms sui quattro casi d'uso senza servizi
-  esterni; quota invariata; `RESULTS.md` compilato.
+- Locust headless termina senza errori; p95 < 500 ms sui cinque casi d'uso; quota reale
+  invariata; scenario twist con zero errori di quota, ≈ 20 acquisti/min, prenotazione entro
+  60 s dal pagamento; `RESULTS.md` compilato.
 
-**Copre.** RNF-05, RNF-10, §10.5.
+**Copre.** RNF-05, RNF-10 (incluso lo scenario twist), §10.5.
 
 **Prompt.**
-> Leggi docs/spec.md (RNF-05, RNF-08, RNF-10, §10.5) e docs/roadmap.md M13. Obiettivo: load
-> test Locust in replay con risultati documentati. Test: M13.
+> Leggi docs/spec.md (§4.10, RNF-05, RNF-08, RNF-10, §10.5) e docs/roadmap.md M13.
+> Obiettivo: load test Locust in replay con lo scenario twist (quota e latenza simulate) e
+> risultati documentati. Test: M13.
 
 ---
 
@@ -474,6 +512,7 @@ personali, verifica che nessun segreto sia nel repo né negli agent-log.
 **Scope.**
 - Log JSON su stdout con id intento/ordine, chiamate HofJ con esito e quota residua.
 - `/health`: DB, età catalogo, quota residua nota.
+- Catalogo in memoria per istanza, ricaricato da Postgres ogni minuto (RNF-12).
 - `python -m vela.forget <order_id|--all>` cancella i dati di RF-12.
 - Script di verifica: `git grep` sulle chiavi note (senza stamparle), ricerca di letture di
   `.env` in `agent-log/`.
@@ -558,6 +597,7 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 | RF-42 | M2 |
 | RF-43 | M4 (REST), M8 (MCP OAuth) |
 | RF-44 | M15 (documentazione), M16 (opzionale) |
+| RF-45..RF-51 | M5 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5 |
 | RNF-05 | M13 |
@@ -567,6 +607,8 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 | RNF-09 | ogni task (suite `unittest` senza servizi esterni; DB test saltati senza `DATABASE_URL`) |
 | RNF-10 | M13 |
 | RNF-11 | M0 |
+| RNF-12 | M9 (interruttore Haiku), M14 (catalogo in memoria) |
+| RNF-13 | M3 (MCP stateless), M8 |
 | §6 `agent-log/` | M0 |
 | §8 verifiche | M5 |
 | §9 consegne | M15 |
@@ -575,5 +617,5 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 | §10.5 | M13 |
 | §10.6 | M2, M3, M4 |
 
-Tutti i 44 RF, gli 11 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
+Tutti i 51 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
 di §10 hanno almeno una macro task.
