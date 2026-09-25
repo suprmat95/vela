@@ -2374,3 +2374,92 @@ Il test fallisce perché il modulo non esiste ancora. Lo creo.
 - 🔧 Bash: Run quota rules tests
 
 - 🔧 Bash: Confirm float pitfall, run suite, commit Task 4
+
+Task 4 fatto (commit `81078e6`): la suite passa da 519 a **528 test, verde**, con 14 saltati.
+
+**Cosa ho fatto.** Ho creato `vela/domain/quota.py`, che contiene solo calcoli, senza accesso al database né a HofJ:
+- `effective_limit(120, 0.10)` → **108**
+- `booking_reserve(108, 0.20)` → **21**
+- `cap_for(classe, …)`: `booking` può usare 108 chiamate, `purchase` e `sync` 87
+- `purchases_per_window(108, 21)` → **17,4** acquisti a finestra (5 chiamate per acquisto)
+- `estimated_wait_seconds(posizione, 17,4)` → posizione 1 = 4 s, posizione 18 = 63 s, posizione 1000 = 3449 s. Nessun tetto, come chiede RF-48.
+- `wait_minutes(secondi)` → minuti per eccesso, **minimo 1**, da usare nella frase `say`.
+
+Ci sono 9 test in `tests/test_quota_rules.py`. Li ho visti fallire perché il modulo non esisteva, poi passare.
+
+**Cosa ho deciso:**
+- **Percentuali calcolate con `Decimal`.** In virgola mobile 100 × 0,29 dà 28,999…, e arrotondando per difetto verrebbe 28. C'è un test apposta.
+- **Nessun budget per gli acquisti è un errore.** Se la riserva `booking` si mangia tutto il limite, `purchases_per_window` solleva un errore invece di dividere per zero. Può succedere con un `limitPerMinute` molto basso.
+
+**Dubbi:** nessuno su questo task.
+
+Il prossimo è il **Task 5**, il contatore della quota condiviso (`QuotaStore`):
+- la prenotazione atomica dei blocchi di chiamate, in memoria e su Postgres;
+- la finestra che avanza ogni 60 s;
+- la gestione di un 429.
+
+C'è anche il test di concorrenza su Postgres, che resterà saltato senza `DATABASE_URL`. Vado?
+
+## Utente 20:15
+
+ho aggiunto DATABASE_URL
+
+## Agente 20:15
+
+Controllo che `DATABASE_URL` ci sia e sia raggiungibile da qui, senza stamparla.
+
+- 🔧 Bash: Check DATABASE_URL presence and host type without printing it
+
+`DATABASE_URL` c'è, ma è l'**URL interno** di Render (host `dpg-…`), che funziona solo dentro Render: da questa macchina non si risolve. È lo stesso problema annotato in M9. Serve l'**External Database URL**, che trovi nella pagina del database su Render (`Connections → External Database URL`) e che ha un host `….render.com`.
+
+**Prima di lanciare i test su quel database c'è un rischio.** Il test `PostgresUpgradeTest.test_upgrade_head_is_idempotent`, che esiste da M0, applica le migrazioni **allo schema principale** del database indicato da `DATABASE_URL`:
+- Con il codice di M5 porterebbe il database di Render alla migrazione **`0005`**.
+- L'app su Render gira con `master`, che si ferma alla `0004`. Al prossimo deploy `alembic upgrade head` non troverebbe la revisione `0005` e **l'avvio fallirebbe**.
+
+I test dei repository invece lavorano nello schema separato `vela_test`, quindi non creano problemi.
+
+Quando mi dai l'URL esterno, lancio i test Postgres in uno di questi due modi:
+1. **Consigliato:** tutti i test Postgres, ma con il `search_path` puntato sullo schema isolato `vela_test`, **solo per questa esecuzione**. Anche la migrazione finisce lì e lo schema dell'app non viene toccato.
+2. Solo i test dei repository, saltando quello della migrazione.
+
+Nel frattempo, vado avanti col Task 5?
+
+## Utente 20:16
+
+si sono in .env
+
+## Agente 20:16
+
+- 🔧 Bash: List database-related variable names and host types
+
+Nel `.env` c'è una sola variabile per il database, `DATABASE_URL`, e punta ancora all'host **interno** di Render (`dpg-…`, senza dominio). Nessun'altra variabile contiene un URL di database.
+
+Per i test serve l'**External Database URL**. Su Render: apri il database, vai in *Connections* e copia **External Database URL**. L'host finisce con `.render.com`, per esempio `dpg-…-a.frankfurt-postgres.render.com`.
+
+Puoi metterlo in due modi:
+- **sostituire** il valore di `DATABASE_URL` nel `.env`. Vale solo in locale: su Render l'app usa la sua variabile;
+- oppure **aggiungere** una variabile a parte, per esempio `TEST_DATABASE_URL`. Io la passo ai test come `DATABASE_URL` solo durante l'esecuzione, insieme al `search_path` sullo schema isolato `vela_test`.
+
+Consiglio la seconda: non si confonde con l'URL dell'app. Dimmi quando l'hai messo e lancio i test Postgres dei Task 3 e 4. Il Task 4 non ha test Postgres, quindi in pratica ricontrollo la migrazione `0005` e il contratto dei repository.
+
+## Utente 20:17
+
+cambiata adesso
+
+## Agente 20:17
+
+- 🔧 Bash: Recheck database URL host types
+
+- 🔧 Bash: Verify isolated test schema on Render Postgres
+
+Isolamento confermato: il `search_path` è `vela_test`, e lì c'è già la tabella `alembic_version` delle esecuzioni precedenti. Lancio la suite completa.
+
+- 🔧 Bash: Run full suite against Render Postgres in vela_test schema
+
+- 🔧 Bash: Run full suite with PGOPTIONS isolating vela_test schema
+
+Tutti i 528 test passano, **nessuno saltato**, compresi i test Postgres della migrazione `0005` e del contratto dei repository. Verifico che lo schema dell'app non sia stato toccato.
+
+- 🔧 Bash: Confirm app schema version untouched
+
+- 🔧 Bash: Document isolated Postgres test run in plan

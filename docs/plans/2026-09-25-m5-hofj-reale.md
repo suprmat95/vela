@@ -39,7 +39,12 @@ Data: 2026-09-25. Branch: `task/m5`. Destinazione di questo file: `docs/plans/20
   - `test_rest.py`: accept e `FullFlowTest`.
   - `test_app_replay.py`: `test_live_with_database_is_refused`, che cerca `"M5"`.
   - `test_migrations.py`: head `"0002"`.
-- Interprete: `uv run python` (3.12). Suite: `uv run python -m unittest discover -s tests`. Suite di partenza dopo il rebase su `master` (M6 + M9): 513 test, 13 saltati, verde.
+- Interprete: `uv run python` (3.12). Suite: `uv run python -m unittest discover -s tests`. Suite di partenza dopo il rebase su `master` (M6 + M9): 513 test, 13 saltati, verde. Test Postgres: solo con l'External Database URL di Render, passando al processo dei test
+  **solo** `DATABASE_URL` e isolando lo schema con `PGOPTIONS`, così anche
+  `PostgresUpgradeTest` migra `vela_test` e non lo schema dell'app (che deve restare alla head
+  di `master`, altrimenti il deploy di `master` non trova la revisione):
+  `DB=$(env -i bash -c 'set -a; . ./.env >/dev/null 2>&1; printf %s "$DATABASE_URL"'); env -i PATH="$PATH" HOME="$HOME" DATABASE_URL="$DB" PGOPTIONS="-csearch_path=vela_test" uv run python -m unittest discover -s tests`.
+  Dopo il Task 4: 528 test, nessuno saltato; `public` resta a `0004`.
 - Parallelismo: M6 e M9 sono già su `master` e `task/m5` è ribasato sopra (vedi "Integrazione con M6 e M9").
 
 ## Decisioni prese nell'intervista (da riportare in `docs/decisions.md`, Task 0)
