@@ -122,3 +122,13 @@ T3 chiusa. T4: engine e check del DB, test prima.
 - 🔧 Bash: Implement vela.adapters.db and run its tests
 
 - 🔧 Bash: Time each db test individually
+
+- 🔧 Bash: Commit T4 and record it in the ledger
+
+T4 chiusa. T5: app FastAPI e `/health`, test prima.
+
+- 🔧 Bash: Write failing tests for the FastAPI app and /health
+
+- 🔧 Bash: Implement app factory, health router and package skeleton, run health tests
+
+- 🔧 Bash: Commit T5 and record it in the ledger
