@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Registra fixtures/catalog.json dalla House of Journeys API in locale `it`.
+"""Registra fixtures/catalog.json dalla House of Journeys API (locale `it` di default).
 
 Uso:
   record_catalog.py --raw-dir DIR --dry-run     # stampa le chiamate previste, nessuna rete
   record_catalog.py --raw-dir DIR               # registra in DIR (nuova o vuota), scrive la fixture
   record_catalog.py --raw-dir DIR --build-only  # ricostruisce la fixture da DIR senza chiamate
+
+`--locale en` registra (o ricostruisce) un altro locale: su staging i prodotti funzionano solo
+in `en` (M7). L'host è `HOFJ_BASE_URL` e finisce nel `base_url` della fixture.
 
 La chiave viene letta SOLO dalle variabili d'ambiente HOFJ_API_KEY (o API_BEAR_KEY) e non
 viene mai stampata né salvata. DIR sta FUORI dal repository: contiene le risposte grezze
@@ -191,6 +194,8 @@ def main(argv=None):
                     help="cartella FUORI dal repo per le risposte grezze (nuova o vuota)")
     ap.add_argument("--out", default=DEFAULT_OUT,
                     help="fixture da scrivere (default fixtures/catalog.json)")
+    ap.add_argument("--locale", default=LOCALE,
+                    help="locale da registrare e da leggere in --raw-dir (default it)")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true",
                       help="stampa le chiamate previste senza eseguirle")
@@ -210,7 +215,7 @@ def main(argv=None):
                                     dry_run=args.dry_run)
         if args.dry_run:
             total, active = expected_counts(args.out)
-            record(client, brand=brand, expected=(total, active))
+            record(client, locale=args.locale, brand=brand, expected=(total, active))
             lists = sum(1 for path, _, _ in client.planned if path == "/v1/products")
             details = len(client.planned) - lists
             windows, calls = call_plan(len(client.planned))
@@ -219,13 +224,13 @@ def main(argv=None):
                   % (lists, details, windows, calls, windows, total, active))
             return
         try:
-            record(client, brand=brand)
+            record(client, locale=args.locale, brand=brand)
         except (RuntimeError, OSError) as e:   # QuotaExceededError, lista fallita o errore di rete
             sys.exit("STOP: %s (risposte parziali in %s)" % (e, args.raw_dir))
         print("richieste autenticate eseguite: %d" % client.guard.total_requests)
 
     try:
-        catalog = build_catalog(args.raw_dir, brand=brand)
+        catalog = build_catalog(args.raw_dir, locale=args.locale, brand=brand)
     except BuildError as e:
         sys.exit("fixture non scritta: %s" % e)
     write_catalog(catalog, args.out)

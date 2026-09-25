@@ -440,6 +440,35 @@ class MainTest(unittest.TestCase):
         self.assertEqual(sorted(catalog["details"]), ["1", "3"])
         self.assertNotIn("SECRET-KEY", text)
 
+    def test_locale_option_records_and_writes_that_locale(self):
+        server = FakeHofj([item(1)])
+        with mock.patch("urllib.request.urlopen", server):
+            run_main(["--raw-dir", self.raw, "--out", self.out, "--locale", "en"],
+                     {"HOFJ_API_KEY": "SECRET-KEY"})
+        product_calls = [query for path, query, _ in server.calls if path.startswith("/v1/products")]
+        self.assertEqual([q["locale"] for q in product_calls], ["en", "en"])   # lista + dettaglio
+        with open(self.out, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        self.assertEqual(catalog["locale"], "en")
+        self.assertEqual(sorted(catalog["details"]), ["1"])
+
+    def test_build_only_with_locale_uses_pages_of_that_locale(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"], locale="en")
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("rete usata")):
+            text = run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only",
+                             "--locale", "en"], {})
+        self.assertIn("1 prodotti, 1 dettagli", text)
+        with open(self.out, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["locale"], "en")
+
+    def test_build_only_default_locale_ignores_pages_of_other_locales(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"], locale="en")
+        with self.assertRaises(SystemExit) as ctx:
+            run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only"], {})
+        self.assertIn("locale it", str(ctx.exception))
+
     def test_build_only_rebuilds_without_calls(self):
         server = FakeHofj([item(1)])
         record_pages_and_details(make_client(self.raw, server, []), ["1"])

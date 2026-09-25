@@ -99,3 +99,23 @@ Il piano è salvato in `docs/plans/2026-09-25-m7-prima-prenotazione-reale.md` e 
 La suite di partenza è verde: 709 test, 40 saltati. Task 0: registro le decisioni dell'intervista.
 
 - 🔧 Bash: Append M7 decisions and commit
+
+Task 1: guardo il codice attuale di `record_catalog.py` e i suoi test.
+
+- 🔧 Bash: Read recorder internals and existing tests
+
+`record` e `build_catalog` accettano già `locale`: manca solo l'opzione `--locale` in `main`. `base_url` viene da `HOFJ_BASE_URL`, come previsto dal piano. Guardo i test di `main`.
+
+- 🔧 Bash: Read main tests and fake HofJ helper
+
+RED: un test per la registrazione completa con `--locale en` e uno per `--build-only --locale en`.
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_record_catalog.py
+
+- 🔧 Bash: Run recorder tests, expect red
+
+Rossi per il motivo giusto: l'opzione non esiste. Il terzo test passa già: è una guardia sul default, non verifica codice nuovo. GREEN:
+
+- 🔧 Bash: Add --locale option, run tests and full suite
+
+- 🔧 Bash: Commit Task 1
