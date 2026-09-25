@@ -239,5 +239,90 @@ class BuildCatalogTest(unittest.TestCase):
         self.assertIn("è", text)  # ensure_ascii=False
 
 
+class RecordTest(unittest.TestCase):
+    def setUp(self):
+        self.raw = tempfile.mkdtemp()
+        self.logs = []
+
+    def test_paginates_and_fetches_details_only_for_active(self):
+        products = [item(i, archived=(i % 3 == 0)) for i in range(1, 8)]  # 3 e 6 archiviati
+        server = FakeHofj(products, page_size=5)
+        record_catalog.record(make_client(self.raw, server, self.logs), brand="weebora.com")
+        lists = [q for p, q, _ in server.calls if p == "/v1/products"]
+        self.assertEqual(len(lists), 2)
+        self.assertEqual(lists[0], {"limit": "100", "locale": "it", "brand": "weebora.com"})
+        self.assertEqual(lists[1]["cursor"], "p2")
+        details = [p for p, _, _ in server.calls if p.startswith("/v1/products/")]
+        self.assertEqual(details, ["/v1/products/%d" % i for i in (1, 2, 4, 5, 7)])
+        query = [q for p, q, _ in server.calls if p == "/v1/products/1"][0]
+        self.assertEqual(query, {"extended": "true", "locale": "it", "brand": "weebora.com"})
+        self.assertEqual(server.calls[0][0], "/v1/quota")
+        self.assertEqual(server.calls[1][2]["Authorization"], "Bearer SECRET-KEY")
+
+    def test_brand_omitted_when_none(self):
+        server = FakeHofj([item(1)])
+        record_catalog.record(make_client(self.raw, server, self.logs))
+        for path, query, _ in server.calls:
+            self.assertNotIn("brand", query, path)
+
+    def test_key_never_written_or_logged(self):
+        server = FakeHofj([item(1), item(2)])
+        record_catalog.record(make_client(self.raw, server, self.logs))
+        dump = "".join(self.logs)
+        for name in os.listdir(self.raw):
+            with open(os.path.join(self.raw, name), encoding="utf-8") as fh:
+                dump += fh.read()
+        self.assertNotIn("SECRET-KEY", dump)
+        self.assertNotIn("Authorization", dump)
+
+    def test_paces_within_cap_across_windows(self):
+        server = FakeHofj([item(i) for i in range(1, 96)])  # 95 attivi
+        record_catalog.record(make_client(self.raw, server, self.logs, cap=90))
+        quota_calls = [p for p, _, _ in server.calls if p == "/v1/quota"]
+        self.assertEqual(len(quota_calls), 2)           # sync iniziale + sync dopo l'attesa
+        self.assertLessEqual(server.max_window_used, 90)
+        self.assertEqual(len(server.calls), 1 + 95 + 2)  # lista + dettagli + 2 sync
+
+    def test_429_stops_and_keeps_partial_raw(self):
+        server = FakeHofj([item(i) for i in range(1, 6)], limit=3)
+        with self.assertRaises(api_explore.QuotaExceededError):
+            record_catalog.record(make_client(self.raw, server, self.logs))
+        self.assertGreaterEqual(len(os.listdir(self.raw)), 2)  # quota + lista salvate
+
+    def test_detail_error_is_recorded_not_fatal(self):
+        server = FakeHofj([item(1), item(2)], broken_ids=["1"])
+        record_catalog.record(make_client(self.raw, server, self.logs))
+        details = [p for p, _, _ in server.calls if p.startswith("/v1/products/")]
+        self.assertEqual(details, ["/v1/products/1", "/v1/products/2"])
+        with self.assertRaises(record_catalog.BuildError) as ctx:
+            record_catalog.build_catalog(self.raw)
+        self.assertIn("1", str(ctx.exception))
+
+    def test_list_error_raises(self):
+        server = FakeHofj([item(1)], list_status=400)
+        with self.assertRaises(RuntimeError) as ctx:
+            record_catalog.record(make_client(self.raw, server, self.logs))
+        self.assertIn("400", str(ctx.exception))
+        self.assertEqual([p for p, _, _ in server.calls if p.startswith("/v1/products/")], [])
+
+    def test_dry_run_plans_from_expected_counts(self):
+        server = FakeHofj([])
+        client = api_explore.Client(self.raw, api_explore.QuotaGuard(), "", base_url="https://api.test",
+                                    opener=server, log=self.logs.append, dry_run=True)
+        record_catalog.record(client, expected=(123, 92))
+        self.assertEqual(server.calls, [])
+        self.assertEqual(os.listdir(self.raw), [])
+        lists = [p for p, _, _ in client.planned if p == "/v1/products"]
+        self.assertEqual(len(lists), 2)
+        self.assertEqual(len(client.planned), 2 + 92)
+
+
+class CallPlanTest(unittest.TestCase):
+    def test_windows_and_total_include_quota_syncs(self):
+        self.assertEqual(record_catalog.call_plan(94, cap=90), (2, 96))   # 89 + 5
+        self.assertEqual(record_catalog.call_plan(89, cap=90), (1, 90))
+        self.assertEqual(record_catalog.call_plan(1, cap=90), (1, 2))
+
+
 if __name__ == "__main__":
     unittest.main()

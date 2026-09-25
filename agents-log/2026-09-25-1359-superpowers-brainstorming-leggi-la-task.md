@@ -203,3 +203,94 @@ Task 1 approvato (spec ✅, qualità approvata, un solo minor previsto dal piano
 - 🔧 Agent: Implement Task 2: build_catalog
 
 Task 2 in esecuzione; attendo la notifica dell'implementer.
+
+## Utente 14:28
+
+<task-notification>
+<task-id>ae69b50295c3da3ab</task-id>
+<tool-use-id>toolu_017yKePqFcUCiAX1KtfMBHrN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/ae69b50295c3da3ab.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 2: build_catalog" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>---
+
+**Status:** DONE
+
+**Commits created:**
+- `2965b4b` - Build catalog.json from recorded HofJ responses
+
+**Test summary:**
+All 43 tests pass (7 new BuildCatalogTest tests + 36 pre-existing tests); RED → GREEN confirmed.
+
+**Concerns:**
+None. Implementation complete, all constraints met (Python 3.7+, stdlib only, no network in tests).
+
+**Report file:**
+`/Users/matteodospina/orca/workspaces/vela/task-m1/.superpowers/sdd/2026-09-25-m1-fixture-catalogo/task-2-report.md`</result>
+<usage><subagent_tokens>52406</subagent_tokens><tool_uses>15</tool_uses><duration_ms>122034</duration_ms></usage>
+</task-notification>
+
+## Agente 14:28
+
+Task 2 implementato (commit `2965b4b`). Preparo il diff di review e dispatch del reviewer.
+
+- 🔧 Bash: Build task 2 review diff and update the ledger
+
+- 🔧 Agent: Review Task 2 (spec + quality)
+
+Review del Task 2 in corso; attendo l'esito.
+
+## Utente 14:32
+
+<task-notification>
+<task-id>a8b8d3298bf65ffc3</task-id>
+<tool-use-id>toolu_01XhvTbA7WcMCJ5n9r2jimeK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m1/4e8a03c7-fb5d-44a7-8959-87467956b24d/tasks/a8b8d3298bf65ffc3.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 2 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ Spec compliant
+
+Verified programmatically: extracted all three Python code blocks from the brief (`task-2-brief.md` Step 1 helpers, Step 1 `BuildCatalogTest`, Step 3 implementation) and confirmed each is an exact, byte-for-byte substring of the diff's added lines (names, signatures, docstrings, Italian comments, error-message wording, and code structure all match verbatim — no reformatting, no rewording).
+
+Checked against global constraints and the "Formato" spec:
+- `scripts/record_catalog.py:169-172` `BuildError(RuntimeError)` — matches.
+- `scripts/record_catalog.py:174-180` `detail_id` — matches signature/behavior (`extended == "true"` + `status == 200`).
+- `scripts/record_catalog.py:183-217` `build_catalog(raw_dir, locale=LOCALE, brand=None)` — produces exactly `{recorded_at, locale, brand, base_url, products, details}`; `products` is the full list including archived items, last record wins per id (dict overwrite preserves first-insertion position, per Python 3.7+ dict semantics — matches brief's explicit note); `details` built only for non-archived ids using `project_detail` (RF-28 projection) and `strip_media` (media-free raw); missing detail for an active product raises `BuildError` listing ids before any dict is constructed, so no file is ever written in that path (`write_catalog` is a separate, later call).
+- `scripts/record_catalog.py:220-225` `write_catalog` — creates parent dirs, UTF-8, `ensure_ascii=False`, trailing newline. Matches.
+- Placement verified from diff hunks: helpers inserted after `detail_of`/before `StripMediaTest`; `BuildCatalogTest` inserted after `ProjectDetailTest`/before `__main__`; `build_catalog`/`write_catalog` inserted after `project_detail` in `record_catalog.py` — all as the brief specifies.
+
+Named-risk checks (outside the diff, as permitted):
+- `scripts/api_explore.py:181-195` (`Client._save`) writes records with keys `path, params, status, body, requestedAt` (plus `index, method, authenticated, headers, elapsedMs`) — exactly what `build_catalog` consumes. `load_records` (`api_explore.py:270-274`) reads files matching `^\d{3}-GET-` sorted lexicographically, which equals numeric call order since the index is zero-padded to 3 digits — preserves "ordine API" as required.
+- `scripts/api_explore.py:38-53` `QuotaGuard(cap=...)` signature matches `make_client`'s `api_explore.QuotaGuard(cap=cap)` usage in the test file.
+- Import check: `re, os, json` already present in `scripts/record_catalog.py:15-17`; `io, json, os, re, tempfile, urllib.error, urllib.parse` already present in `tests/test_record_catalog.py:1-10` — no missing imports for the new code.
+- No network calls introduced in tests: `FakeHofj` is passed as `opener` to `api_explore.Client`, real `urllib.request.urlopen` never touched.
+- No f-strings, no `-&gt;`-style runtime type annotations, no 3.8+ syntax — Python 3.7 compatible as claimed.
+- `scripts/api_explore.py` itself is untouched by this diff (confirmed by the diff file, which shows changes only to `record_catalog.py` and `test_record_catalog.py`).
+- Key is never touched by this diff — no key handling logic was added or modified.
+
+### Strengths
+- Exact, verifiable transcription of the brief's mandated code — zero deviation in signatures, docstrings, error strings, or logic.
+- Test suite (`tests/test_record_catalog.py:196-260`) covers every edge case called out in the format spec: mixed archived/active build, brand pass-through, wrong-locale/failed-call exclusion, missing-detail error with correct id set (and archived ids correctly excluded from the "missing" list), last-record-wins on duplicate id, empty-dir error, and `write_catalog`'s directory creation/newline/unicode behavior.
+- `FakeHofj`/`make_client`/`record_pages_and_details` are self-contained, fully offline test doubles with no reliance on external state.
+
+### Issues
+None found — Critical, Important, and Minor are all empty.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The diff is a verbatim, verified transcription of the brief's exact code (confirmed via substring diff against the brief's code blocks), correctly placed, fully compatible with the existing `api_explore` record schema and Python 3.7 constraint, with no network calls in tests and complete edge-case coverage of the specified fixture format.</result>
+<usage><subagent_tokens>71140</subagent_tokens><tool_uses>13</tool_uses><duration_ms>193397</duration_ms></usage>
+</task-notification>
+
+## Agente 14:32
+
+Task 2 approvato senza rilievi. Ledger e dispatch del Task 3.
+
+- 🔧 Bash: Record task 2 completion in the ledger
+
+- 🔧 Agent: Implement Task 3: record e call_plan
+
+Task 3 in esecuzione; attendo l'implementer.

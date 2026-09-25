@@ -112,3 +112,47 @@ def write_catalog(catalog, out_path):
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(catalog, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
+
+
+def record(client, locale=LOCALE, brand=None, expected=(EXPECTED_TOTAL, EXPECTED_ACTIVE)):
+    """Scarica la lista paginata e il dettaglio esteso dei prodotti non archiviati.
+
+    In dry-run non conosce i numeri reali: pianifica dalle stime `expected`
+    (prodotti totali, non archiviati) e restituisce None. Un dettaglio che fallisce
+    non ferma il giro: sarà build_catalog a segnalare gli id mancanti.
+    """
+    if client.dry_run:
+        total, active = expected
+        pages = max(1, -(-total // PAGE_LIMIT))
+        for n in range(pages):
+            client.get("/v1/products", {"limit": PAGE_LIMIT, "locale": locale, "brand": brand,
+                                        "cursor": "pagina-%d" % (n + 1) if n else None})
+        for _ in range(active):
+            client.get("/v1/products/{id}", {"extended": "true", "locale": locale, "brand": brand})
+        return None
+
+    cursor, products = None, []
+    while True:
+        page = client.get("/v1/products", {"limit": PAGE_LIMIT, "locale": locale,
+                                           "brand": brand, "cursor": cursor})
+        if page["status"] != 200:
+            raise RuntimeError("lista prodotti: HTTP %d %s" % (page["status"],
+                                                               json.dumps(page["body"])[:300]))
+        products.extend(page["body"].get("data") or [])
+        cursor = (page["body"].get("meta") or {}).get("nextCursor")
+        if not cursor:
+            break
+    active = [p for p in products if not p.get("archived")]
+    client.log("%d prodotti in lista, %d non archiviati: scarico i dettagli"
+               % (len(products), len(active)))
+    for product in active:
+        client.get("/v1/products/%s" % product["id"],
+                   {"extended": "true", "locale": locale, "brand": brand})
+    return products
+
+
+def call_plan(n_calls, cap=api_explore.CAP_PER_WINDOW):
+    """(finestre da 60 s, chiamate autenticate totali) per n_calls, contando un sync
+    di /v1/quota per finestra: ogni finestra ospita al più cap - 1 chiamate utili."""
+    windows = max(1, -(-n_calls // (cap - 1)))
+    return windows, n_calls + windows
