@@ -278,3 +278,15 @@ continua
 - 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/vela/surfaces/rest.py
 
 - 🔧 Bash: Wire REST router into app and run tests
+
+Tutto verde, anche l'intera suite. Committo il Task 4.
+
+- 🔧 Bash: Commit Task 4
+
+**Task 5**, fase RED: test di rifiuto, accettazione, stato dell'ordine e flusso completo.
+
+- 🔧 Bash: Write Task 5 tests and watch them fail
+
+Tutti rossi perché le tre route mancano. Per gli id sconosciuti la risposta è già un 404, ma arriva dalla route inesistente e non nomina la risorsa. Fase GREEN:
+
+- 🔧 Bash: Add remaining endpoints and run tests

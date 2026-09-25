@@ -71,6 +71,14 @@ class IntentIn(BaseModel):
     profile: Optional[ProfileIn] = None
 
 
+class RejectIn(BaseModel):
+    reason: Optional[str] = None
+
+
+class AcceptIn(BaseModel):
+    traveler: Optional[ProfileIn] = None
+
+
 router = APIRouter(prefix="/v1", tags=["v1"], dependencies=[Depends(require_token)])
 
 
@@ -82,3 +90,22 @@ def create_intent(body: IntentIn, vela: Vela = Depends(get_vela)) -> JSONRespons
 @router.get("/intents/{intent_id}/proposal")
 def get_proposal(intent_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse:
     return reply(vela.get_proposal(intent_id))
+
+
+@router.post("/proposals/{proposal_id}/reject")
+def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
+                    vela: Vela = Depends(get_vela)) -> JSONResponse:
+    reason = body.reason if body is not None else None
+    return reply(vela.reject_proposal(proposal_id, reason or ""))
+
+
+@router.post("/proposals/{proposal_id}/accept")
+def accept_proposal(proposal_id: str, body: Optional[AcceptIn] = None,
+                    vela: Vela = Depends(get_vela)) -> JSONResponse:
+    traveler = to_profile(body.traveler) if body is not None else None
+    return reply(vela.accept_proposal(proposal_id, traveler))
+
+
+@router.get("/orders/{order_id}")
+def get_order_status(order_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse:
+    return reply(vela.get_order_status(order_id))

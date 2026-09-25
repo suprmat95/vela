@@ -2,6 +2,7 @@
 import random
 import unittest
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
@@ -167,3 +168,155 @@ class IntentEndpointsTest(unittest.TestCase):
                               404, "not-found")
         self.assertIn("intento", body["detail"])
         self.assertIn("nope", body["detail"])
+
+
+ENDPOINTS = [("post", "/v1/intents"), ("get", "/v1/intents/i/proposal"),
+             ("post", "/v1/proposals/p/reject"), ("post", "/v1/proposals/p/accept"),
+             ("get", "/v1/orders/o")]
+
+
+class EveryEndpointAuthTest(unittest.TestCase):
+    def test_every_endpoint_requires_token(self):
+        c, _ = make_client()
+        for method, path in ENDPOINTS:
+            with self.subTest(path=path):
+                assert_problem(self, getattr(c, method)(path), 401, "unauthorized")
+
+
+def proposal_for(c, iid):
+    r = c.get("/v1/intents/%s/proposal" % iid, headers=AUTH)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+class ProposalEndpointsTest(unittest.TestCase):
+    def setUp(self):
+        self.c, self.vela = make_client()
+        self.iid = new_intent(self.c)["intent_id"]
+        self.first = proposal_for(self.c, self.iid)
+
+    def test_reject_returns_a_different_product(self):
+        r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"],
+                        json={"reason": "troppo caro"}, headers=AUTH)
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["outcome"], "proposal")
+        self.assertNotEqual(body["product"]["product_id"], self.first["product"]["product_id"])
+        assert_single_product(self, body)
+
+    def test_reject_without_body(self):
+        r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"], headers=AUTH)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["outcome"], "proposal")
+
+    def test_reject_with_null_reason(self):
+        r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"],
+                        json={"reason": None}, headers=AUTH)
+        self.assertEqual(r.status_code, 200, r.text)
+
+    def test_reject_until_no_match(self):
+        c, _ = make_client(products=[make_product(1)])
+        iid = new_intent(c, text="padel a ottobre, siamo in due")["intent_id"]
+        pid = proposal_for(c, iid)["proposal_id"]
+        body = c.post("/v1/proposals/%s/reject" % pid, headers=AUTH).json()
+        self.assertEqual(body["outcome"], "no_match")
+        self.assertEqual(body["failed_criterion"], "rejected")
+
+    def test_double_accept_returns_same_order(self):
+        path = "/v1/proposals/%s/accept" % self.first["proposal_id"]
+        r1 = self.c.post(path, json={}, headers=AUTH)
+        r2 = self.c.post(path, headers=AUTH)
+        self.assertEqual((r1.status_code, r2.status_code), (201, 201))
+        self.assertEqual(r1.json()["outcome"], "order")
+        self.assertEqual(r1.json()["order_id"], r2.json()["order_id"])
+        self.assertTrue(r1.json()["payment_url"].startswith("http://test/replay/checkout/"))
+        self.assertNotIn("http", r1.json()["say"])
+
+    def test_missing_traveler_data_then_complete(self):
+        iid = new_intent(self.c, profile=None)["intent_id"]
+        path = "/v1/proposals/%s/accept" % proposal_for(self.c, iid)["proposal_id"]
+        r = self.c.post(path, headers=AUTH)
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["outcome"], "missing_traveler_data")
+        self.assertIn("email", body["missing"])
+        self.assertIn("participants[0].last_name", body["missing"])
+        assert_single_product(self, body)
+        r = self.c.post(path, json={"traveler": FULL}, headers=AUTH)
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertEqual(r.json()["outcome"], "order")
+
+    def test_order_status(self):
+        order = self.c.post("/v1/proposals/%s/accept" % self.first["proposal_id"],
+                            headers=AUTH).json()
+        r = self.c.get("/v1/orders/%s" % order["order_id"], headers=AUTH)
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["outcome"], "order_status")
+        self.assertEqual(body["status"], "awaiting_payment")
+        self.assertIsNone(body["booking_code"])
+        assert_single_product(self, body)
+
+    def test_unknown_ids_are_404(self):
+        cases = [("post", "/v1/proposals/nope/reject", "proposta"),
+                 ("post", "/v1/proposals/nope/accept", "proposta"),
+                 ("get", "/v1/orders/nope", "ordine")]
+        for method, path, label in cases:
+            with self.subTest(path=path):
+                body = assert_problem(self, getattr(self.c, method)(path, headers=AUTH),
+                                      404, "not-found")
+                self.assertIn(label, body["detail"])
+
+    def test_invalid_traveler_is_422(self):
+        r = self.c.post("/v1/proposals/%s/accept" % self.first["proposal_id"],
+                        json={"traveler": {"participants": "Bo"}}, headers=AUTH)
+        assert_problem(self, r, 422, "invalid-request")
+
+    def test_unexpected_domain_error_is_500_problem(self):
+        def boom(order_id):
+            raise RuntimeError("segreto interno")
+        self.vela.get_order_status = boom
+        r = self.c.get("/v1/orders/x", headers=AUTH)
+        assert_problem(self, r, 500, "internal-error")
+        self.assertNotIn("segreto", r.text)
+
+    def test_openapi_lists_the_five_endpoints(self):
+        paths = self.c.get("/openapi.json").json()["paths"]
+        for path in ("/v1/intents", "/v1/intents/{intent_id}/proposal",
+                     "/v1/proposals/{proposal_id}/reject", "/v1/proposals/{proposal_id}/accept",
+                     "/v1/orders/{order_id}"):
+            self.assertIn(path, paths)
+
+
+class FullFlowTest(unittest.TestCase):
+    def test_intent_to_confirmed_over_rest(self):
+        """§10.3 in replay: intento → proposta → rifiuto → altra → accetta ×2 → checkout → confirmed."""
+        c, vela = make_client()
+        bodies = []
+
+        def call(method, path, expected, **kw):
+            r = getattr(c, method)(path, headers=AUTH, **kw)
+            self.assertEqual(r.status_code, expected, r.text)
+            bodies.append(r.json())
+            return r.json()
+
+        intent = call("post", "/v1/intents", 201, json={"text": INTENT, "profile": FULL})
+        first = call("get", "/v1/intents/%s/proposal" % intent["intent_id"], 200)
+        second = call("post", "/v1/proposals/%s/reject" % first["proposal_id"], 200,
+                      json={"reason": "troppo caro"})
+        self.assertNotEqual(second["product"]["product_id"], first["product"]["product_id"])
+        order = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 201)
+        again = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 201)
+        self.assertEqual(again["order_id"], order["order_id"])
+        status = call("get", "/v1/orders/%s" % order["order_id"], 200)
+        self.assertEqual(status["status"], "awaiting_payment")
+
+        paid = c.get(urlparse(order["payment_url"]).path)   # checkout replay: nessun token
+        self.assertEqual(paid.status_code, 200)
+
+        final = call("get", "/v1/orders/%s" % order["order_id"], 200)
+        self.assertEqual(final["status"], "confirmed")
+        self.assertRegex(final["booking_code"], r"^R-\d{6}$")
+        self.assertIn(final["booking_code"], final["say"])
+        for body in bodies:                                   # RF-10 su ogni risposta
+            assert_single_product(self, body)
