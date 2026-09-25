@@ -10,11 +10,15 @@ configurato in `.claude/settings.json`) lancia `scripts/agents_log.py --hook`, c
 1. legge il transcript JSONL della sessione corrente (`transcript_path` fornito dall'hook);
 2. lo converte in Markdown;
 3. lo scrive in `agent-log/YYYY-MM-DD-HHMM-<slug>.md` (data e ora locali del primo
-   messaggio, slug del primo messaggio utente);
+   messaggio, slug del primo messaggio utente); se quel nome è già occupato dal log di
+   un'altra sessione (stessa ora di inizio e stesso slug, per esempio due worktree avviati
+   con lo stesso prompt), aggiunge le prime 8 cifre dell'id sessione:
+   `agent-log/YYYY-MM-DD-HHMM-<slug>-<id8>.md`;
 4. salva accanto una copia identica del transcript, `agent-log/YYYY-MM-DD-HHMM-<slug>.jsonl`;
 5. esegue `git add` su entrambi i file, così entrano nello stesso commit.
 
-I file di una sessione hanno sempre lo stesso nome: a ogni commit vengono rigenerati da zero.
+I file di una sessione hanno sempre lo stesso nome (con o senza suffisso): a ogni commit vengono
+rigenerati da zero.
 Lo script esce sempre con codice 0: un errore di trascrizione finisce su stderr ma non
 blocca il commit.
 

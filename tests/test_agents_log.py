@@ -218,6 +218,40 @@ class TranscribeTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tmp, "agent-log")))
 
 
+class NameCollisionTest(unittest.TestCase):
+    """Due sessioni con stessa ora di inizio e stesso slug non devono sovrascriversi."""
+    OTHER = "e37af65c-57b4-4f16-9c63-cd3a306b634c"
+
+    def run_transcribe(self, tmp, fixture):
+        transcript = os.path.join(tmp, "t.jsonl")
+        with open(transcript, "w", encoding="utf-8") as f:
+            f.write("\n".join(fixture) + "\n")
+        return agents_log.transcribe(transcript, os.path.join(tmp, "agent-log"))
+
+    def test_same_session_keeps_its_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first, _ = self.run_transcribe(tmp, FIXTURE)
+            second, _ = self.run_transcribe(tmp, FIXTURE)
+            self.assertEqual(first, second)
+            self.assertEqual(len(os.listdir(os.path.join(tmp, "agent-log"))), 2)
+
+    def test_other_session_with_same_name_gets_a_suffix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            other = [x.replace(SESSION, self.OTHER) for x in FIXTURE]
+            theirs_md, _ = self.run_transcribe(tmp, other)
+            with open(theirs_md, encoding="utf-8") as f:
+                theirs_text = f.read()
+            mine_md, mine_jsonl = self.run_transcribe(tmp, FIXTURE)
+            self.assertEqual(mine_md, theirs_md[:-3] + "-" + SESSION[:8] + ".md")
+            self.assertEqual(mine_jsonl, mine_md[:-3] + ".jsonl")
+            with open(theirs_md, encoding="utf-8") as f:
+                self.assertEqual(f.read(), theirs_text)
+            with open(mine_md, encoding="utf-8") as f:
+                self.assertIn(SESSION, f.read())
+            again, _ = self.run_transcribe(tmp, FIXTURE)   # commit successivo: stesso file suffissato
+            self.assertEqual(again, mine_md)
+
+
 class HookEndToEndTest(unittest.TestCase):
     def run_hook(self, cwd, command, transcript):
         payload = {"session_id": SESSION, "transcript_path": transcript, "cwd": cwd,
