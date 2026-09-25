@@ -51,6 +51,15 @@ class SqliteUpgradeTest(unittest.TestCase):
                 command.downgrade(alembic_config(), "base")
                 self.assertEqual(versions(url), [])
 
+    def test_upgrade_keeps_existing_loggers_enabled(self):
+        import logging
+        logger = logging.getLogger("vela.test_migrations_probe")
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "head")
+        self.assertFalse(logger.disabled)
+
     def test_upgrade_without_database_url_fails_explicitly(self):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(RuntimeError) as ctx:

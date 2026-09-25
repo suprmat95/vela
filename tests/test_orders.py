@@ -126,6 +126,8 @@ class RunnerTest(unittest.TestCase):
     def test_thread_runner_swallows_unexpected_errors(self):
         s = service(order("a", OrderStatus.PAID_PENDING_BOOKING), hofj=FakeHofJ(fail_booking=RuntimeError("boom")))
         runner = BookingRunner(s)
-        runner.submit("a")
-        runner.shutdown(wait=True)
+        with self.assertLogs("vela.booking", "ERROR") as logs:
+            runner.submit("a")
+            runner.shutdown(wait=True)
+        self.assertIn("a", logs.output[0])
         self.assertEqual(s.get("a").status, OrderStatus.PAID_PENDING_BOOKING)   # riprovato al prossimo avvio
