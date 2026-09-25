@@ -40,7 +40,7 @@ class CatalogFixtureTest(unittest.TestCase):
         active = [p["id"] for p in self.products if not p["archived"]]
         self.assertEqual(sorted(active), sorted(self.details))
         self.assertEqual(len(active), len(set(active)))       # nessun duplicato
-        self.assertGreaterEqual(len(active), 80)              # atteso ~92 (docs/api/counts.md)
+        self.assertGreaterEqual(len(active), 70)              # 77 attivi in it il 2026-09-25 (docs/fixtures.md)
 
     def test_list_items_have_pricing_and_dates(self):
         for product in self.products:

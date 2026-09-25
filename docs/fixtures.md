@@ -52,3 +52,8 @@ il catalogo `it` ne conta 110 in lista e 77 non archiviati, cioè meno prodotti 
 meno prodotti attivi (-15) rispetto alla stima usata per pianificare le chiamate. Di
 conseguenza la registrazione reale ha richiesto solo 80 chiamate autenticate in una finestra,
 contro le ~96 in 2 finestre dichiarate prima della corsa (nessun 429, nessuno STOP).
+
+- Il catalogo `it` è un insieme di voci CMS distinto da quello `en`, non un sottoinsieme o una
+  traduzione parallela: gli id vanno da 181 a 1093 (in `en`: 12-1088) e i `categoryId` sono
+  prevalentemente 8/7/9 (in `en`: 2/1/3; 108 prodotti su 110 in `it`, più due outlier isolati
+  con `categoryId` 20 e 28). Gli id non sono quindi confrontabili tra le due locale.
