@@ -2,7 +2,8 @@
 
 Contiene i paesi e le destinazioni presenti in `fixtures/catalog.json` con alias in italiano e
 inglese. `tests/test_geo.py` verifica che ogni destinazione della fixture sia coperta: quando
-la fixture cambia, il test dice quali voci aggiungere. M9 estende con `geohierarchy`.
+la fixture cambia, il test dice quali voci aggiungere. M11 aggiunge la gerarchia statica
+`PARENTS` (città > regione > paese); `geohierarchy` della fixture non si usa perché è piatto.
 """
 import re
 from typing import Optional
@@ -46,6 +47,19 @@ PLACES = [
     ("Baleari", "region", "ES", "balearic islands", "baleares"),
 ]
 
+# luogo → luogo che lo contiene (solo tra voci di PLACES); il paese chiude sempre la catena
+PARENTS = {
+    "Lanzarote": "Canarie", "Tenerife": "Canarie", "Fuerteventura": "Canarie",
+    "Palma de Mallorca": "Maiorca", "Maiorca": "Baleari", "Minorca": "Baleari", "Ibiza": "Baleari",
+    "Firenze": "Toscana", "Pietrasanta": "Toscana",
+}
+
+# complemento di luogo quando "in <paese>" / "a <luogo>" non suona italiano
+_LOCATIVE = {"Canarie": "alle Canarie", "Baleari": "alle Baleari", "Toscana": "in Toscana",
+             "Sardegna": "in Sardegna"}
+
+_BY_NAME = {place[0]: Area(place[1], place[0], place[2]) for place in PLACES}
+
 _WORD = "a-zà-ÿ'"
 
 
@@ -79,6 +93,38 @@ def area_of_destination(title: Optional[str], country_code: Optional[str]) -> Op
     found = find_area(title)
     if found is not None:
         return found
-    if country_code in COUNTRIES:
-        return Area("country", COUNTRIES[country_code], country_code)
+    return country_area(country_code)
+
+
+def country_area(code: Optional[str]) -> Optional[Area]:
+    if code not in COUNTRIES:
+        return None
+    return Area("country", COUNTRIES[code], code)
+
+
+def ancestors(area: Area) -> list:
+    """L'area e chi la contiene, fino al paese: Palma de Mallorca → Maiorca → Baleari → Spagna."""
+    chain = [area]
+    while chain[-1].name in PARENTS:
+        chain.append(_BY_NAME[PARENTS[chain[-1].name]])
+    if area.kind != "country":
+        country = country_area(area.country_code)
+        if country is not None:
+            chain.append(country)
+    return chain
+
+
+def common_region(a: Area, b: Area) -> Optional[Area]:
+    """La prima area non nazionale che contiene sia `a` sia `b` (Lanzarote, Tenerife → Canarie)."""
+    others = ancestors(b)
+    for candidate in ancestors(a):
+        if candidate.kind != "country" and candidate in others:
+            return candidate
     return None
+
+
+def where(area: Area) -> str:
+    """Complemento di luogo: "in Spagna", "a Lanzarote", "alle Canarie"."""
+    if area.name in _LOCATIVE:
+        return _LOCATIVE[area.name]
+    return ("in %s" if area.kind == "country" else "a %s") % area.name

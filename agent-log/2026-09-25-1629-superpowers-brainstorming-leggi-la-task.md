@@ -259,3 +259,50 @@ Il codice e i test del piano sono verificati sulla copia: 161 test verdi. Ora sc
 - 🔧 Write /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m11/6c47ab9d-e23a-4141-b21a-16d31d3b4d9b/scratchpad/plan_template.md
 
 - 🔧 Bash: Render plan into docs/plans with verified code
+
+Il piano è scritto. Lo committo; solo il file del piano.
+
+- 🔧 Bash: Commit the M11 plan
+
+Ho scritto il piano in `docs/plans/2026-09-25-m11-chooser-v2.md` e l'ho committato (`f93df22`). Il codice e i test che contiene li ho provati prima su una copia del repo nello scratchpad: 161 test del dominio verdi. Nel repo ho aggiunto solo il file del piano.
+
+**Microtask** (TDD, un commit ciascuno):
+1. **`geo.py`:** gerarchia statica `PARENTS` (Canarie, Baleari/Maiorca, Toscana) e le funzioni `ancestors`, `common_region`, `country_area` e `where` («alle Canarie», «in Sardegna»). Test in `tests/test_geo_hierarchy.py`.
+2. **`say.py`:** `on_date` («l'8 ottobre»), preposizioni corrette, `say_no_match(criterion, criteria)` che cita il valore mancante; una riga in `usecases.py`.
+3. **`is_trip`:** esclude la Weebora Gift Card (282), l'unico non-viaggio attivo nella fixture.
+4. **Chooser v2:** filtri con i rifiutati per ultimi, `departure()` per finestre fisse e aperte, punteggio d'area 0-3, ordinamento (area, budget sul totale, prezzo, id), motivazione di al massimo 2 frasi che dichiara i compromessi. Firma pubblica invariata.
+5. **Test sulla fixture reale:** tabella di 11 intenti con le prime tre scelte attese, casi limite (Grecia, budget di 50 €, tennis, marzo 2028) e le proprietà controllate rifiutando tutto in sequenza. Include un passo che rompe apposta l'ordine dei filtri per verificare che i test se ne accorgano.
+6. **Chiusura:** decisioni in `docs/decisions.md` e verifica finale. Il diff non deve toccare `intent.py`, `models.py`, adapter, porte, superfici, migrazioni e dipendenze.
+
+**Da sapere prima di approvare:**
+- **Id attesi:** li ho ricavati eseguendo il codice sulla fixture registrata il 2026-09-25 e li ho controllati a mano. Nella demo §10.1 la prima proposta è ora Torre del Mar a 558 € in totale. Se la fixture viene rigenerata, la tabella va rivista; i test di proprietà no.
+- **Weekend e finestre aperte:** un «weekend» a Lanzarote propone il prodotto 186 dal 10 al 16 ottobre. È la regola che hai scelto (partenza nel periodo, ritorno anche dopo); segnalo il caso perché può sembrare strano.
+- **Prodotti senza destinazione:** per 323 e 326 l'area si ricava dal titolo. È un default che ho aggiunto io durante il prototipo e non era tra le domande: è registrato tra le decisioni del piano.
+
+Il piano indica `superpowers:subagent-driven-development` come metodo consigliato; l'alternativa è eseguirlo io in questa sessione con una revisione finale. Ti consiglio subagent-driven: le 6 task sono sequenziali e le interfacce tra una e l'altra sono scritte nel piano, quindi un revisore per task costa poco e intercetta subito una regola applicata male. Ti torna il piano, e con quale metodo vuoi eseguirlo?
+
+## Utente 17:23
+
+/superpowers:test-driven-development: docs/plans/2026-09-25-m11-chooser-v2.md
+
+## Agente 17:24
+
+Eseguo il piano in questa sessione, in TDD, una task alla volta: prima il test, lo vedo fallire, poi il codice. Parto dalla Task 1: gerarchia in `geo.py`.
+
+- 🔧 Bash: Add geo hierarchy test and watch it fail
+
+- 🔧 Bash: Show failure reason
+
+Fallisce per il motivo atteso. Ora il codice, come scritto nel piano.
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
+
+- 🔧 Bash: Run geo tests and full suite
