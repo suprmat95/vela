@@ -460,3 +460,19 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, T
 | Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
 | Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
 
+
+## 2026-09-25 — M7: prima prenotazione reale end-to-end
+
+Origine: intervista sulla macro task M7, piano in
+`docs/plans/2026-09-25-m7-prima-prenotazione-reale.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ambiente live | HofJ staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`) con un catalogo di staging registrato apposta | Un booking su staging non crea una prenotazione vera; è l'ambiente verificato in M5. La fixture di M1 è il catalogo di produzione e i suoi id non esistono su staging |
+| Locale | Catalogo di staging registrato in `en`; `HofJHttp` usa il `locale` della fixture caricata, nessuna variabile d'ambiente nuova | Su staging il prodotto 118 dà 502 in `it` e funziona in `en`; le frasi `say` seguono comunque la lingua del viaggiatore |
+| Catalogo sul DB | Una fixture per ambiente (`fixtures/catalog.json` di produzione per replay e test, `fixtures/catalog-staging.json`). In live si sceglie la fixture con `base_url` = `HOFJ_BASE_URL`, altrimenti l'app non parte. Al boot, se gli id attivi nel DB differiscono da quelli della fixture: upsert e prodotti assenti marcati `archived` | Il DB di Render ha il catalogo di produzione referenziato da proposte e ordini: niente DELETE. Il riallineo solo su differenza preserva i flag `bookable` di RF-33 tra un riavvio e l'altro |
+| Criterio 4 | Prodotto trappola dichiarato nella fixture di staging: clone di un prodotto reale, id numerico inesistente su HofJ, prezzo più basso, `vela_trap: true` | Prova ripetibile; HofJ risponde con un vero errore di prodotto (502, upstream 404) |
+| Criterio 3 e latenza | Nuovo `scripts/rest_flow.py` cronometrato | Misura ripetibile per M13 |
+| Criterio 1 | Eseguito dall'utente in claude.ai col connector Vela; pagamento 4242 dall'utente; l'agente guida e registra | Lettura letterale di §10.1, ripetibile per il video |
+| `render.yaml` | `VELA_UPSTREAM_MODE: value: live` | Un valore cambiato solo in dashboard può essere riportato a `replay` da una sincronizzazione del Blueprint |
+| Allineamento del branch | `task/m7` portato a `master` (con M5) con un fast-forward | Nessun commit proprio sul branch, nessuna riscrittura della storia |
