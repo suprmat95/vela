@@ -74,10 +74,11 @@ regole prevalgono sul resto del piano dove differiscono:
   addebita "the entire open amount". `get_itinerary` legge `Itinerary(total=openAmount)`;
   `checkout.total` è registrato solo nei test dell'adapter come campo ignorato.
   `Money.amount` è una stringa, a volte senza decimali (`"337"`): `Decimal(amount)`.
-- **Booking**: `create_booking` manda `{itineraryId, paymentType: "full"}`. Non si inoltra il
-  `paymentIntentId`, perché il pagamento previsto è sul PaymentIntent del brand site
-  (decisione su M6 qui sotto). `PaymentProof` resta nella porta ma l'adapter HTTP ignora
-  `payment_intent_id`.
+- **Booking**: `create_booking` manda `{itineraryId, paymentType: "full", paymentIntentId,
+  paymentStatus}` da `PaymentProof` (il `payment_ref` salvato dal webhook o dal polling è l'id
+  del PaymentIntent). OAS: "forwarded to the brand site when present"; è uno dei due modi con
+  cui HofJ può riconoscere il pagamento (l'altro è `metadata.checkoutRefId`, messo da M6).
+  Con `payment_intent_id` vuoto i due campi non vengono inviati.
 - **Codice di prenotazione** = la stringa `data` restituita, qualunque forma abbia (`R-…` da
   DOCS, `itineraryId` osservato senza pagamento HofJ). Nessuna validazione del formato.
 - **Envelope reale**: `meta` è `{now}` o `{}`; `PUT customer` e `PUT pax` rispondono
@@ -87,6 +88,69 @@ regole prevalgono sul resto del piano dove differiscono:
 - **Lingua**: `HofJHttp` usa `locale` del costruttore (default `it`). Un prodotto non tradotto
   dà 502 con 404 upstream → `ProductError` → sostituzione (RF-17). Nessun fallback su `en` in
   M5; il rischio è annotato per M7.
+
+## Integrazione con M6 e M9 (decisa il 2026-09-25, prima del Task 2)
+
+`master` contiene M9; M6 è completa su `task/m6` (Checkout Session, webhook, `stripe_events`).
+Ordine dei merge e rebase di `task/m5`: **da confermare con l'utente prima del Task 2**. Le
+regole sotto valgono sul codice dopo il rebase e prevalgono sul resto del piano.
+
+- **Migrazione**: M6 ha `0003_stripe_events`. La migrazione di M5 è `0004_jobs_quota`
+  (`down_revision = "0003"`); `test_migrations.py` attende head `"0004"`.
+- **Frasi**: M9 ha reso le frasi bilingui (`lang` da `criteria.language`, firma
+  `say_status(status, booking_code, failure_reason, lang="it", total=None)` dopo il merge M6+M9).
+  Il Task 9 scrive ogni frase nuova in italiano e in inglese, con un test per lingua.
+- **Porta dei pagamenti**: `create_payment_link(order, description)` (titolo del prodotto) e
+  `PaymentsError` (M6). Il passo 5 del job d'acquisto passa il titolo; `PaymentsError` è trattato
+  come `UpstreamError` (retry nella finestra successiva, al terzo tentativo `failed`), senza
+  consumare quota HofJ.
+- **Accept**: `_ensure_link` di M6 sparisce: il link lo crea solo il job. La 503
+  `payments-unavailable` di REST e la frase MCP di M6 non si applicano più all'accept.
+- **Webhook**: `checkout.session.completed` fa `mark_paid` e **accoda un job `booking`** al posto
+  di `runner.submit` (punto di aggancio già segnato da M6 in `vela/surfaces/webhooks.py`).
+  La logica "pagamento arrivato" (controlli di stato, valuta, importo, `mark_paid`, accodamento)
+  si sposta in `OrderService.settle_payment(order_id, status, amount_cents, currency,
+  payment_ref)`, usata dal webhook e dal polling.
+- **Eventi di HofJ**: l'account Stripe è condiviso con HofJ; un evento senza `metadata.order_id`
+  è registrato a livello `debug`, non `warning`.
+- **Modo live**: la scelta dei pagamenti è di M6 (`STRIPE_SECRET_KEY` → `StripePayments`). Il
+  `RuntimeError` "live in attesa di M6" del Task 16 non si fa: `live` costruisce `HofJHttp` e i
+  pagamenti di M6.
+- **Stato dell'ordine**: M6 ha già `total`, `currency`, `payment_url` in `OrderStatusResponse`; M5
+  aggiunge solo gli altri campi del contratto.
+
+### Task 13b: polling dei pagamenti (riserva del webhook)
+
+Il webhook va registrato sull'account Stripe di HofJ (domanda 3 di `docs/hofj-questions.md`).
+Finché non c'è, e dopo come recupero di eventi persi, un job controlla lo stato delle sessioni.
+
+**Files:** Modify `vela/ports/payments.py`, `vela/adapters/stripe_links.py`,
+`vela/adapters/stripe_fake.py`, `vela/domain/orders.py`, `vela/domain/jobs.py`,
+`vela/domain/purchase.py`, `vela/surfaces/webhooks.py`, `vela/config.py`; Test
+`tests/test_payment_poll.py`, `tests/test_stripe_links.py`, `tests/test_webhooks.py`.
+
+**Produces:**
+- `PaymentsPort.link_status(reference) -> LinkStatus(state: "open"|"paid"|"expired",
+  amount_cents, currency, payment_ref)`; `StripePayments` usa `checkout.sessions.retrieve`
+  (errori → `PaymentsError`); `FakePayments` legge lo stato dal checkout di replay.
+- `JobKind.PAYMENT_CHECK`: accodato dal passo 5 del job d'acquisto con `run_after = now +
+  payment_poll_seconds` (nuovo campo di `Settings`, default 60). Nessuna quota HofJ.
+- Esito: `paid` → `settle_payment` (che accoda il `booking`); `expired` → `expire`; `open` →
+  ripianificato; ordine non più `awaiting_payment` (già pagato dal webhook, annullato, scaduto) →
+  job chiuso senza effetti. `PaymentsError` → ripianificato.
+
+**Test:**
+- `test_poll_paid_session_settles_and_enqueues_booking_once`
+- `test_poll_open_session_reschedules`
+- `test_poll_expired_session_expires_order`
+- `test_poll_after_webhook_is_noop` (nessun secondo booking)
+- `test_webhook_after_poll_is_noop`
+- `test_poll_amount_mismatch_does_not_settle`
+- `test_poll_uses_no_hofj_quota`
+- `test_stripe_link_status_maps_session` (client finto: `complete`/`paid` → paid, `expired`, `open`)
+- `test_webhook_event_without_order_id_logs_debug`
+
+- [ ] TDD, poi commit «Poll Stripe sessions as a fallback for the payment webhook».
 
 ## Global Constraints
 
@@ -531,12 +595,12 @@ purchase_waiting(now) -> bool
 
 - [ ] TDD, poi commit «Add the HofJ HTTP adapter with error mapping».
 
-### Task 16: modo `live`
+### Task 16: modo `live` (vedi "Integrazione con M6 e M9": niente `RuntimeError`)
 
 **Files:** Modify `vela/app.py`, `tests/test_app_replay.py`.
 
 **Test:**
-- `test_live_builds_http_adapter_then_refuses_without_m6` (il `RuntimeError` cita `M6` e `pagamenti`)
+- `test_live_builds_http_adapter_and_m6_payments`
 - `test_live_requires_hofj_settings` (manca `HOFJ_API_KEY` → errore chiaro, senza stampare valori)
 
 - [ ] TDD, poi commit «Build the live HofJ adapter and wait for M6 payments».

@@ -1840,3 +1840,192 @@ si, scrivi la domanda per HofJ
 - 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/docs/hofj-questions.md
 
 - 🔧 Bash: Commit the HofJ questions document
+
+Ho scritto la domanda per HofJ in `docs/hofj-questions.md`, committata su `task/m5` (`2f318eb`). Non l'ho inviata: tocca a te.
+
+Il documento contiene:
+- **Contesto:** in poche righe, il flusso di Vela.
+- **Cosa abbiamo osservato:** le due prove su staging, con gli id dei carrelli e dei PaymentIntent, così HofJ può controllare nei suoi sistemi.
+- **Sette domande:**
+  1. il pagamento creato da noi viene riconosciuto come pagamento del carrello? Basta `checkoutRefId` con `openAmount`, oppure serve passare `paymentIntentId` al booking? Se nessuna delle due, ci serve la `pk_test`;
+  2. perché su staging il booking restituisce l'`itineraryId` invece di un codice `R-…`, e come verificare che una prenotazione è confermata;
+  3. come veniamo avvisati del pagamento: webhook sul loro account (registrato da loro o tramite permesso alla nostra chiave) oppure lettura delle sessioni da parte nostra;
+  4. permessi della chiave `rk_test` e chiave equivalente per la produzione;
+  5. cosa sono i 31 € di differenza tra `total` e `openAmount`;
+  6. se in produzione i prodotti del catalogo italiano funzionano con `locale=it`;
+  7. se i carrelli e i pagamenti di prova vanno annullati.
+
+Il documento è in italiano come il resto di `docs/`. Se HofJ lavora in inglese te lo traduco.
+
+Restano in attesa del tuo via libera le altre modifiche che ti avevo proposto:
+- aggiornare il piano M5 per l'integrazione con M6 e M9 (migrazione `0004`, frasi bilingui, booking con `paymentIntentId`, webhook che accoda un job `booking`);
+- correggere la riga di `docs/decisions.md` in conflitto con M6;
+- decidere l'ordine dei merge: prima M6 su `master`, poi rebase di `task/m5`.
+
+## Utente 19:26
+
+spiegami in maniera piu semplice a
+
+## Agente 19:26
+
+La domanda 1, detta semplice:
+
+**La situazione.** Quando il viaggiatore paga, i soldi arrivano sul conto Stripe di HofJ. Su quel conto però entrano tanti pagamenti, e HofJ deve capire **a quale carrello appartiene ciascuno**. Altrimenti vede i soldi entrare ma non sa che il carrello X è stato pagato.
+
+**Come fa HofJ con i pagamenti che crea lui** (con `POST …/payment`), secondo quanto abbiamo osservato:
+- sul pagamento scrive un'etichetta, `checkoutRefId = id del carrello`;
+- l'importo è esattamente quello che il carrello chiede, `openAmount`.
+
+Così, quando il pagamento va a buon fine, probabilmente cerca l'etichetta e segna quel carrello come pagato.
+
+**Il nostro caso.** Il pagamento lo crea Vela (il link di M6), non HofJ. La domanda è: **HofJ riconosce anche il nostro pagamento?** Abbiamo tre modi per aiutarlo, e chiediamo quale funziona:
+
+1. mettiamo sul nostro pagamento la stessa etichetta (`checkoutRefId`) e lo stesso importo (`openAmount`);
+2. quando chiediamo la prenotazione, gli passiamo anche l'id del pagamento (`paymentIntentId`), così sa quale pagamento guardare;
+3. se nessuno dei due basta, rinunciamo al nostro link e usiamo il pagamento creato da HofJ. In quel caso la pagina dove il viaggiatore inserisce la carta la costruiamo noi, e per farla ci serve un'altra chiave, quella pubblica (`pk_test`).
+
+**Perché dobbiamo chiederlo.** Dall'API non riusciamo a verificarlo: pagato o non pagato, il carrello ci appare identico. Solo HofJ sa come fa i suoi collegamenti.
+
+## Utente 19:29
+
+proviamo a mettere anche noi checkoutRefId. Ma dobbiamo comunque costruire il webhook?
+
+## Agente 19:29
+
+**`checkoutRefId`.** Aggiungerlo costa una riga in `vela/adapters/stripe_links.py` di M6, nei `metadata` del PaymentIntent, accanto a `order_id` e `itinerary_id`. Si può fare senza rischi.
+
+Una prova però non ci direbbe se funziona. Nella seconda sonda abbiamo usato il pagamento creato da HofJ stesso, con il suo `checkoutRefId`, e il carrello e il booking si sono comportati esattamente come senza. Da parte nostra non c'è nessun segnale che cambi. Quindi lo mettiamo per coerenza con il loro flusso, e la conferma che serva può darla solo HofJ (domanda 1).
+
+**Il webhook: sì, qualcosa serve comunque.** `checkoutRefId` e webhook risolvono due problemi diversi:
+
+| | A chi serve | Cosa risolve |
+|---|---|---|
+| `checkoutRefId` | a **HofJ** | capire che quei soldi pagano quel carrello |
+| webhook (o polling) | a **Vela** | sapere che il viaggiatore ha pagato, per chiamare `POST /v1/bookings` e dare il codice |
+
+Anche se HofJ riconoscesse il pagamento, è Vela che deve chiamare la prenotazione: la loro documentazione lo chiede esplicitamente. Quindi Vela deve venire avvisata del pagamento.
+
+Il webhook **è già costruito** in M6. Il problema non è il codice, è che va **registrato sull'account Stripe di HofJ**, e quell'account non lo controlliamo. Le strade sono tre:
+
+1. **HofJ registra il webhook** e ci dà il secret. Non si scrive altro codice. Dipende da loro (domanda 3).
+2. **Lo registriamo noi via API** con la chiave `rk_test`, se ha il permesso sui webhook. Scriveremmo però una configurazione sul loro account: va fatto solo con il loro OK.
+3. **Polling:** il worker di M5 controlla ogni tanto su Stripe le sessioni degli ordini in attesa di pagamento. Non serve nulla da HofJ, basta il permesso di lettura della chiave. È un piccolo job in più nel piano M5, che userebbe la stessa logica del webhook di M6 (`mark_paid`, accodamento del booking).
+
+Ti consiglio di **tenere il webhook come strada principale** e di **aggiungere il polling a M5 come riserva**. Il polling fa funzionare Vela finché HofJ non risponde, e resta utile anche dopo: recupera un evento webhook che si fosse perso.
+
+Se ti va bene:
+- aggiungo `checkoutRefId` su `task/m6`, con il suo test, oppure lo lascio alla sessione di M6: dimmi tu;
+- aggiungo al piano M5 il job di polling, insieme alle altre modifiche di integrazione.
+
+## Utente 19:31
+
+ma come fa HofJ a riconoscere automaticamente il pagamento se stripe notifica noi con il webhook?
+
+## Agente 19:31
+
+Stripe non manda la notifica a una sola persona: la manda **a ogni endpoint registrato sull'account**. Un account Stripe può avere più webhook, e ciascuno riceve gli stessi eventi.
+
+Quando il viaggiatore paga, l'account di HofJ genera gli eventi del pagamento (`checkout.session.completed`, `payment_intent.succeeded`…). Stripe li recapita a tutti gli ascoltatori:
+- **al webhook di Vela**, che serve a noi per chiamare la prenotazione;
+- **ai webhook di HofJ**, se il loro sito ne ha: con ogni probabilità sì, perché è così che si sa quando un pagamento è andato a buon fine.
+
+Il nostro webhook non toglie niente a loro: è un destinatario in più.
+
+**Come HofJ potrebbe riconoscere il pagamento.** Ci sono due modi plausibili, e non sappiamo quale usi:
+
+1. **Dal suo webhook.** Riceve `payment_intent.succeeded`, legge i `metadata` del PaymentIntent, trova `checkoutRefId` e segna quel carrello come pagato. È per questo che l'etichetta conta. Anche il PaymentIntent creato dalla nostra Checkout Session genera `payment_intent.succeeded`: se porta `checkoutRefId`, il loro ascoltatore lo tratta come uno dei loro.
+2. **Al momento del booking.** Quando chiamiamo `POST /v1/bookings` passando `paymentIntentId`, il loro sito può leggere quel PaymentIntent dal suo account Stripe e controllare che sia `succeeded` e dell'importo giusto. È per questo che conviene inoltrare `paymentIntentId`.
+
+Mettendo sia `checkoutRefId` sia `paymentIntentId`, copriamo entrambi i casi. Se invece HofJ riconoscesse solo i pagamenti creati da `POST …/payment`, per esempio salvandosi l'id del PaymentIntent al momento della creazione, nessuna delle due basterebbe e servirebbe la loro pagina di pagamento. Per questo la domanda 1 a HofJ resta necessaria.
+
+## Utente 19:34
+
+invece i questo momento il webhook di vela come fa ad identificare quale prenotazione è andata a buon fine?
+
+## Agente 19:34
+
+- 🔧 Bash: Read M6 webhook order lookup logic
+
+Il webhook di Vela usa **l'etichetta che mette lui stesso** sulla sessione, lo stesso meccanismo di `checkoutRefId` per HofJ (`vela/surfaces/webhooks.py`, funzione `_apply`):
+
+1. **Quando crea il link,** Vela scrive sulla Checkout Session `metadata = {order_id, itinerary_id}`.
+2. **Quando arriva l'evento `checkout.session.completed`,** il webhook ne verifica la firma e poi legge `metadata.order_id` dalla sessione.
+3. **Carica quell'ordine.** Se l'ordine non esiste, o l'evento non ha `order_id`, lo scarta: registra un warning e risponde 200.
+4. **Controlla che il pagamento corrisponda all'ordine:**
+   - `payment_status == "paid"`;
+   - valuta uguale;
+   - **importo uguale** a `order.total`, in centesimi.
+
+   Se qualcosa non torna, non cambia l'ordine.
+5. **Se tutto torna,** fa `mark_paid(ordine, id del PaymentIntent)` e avvia la prenotazione su HofJ.
+6. **Evento `checkout.session.expired`** con lo stesso `order_id`: l'ordine passa a `expired`.
+
+Siamo quindi simmetrici a HofJ: noi riconosciamo il pagamento da `order_id`, loro (forse) da `checkoutRefId`. Con tutte e due le etichette sullo stesso pagamento, ciascuno trova la propria.
+
+Una conseguenza dell'account condiviso: il nostro webhook riceverà **anche gli eventi di HofJ**, cioè i pagamenti dei loro clienti fatti dal sito del brand. Quegli eventi non hanno `order_id`, quindi vengono scartati senza danni, ma ognuno lascia un warning nei log. Se il volume è alto, conviene declassare quel caso a log di livello `debug`. Lo aggiungo agli appunti di integrazione.
+
+## Utente 19:39
+
+ok dove siamo rimasti
+
+## Agente 19:39
+
+Siamo su `task/m5`. Nessun codice di M5 è stato ancora scritto: finora solo documenti e verifiche. La suite è ancora quella di partenza, 390 test verdi.
+
+**Fatto:**
+- **Task 0:** piano M5 in `docs/plans/2026-09-25-m5-hofj-reale.md` e decisioni dell'intervista.
+- **Task 1:** verifiche di §8 su staging. La chiave funziona e la quota è 120 al minuto su finestre fisse. Il pagamento resta aperto: 2 sonde, 15 chiamate HofJ e 4 Stripe in tutto.
+- **Piano aggiornato dopo le sonde:**
+  - l'importo da incassare è `openAmount`;
+  - il codice di prenotazione è la stringa restituita dal booking;
+  - i test dell'adapter usano i corpi reali delle risposte.
+- **Domande per HofJ** in `docs/hofj-questions.md`, da inviare tu. Le più urgenti sono la 1 (riconoscono il nostro pagamento?) e la 3 (webhook sul loro account).
+
+**Deciso a voce, non ancora scritto:**
+1. **`checkoutRefId`:** aggiungerlo ai `metadata` del PaymentIntent in M6.
+2. **Pagamento:** restiamo sulla Checkout Session di M6. La riga di `docs/decisions.md` che diceva il contrario va corretta.
+3. **Booking:** torna a inoltrare `paymentIntentId` e `paymentStatus`, invertendo la modifica fatta al piano.
+4. **Polling di Stripe:** un job nel worker come riserva del webhook, se ti va bene.
+5. **Integrazione con M6 e M9 nel piano:**
+   - migrazione `0004`;
+   - frasi in italiano e inglese;
+   - `create_payment_link(order, description)`;
+   - `PaymentsError` ripetuto dal job;
+   - il webhook accoda un job `booking`;
+   - nessun rifiuto del modo `live`;
+   - warning declassato per gli eventi di HofJ senza `order_id`.
+
+**Aspetta una tua decisione:**
+- **Punto 1:** lo faccio io su `task/m6` o lo lascio alla sessione di M6?
+- **Punti 4 e 5:** posso scriverli nel piano M5 e in `docs/decisions.md`?
+- **Ordine dei merge:** prima M6 su `master`, poi rebase di `task/m5` (riscrive la storia di `task/m5`, per questo ti chiedo l'OK).
+
+Una volta chiuse queste tre, riparto dal **Task 2**, i parametri in `Settings`.
+
+## Utente 19:40
+
+ok a tutti e 2
+
+## Agente 19:40
+
+Interpreto il tuo «tutti e 2» come OK al punto 1, che faccio io su `task/m6`, e ai punti 4-5, da scrivere nel piano M5. Sull'ordine dei merge e sul rebase non tocco nulla finché non me lo confermi. Parto da `checkoutRefId` su `task/m6`, in TDD.
+
+- 🔧 Bash: Check m6 worktree status and metadata test
+
+- 🔧 Bash: Read surrounding test code
+
+- 🔧 Bash: Write failing tests for checkoutRefId and run them
+
+- 🔧 Bash: Show failure reasons
+
+I test falliscono per il motivo atteso: `checkoutRefId` non c'è ancora. Implemento.
+
+- 🔧 Bash: Add checkoutRefId and run tests and full suite
+
+- 🔧 Bash: Tidy docstring, record decision, commit only M6 files
+
+- 🔧 Bash: Locate plan anchors
+
+- 🔧 Bash: Read booking rule lines
+
+- 🔧 Bash: Update M5 plan and decisions for M6/M9 integration

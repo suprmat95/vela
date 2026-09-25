@@ -388,7 +388,7 @@ staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`). Forme oss
 | Codice di prenotazione | `POST /v1/bookings` restituisce `data: "<itineraryId>"`, non `R-…`: `booking_code` = quella stringa. La frase vocale andrà scandita | Forma osservata |
 | Totale reale | Da decidere tra `checkout.total` (368, uguale a `totalPrice`) e `openAmount` (337, uguale a `originalTotal`): DOCS dice che `paymentType: "full"` addebita "the entire open amount". Origine della differenza di 31 € non nota | Il PaymentIntent di prova è stato creato su 368, probabilmente l'importo sbagliato |
 | Pax | `pax-1` è precompilato dal customer: il `PUT pax` scrive comunque tutti i nomi preservando i `refId` | Nessun cambio al job |
-| Pagamento (esito §8 riga 3) | Il pagamento va fatto sul PaymentIntent creato da HofJ (`POST /v1/itineraries/{id}/payment` → `client_secret`, conferma con Stripe.js), non su un Payment Link del nostro account Stripe. Il progetto concreto è M6; in M5 il job resta dietro `PaymentsPort` e il booking manda solo `{itineraryId, paymentType}` | È il flusso documentato da DOCS; il nostro `paymentIntentId` è solo inoltrato e non può essere verificato dal brand site |
+| Pagamento (esito §8 riga 3) | ~~Pagamento sul PaymentIntent di HofJ invece del link~~ Superata dalla riga "Pagamento: scelta" della sezione "M5: integrazione con M6 e M9" | La seconda sonda ha mostrato che la chiave Stripe è di HofJ e che il flusso documentato dà lo stesso esito |
 | Importo del link | `checkout.openAmount` (DOCS: `full` addebita "the entire open amount") | Il PaymentIntent di prova su `checkout.total` (368) era probabilmente l'importo sbagliato |
 
 ## 2026-09-25 — M5: seconda sonda sul pagamento (flusso documentato)
@@ -401,4 +401,20 @@ Origine: richiesta dell'utente dopo la rilettura di DOCS/OAS. 6 chiamate HofJ + 
 | Conclusione sulla §8 riga 3 | La conclusione "HofJ ignora il nostro pagamento" è **ritirata**: la chiave Stripe è di HofJ, i due PaymentIntent stanno sullo stesso account, e dall'API non si distingue un booking pagato da uno non pagato. Differenze reali del nostro PaymentIntent: importo (`total` invece di `openAmount`) e assenza di `metadata.checkoutRefId` | Nessun segnale osservabile dall'API interna; `GET /v1/bookings/{id}` richiede il token dell'utente finale |
 | Pagamento in M6 (da decidere in M6) | Due strade compatibili con quanto osservato: (a) usare il PaymentIntent del brand (`POST .../payment`) e confermarlo da una pagina nostra; (b) creare noi il PaymentIntent sullo stesso account con `amount = openAmount` e `metadata.checkoutRefId = itineraryId`. Da chiedere a HofJ quale riconcilia il pagamento lato brand | La chiave è ristretta e di HofJ: serve la loro conferma |
 | Importo del link | Confermato `openAmount` (il PaymentIntent del brand è di 337 €) | Osservato |
+
+## 2026-09-25 — M5: integrazione con M6 e M9
+
+Origine: lettura di `task/m6` e di `master` (M9) prima del Task 2; decisioni prese con l'utente.
+Dettagli nella sezione "Integrazione con M6 e M9" del piano M5.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Pagamento: scelta | Si resta sulla Checkout Session di M6 (account Stripe di HofJ), con `metadata.checkoutRefId = itineraryId` sul PaymentIntent (fatto su `task/m6`, commit `6aecb03`) e importo = `openAmount` (scritto dal job d'acquisto di M5). Conferma attesa da HofJ (`docs/hofj-questions.md`, domanda 1) | Compatibile con quanto osservato; il flusso con Stripe.js cambierebbe molto M6 e richiede la `pk_test` |
+| `paymentIntentId` nel booking | Inoltrato con `paymentStatus` (inverte la regola del piano dopo il Task 1) | OAS lo inoltra al brand site: secondo modo con cui HofJ può riconoscere il pagamento |
+| Notifica del pagamento a Vela | Webhook di M6 come strada principale; polling delle sessioni con un job `payment_check` nel worker come riserva (Task 13b) | Il webhook va registrato sull'account di HofJ (domanda 3); il polling non richiede nulla da HofJ e recupera eventi persi |
+| Logica del pagamento | `OrderService.settle_payment` condivisa da webhook e polling; il webhook accoda un job `booking` | Una sola regola per importo, valuta e transizione |
+| Eventi Stripe senza `order_id` | Log `debug`, non `warning` | L'account è condiviso con HofJ: i loro pagamenti arrivano anche al nostro webhook |
+| Migrazione | `0004_jobs_quota` dopo `0003_stripe_events` di M6 | Numerazione lineare dopo il merge di M6 |
+| Frasi | Ogni frase nuova in italiano e inglese | M9 ha reso le frasi bilingui |
+| Modo live | Nessun rifiuto all'avvio: `live` usa `HofJHttp` e i pagamenti scelti da M6 | M6 esiste; la decisione "live in attesa di M6" dell'intervista è superata |
 
