@@ -99,6 +99,30 @@ class ParseTranscriptTest(unittest.TestCase):
         self.assertEqual(self.entries[0].ts, datetime(2026, 9, 24, 21, 10, 48, 356000, tzinfo=timezone.utc))
 
 
+class SlashCommandSessionTest(unittest.TestCase):
+    """Una sessione avviata con uno slash command ha come primo messaggio solo i tag
+    <command-message>/<command-name>/<command-args>: gli args sono il testo utente."""
+
+    SLASH = user("<command-message>superpowers:brainstorming</command-message>\n"
+                 "<command-name>/superpowers:brainstorming</command-name>\n"
+                 "<command-args>Leggi la task m0 in docs/roadmap.md</command-args>", T0)
+
+    def test_command_args_become_user_text(self):
+        entries, meta = agents_log.parse_transcript([self.SLASH])
+        self.assertEqual([(e.role, e.text) for e in entries],
+                         [("user", "/superpowers:brainstorming: Leggi la task m0 in docs/roadmap.md")])
+        self.assertEqual(meta["title"], "/superpowers:brainstorming: Leggi la task m0 in docs/roadmap.md")
+
+    def test_filename_uses_command_args_slug(self):
+        entries, _ = agents_log.parse_transcript([self.SLASH])
+        name = agents_log.session_filename(entries)
+        self.assertTrue(name.endswith("-superpowers-brainstorming-leggi-la-task.md"), name)
+
+    def test_command_without_args_stays_noise(self):
+        entries, _ = agents_log.parse_transcript([user("<command-name>/clear</command-name>", T0)])
+        self.assertEqual(entries, [])
+
+
 class ToolLabelTest(unittest.TestCase):
     def test_bash_prefers_description(self):
         self.assertEqual(agents_log.tool_label("Bash", {"command": "rm x", "description": "Remove x"}), "Bash: Remove x")
@@ -178,7 +202,7 @@ class TranscribeTest(unittest.TestCase):
             raw = ("\n".join(FIXTURE) + "\n").encode("utf-8")
             with open(transcript, "wb") as f:
                 f.write(raw)
-            out_dir = os.path.join(tmp, "agents-log")
+            out_dir = os.path.join(tmp, "agent-log")
             md_path, jsonl_path = agents_log.transcribe(transcript, out_dir)
             self.assertTrue(md_path.endswith(".md"))
             self.assertEqual(jsonl_path, md_path[:-3] + ".jsonl")
@@ -190,8 +214,8 @@ class TranscribeTest(unittest.TestCase):
             transcript = os.path.join(tmp, "t.jsonl")
             with open(transcript, "w") as f:
                 f.write(FIXTURE[0] + "\n")
-            self.assertIsNone(agents_log.transcribe(transcript, os.path.join(tmp, "agents-log")))
-            self.assertFalse(os.path.exists(os.path.join(tmp, "agents-log")))
+            self.assertIsNone(agents_log.transcribe(transcript, os.path.join(tmp, "agent-log")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agent-log")))
 
 
 class HookEndToEndTest(unittest.TestCase):
@@ -211,13 +235,13 @@ class HookEndToEndTest(unittest.TestCase):
                 f.write("\n".join(FIXTURE) + "\n")
             res = self.run_hook(tmp, "git commit -m 'x'", transcript)
             self.assertEqual(res.returncode, 0, res.stderr)
-            files = sorted(os.listdir(os.path.join(tmp, "agents-log")))
+            files = sorted(os.listdir(os.path.join(tmp, "agent-log")))
             self.assertEqual(len(files), 2)
             self.assertTrue(files[0].endswith("-obiettivo-trascrivere-le-chat-con-gli-ag.jsonl"))
             self.assertTrue(files[1].endswith("-obiettivo-trascrivere-le-chat-con-gli-ag.md"))
             staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp,
                                     capture_output=True, text=True).stdout.split()
-            self.assertEqual(staged, ["agents-log/" + f for f in files])
+            self.assertEqual(staged, ["agent-log/" + f for f in files])
 
     def test_non_commit_does_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -227,7 +251,7 @@ class HookEndToEndTest(unittest.TestCase):
                 f.write("\n".join(FIXTURE) + "\n")
             res = self.run_hook(tmp, "git status", transcript)
             self.assertEqual(res.returncode, 0)
-            self.assertFalse(os.path.exists(os.path.join(tmp, "agents-log")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agent-log")))
 
     def test_missing_transcript_never_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
