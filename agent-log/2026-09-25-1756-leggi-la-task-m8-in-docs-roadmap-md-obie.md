@@ -1583,3 +1583,260 @@ In tutto sono 6 chiamate HofJ e 2 Stripe. Procedo, come mi hai già autorizzato,
 - 🔧 Bash: Resume probe from Stripe retrieve, confirm, then book
 
 - 🔧 Bash: Record second probe results and commit
+
+Sonda eseguita (commit `2d7d99b`): 6 chiamate HofJ e 3 Stripe, due retrieve e una conferma. Il retrieve è partito due volte perché il mio script si è bloccato sul primo. **Il risultato smentisce la mia conclusione di prima.**
+
+| | 1ª sonda (PaymentIntent creato da noi) | 2ª sonda (flusso documentato) |
+|---|---|---|
+| Account Stripe | quello di HofJ (la chiave `rk_test` è loro) | **lo stesso** |
+| Importo | 368 € (`total`) | **337 € (`openAmount`)** |
+| `metadata.checkoutRefId` | assente | **= `itineraryId`** |
+| Conferma | `succeeded` | `succeeded` |
+| Risposta del booking | `data: "<itineraryId>"` | **identica**: `data: "<itineraryId>"`, nessun `R-…` |
+| `checkout.status` dopo il booking | `BookingInitiated` | **identico** |
+
+**Cosa vuol dire:**
+- **HofJ non ha ignorato il nostro pagamento.** Anche seguendo alla lettera la loro documentazione, il risultato è lo stesso. Su staging il booking restituisce sempre l'`itineraryId` e lo stato del carrello non cambia, pagato o no.
+- **Dall'API che usiamo non si vede se un booking è pagato.** L'unica lettura che lo direbbe (`GET /v1/bookings/{id}`) richiede il token dell'utente finale.
+- **Due cose confermate:** l'importo giusto è `openAmount`, e HofJ collega il pagamento al carrello con `metadata.checkoutRefId`. Il nostro primo PaymentIntent non aveva né l'uno né l'altro.
+
+**Per M6 restano due strade**, annotate in `docs/decisions.md` e da decidere in M6:
+- confermare il PaymentIntent che crea HofJ;
+- crearlo noi sullo stesso account, con `amount = openAmount` e `metadata.checkoutRefId`.
+
+**Quale delle due HofJ riconcili davvero va chiesto a loro.** Da qui non si può verificare. Ti consiglio di chiederlo tu, insieme al perché su staging il booking non restituisce un `R-…`.
+
+**Per M5 non cambia nulla** rispetto al piano già aggiornato: importo = `openAmount`, il booking manda `{itineraryId, paymentType}`, il codice è la stringa che torna.
+
+Il Task 1 è chiuso. Passo al Task 2 (i nuovi parametri in `Settings`)?
+
+## Utente 19:13
+
+Leggi quanto detto sul worktree task/m6
+
+## Agente 19:13
+
+- 🔧 Bash: Find the task/m6 worktree and its commits
+
+- 🔧 Bash: Read M6 decisions in the task/m6 worktree
+
+- 🔧 Bash: Search M6 session logs for payment/HofJ discussion
+
+- 🔧 Bash: Scan M6 session log for HofJ, payment and M5 mentions
+
+- 🔧 Bash: Read end of M6 session log and master state
+
+Ho letto quanto c'è sul worktree `task/m6`: le decisioni in `docs/decisions.md`, il piano e il log della sessione. Nel frattempo è emerso anche che **`master` è andato avanti**. M9 è stata mergiata (`6d4e90a`), mentre `task/m5` parte ancora dal commit precedente (`103908d`). M6 è completa su `task/m6`, con `master` già mergiato dentro, ma **non è ancora su `master`**.
+
+## Cosa ha deciso M6 che tocca M5
+
+**1. Il pagamento contraddice quello che ho scritto oggi.** M6 crea una **Checkout Session di Stripe** con la `STRIPE_SECRET_KEY`. Dalla nostra sonda risulta che quella chiave è di HofJ, quindi la Checkout Session nasce sul loro account.
+- La sessione genera un proprio PaymentIntent, con `amount` = totale dell'ordine e `metadata {order_id, itinerary_id}`.
+- Dalle nostre sonde servirebbero invece **`amount = openAmount`** e forse **`metadata.checkoutRefId = itineraryId`**, cioè il modo in cui HofJ lega il pagamento al carrello.
+- La riga che ho aggiunto a `docs/decisions.md`, «il pagamento va fatto sul PaymentIntent di HofJ, non su un link del nostro account», è in conflitto con il design di M6 e va riconciliata.
+- Nessuno ha ancora verificato che la chiave ristretta `rk_test` abbia il permesso di creare Checkout Session: il test manuale di M6 è ancora da fare.
+
+**2. Interfacce che M5 deve usare, diverse da quelle del mio piano:**
+
+| Cosa | M6/M9 | Impatto sul piano M5 |
+|---|---|---|
+| Migrazione `0003` | `0003_stripe_events` (M6) | la mia diventa **`0004_jobs_quota`** |
+| `OrderStatusResponse` | M6 aggiunge `total`, `currency`, `payment_url` | compatibile: M5 aggiunge solo gli altri campi |
+| `say_status(status, code, reason, lang="it", total=None)` e frasi in it/en | M9 + M6 | il Task 9 deve scrivere le frasi nuove **in italiano e in inglese**, secondo `criteria.language` |
+| `create_payment_link(order, description)` e `PaymentsError` | M6 | il passo 5 del job passa il titolo del prodotto. `PaymentsError` va trattato come errore da ripetere. M6 lo dice esplicitamente: «M5 poi sposterà tutto nel job d'acquisto con retry» |
+| `_ensure_link` nell'accept | M6 | sparisce: il link lo crea il job |
+| Webhook `checkout.session.completed` | fa `mark_paid` e poi `runner.submit` | diventa l'accodamento di un job `booking` |
+| Scelta dei pagamenti | `STRIPE_SECRET_KEY` → `StripePayments`, qualunque sia il modo | la mia decisione «`live` rifiuta l'avvio finché M6 non c'è» diventa superata dopo il merge di M6 |
+| Dipendenze | M9 ha aggiunto `anthropic` | nessuna per M5 |
+
+**3. Due note minori.** Il test `test_replay_router_absent_in_live` passa sempre, qualunque cosa succeda: M6 lo ha segnalato, ed è fuori scope anche per M5. I test su Postgres di M6 non sono stati eseguiti.
+
+## Cosa ti propongo
+
+1. **Ordine dei merge:** prima M6 su `master`, poi **rebase di `task/m5` su `master`**. Su `task/m5` ci sono solo commit di documentazione e nessun push, quindi il rebase è banale. Il rebase riscrive la storia, e `CLAUDE.md` chiede di chiederti prima.
+2. **Aggiornare il piano M5** con una sezione «Integrazione con M6 e M9»: migrazione `0004`, frasi bilingui, `create_payment_link(order, description)`, `PaymentsError` da ripetere, webhook → job `booking`, niente rifiuto del modo `live`. Correggerei anche la riga di `docs/decisions.md` in conflitto con M6, riformulandola così: «in M6 si usa la Checkout Session; da verificare con HofJ importo (`openAmount`) e `metadata.checkoutRefId`».
+3. **Segnalare a M6** i due punti delle sonde, importo = `openAmount` e `checkoutRefId`. È codice di M6: li correggo io su `task/m6` o li lasci a quella sessione?
+
+Come preferisci procedere, in particolare sul rebase e sul punto 3?
+
+## Utente 19:17
+
+ma cosa ha fatto m6?
+
+## Agente 19:17
+
+M6 ha aggiunto a Vela il **pagamento vero con Stripe**. Prima c'era solo il checkout finto della modalità replay. Il lavoro è completo e testato sul branch `task/m6`, ma non ancora mergiato su `master`.
+
+**Il flusso, dal punto di vista del viaggiatore:**
+
+1. **Accetta la proposta.** Vela crea l'ordine e, per pagarlo, una **Checkout Session di Stripe**. È la pagina di pagamento ospitata da Stripe, quella dove si inserisce la carta.
+   - L'importo è il totale dell'ordine, in euro, come una sola voce che riporta il titolo del viaggio.
+   - La sessione porta nei `metadata` l'id dell'ordine e dell'itinerario HofJ.
+   - Scade 24 ore meno 1 minuto dopo la creazione dell'ordine: Stripe non permette scadenze più lunghe.
+   - Se la creazione viene ripetuta, Stripe restituisce sempre la stessa sessione. Non nascono due link pagabili per lo stesso ordine.
+2. **Riceve il link.** `get_order_status` restituisce `payment_url`, `total` e `currency`. La frase vocale dice l'importo, mai l'URL.
+3. **Paga su Stripe.** Poi torna su una delle due pagine statiche di Vela, `/checkout/success` o `/checkout/cancel`.
+4. **Stripe avvisa Vela** con un webhook su `POST /webhooks/stripe`. Vela ne verifica la firma.
+   - **`checkout.session.completed`:** l'ordine passa a «pagato» e parte la prenotazione su HofJ, oggi con il vecchio `BookingRunner`.
+   - **`checkout.session.expired`:** l'ordine passa a `expired`.
+   - Un evento ripetuto non ha effetto: la tabella `stripe_events` è la migrazione `0003`.
+   - Se importo o valuta non coincidono con l'ordine, l'ordine non cambia stato.
+5. **Se Stripe non risponde durante l'accettazione:** la REST dà 503 e MCP legge una frase di scuse. Accettando di nuovo, il link viene ricreato.
+
+**Quale Stripe usa.** Se `STRIPE_SECRET_KEY` è impostata usa Stripe reale, altrimenti il finto di prima. In quel caso servono anche `STRIPE_WEBHOOK_SECRET` e `VELA_PUBLIC_URL`, altrimenti l'app non parte.
+
+**Cosa non ha fatto:**
+- **Nessuna chiamata reale a Stripe.** È una scelta dell'intervista di M6: tutto è testato con un client finto. Il test manuale con la carta `4242…` dopo il deploy spetta a te e segue `docs/stripe.md`.
+- **Test su Postgres non eseguiti.**
+- **Non conosceva le sonde fatte qui oggi.** Il suo design dà per scontato che il pagamento sul "nostro" Stripe basti a HofJ. Non sapeva che la chiave è di HofJ, che l'importo atteso da HofJ è `openAmount` e non il totale, né che il PaymentIntent di HofJ porta `metadata.checkoutRefId`.
+
+In breve, M6 ha costruito il pagamento sul **link Stripe creato da Vela**. È compatibile con quanto abbiamo scoperto, perché siamo sullo stesso account Stripe di HofJ. Mancano però i due dettagli (`openAmount` e `checkoutRefId`) che forse servono a HofJ per riconoscere il pagamento. Resta da chiedere a HofJ se servano davvero.
+
+## Utente 19:19
+
+in questo caso, se il pagamento avviene sul nostro stripe,  hofj non saprà ma che il pagamento è avvenuto
+
+## Agente 19:19
+
+Non esattamente: il pagamento **non avviene su un "nostro" Stripe**. La chiave in `STRIPE_SECRET_KEY` è di HofJ, come mi hai detto. Con quella stessa chiave ho letto sia il PaymentIntent creato da noi sia quello creato da HofJ con `POST …/payment`. Una chiave segreta legge solo i PaymentIntent del proprio account, quindi i soldi di un pagamento fatto con il link di M6 **arrivano sull'account Stripe di HofJ**.
+
+Il tuo dubbio però è giusto in un altro senso. **HofJ riceve i soldi, ma il suo sistema potrebbe non collegarli al carrello.** Dalle sonde si vede che il PaymentIntent creato da HofJ ha due caratteristiche che quello di M6 non ha:
+
+| | PaymentIntent di HofJ (`POST …/payment`) | PaymentIntent della Checkout Session di M6 |
+|---|---|---|
+| Account Stripe | HofJ | HofJ (stesso) |
+| Importo | `openAmount` (337 €) | totale dell'ordine (368 € nel caso osservato) |
+| `metadata.checkoutRefId` | = `itineraryId` | assente (M6 mette `order_id`, `itinerary_id`) |
+
+Se il sito del brand riconosce il pagamento cercando `checkoutRefId` e confrontando l'importo, cosa plausibile, il pagamento di M6 per loro sarebbe un incasso **orfano**. Non possiamo verificarlo: in entrambe le sonde il carrello è rimasto `BookingInitiated` e il booking ha dato la stessa risposta. Dall'API che abbiamo, un carrello pagato e uno non pagato sono indistinguibili.
+
+**Per far sapere a HofJ del pagamento ci sono tre strade**, in ordine di intervento:
+
+1. **Ritoccare M6.** Nella Checkout Session si imposta `payment_intent_data.metadata.checkoutRefId = itineraryId` e l'importo = `openAmount`. Nel booking si inoltra `paymentIntentId`, che il contratto prevede come «forwarded to the brand site». È una piccola modifica a M6 e lascia intatta la Checkout Session.
+2. **Usare il PaymentIntent di HofJ.** Si chiama `POST …/payment` e si conferma il PaymentIntent da una nostra pagina con Stripe.js. È il flusso che HofJ documenta, ma cambia molto M6: niente Checkout Session, serve la `pk_test` di HofJ e una pagina di pagamento nostra.
+3. **Chiedere a HofJ come riconciliano i pagamenti.** Da qui non si può verificare. Una sola domanda chiarisce tutto: «Un PaymentIntent creato con la vostra chiave `rk_test` fuori da `POST …/payment`, con `metadata.checkoutRefId = itineraryId` e importo = `openAmount`, e poi `POST /v1/bookings` con `paymentIntentId`, viene riconosciuto come pagamento del carrello? E perché su staging il booking restituisce l'`itineraryId` invece di un codice `R-…`?»
+
+Consiglio di fare la **3** subito e intanto preparare la **1**: costa poco e allinea M6 al PaymentIntent di HofJ. Vuoi che scriva la domanda per HofJ in un file in `docs/`, pronta da inviare?
+
+## Utente 19:20
+
+ma quindi il link di pagamento di stripe viene generato da hofj?
+
+## Agente 19:20
+
+No. Sono due cose diverse, e in nessuna delle due HofJ genera un link:
+
+**1. Il link di M6: lo genera Vela.** Il codice di Vela chiama l'API di Stripe e crea una Checkout Session. Stripe restituisce un URL (`https://checkout.stripe.com/…`) che mandiamo al viaggiatore. Usiamo la chiave che ci ha dato HofJ, quindi la sessione e i soldi stanno sull'account Stripe di HofJ, ma **i sistemi di HofJ non partecipano**: HofJ non sa che quel link esiste.
+
+**2. Il flusso documentato da HofJ: nessun link, solo un `client_secret`.** `POST …/payment` fa creare al sito del brand un PaymentIntent. HofJ restituisce solo il suo `client_secret`, cioè una stringa, non un URL né una pagina. Per incassare serve una **nostra** pagina web con Stripe.js, dove il viaggiatore inserisce la carta e che conferma quel PaymentIntent. In questo caso HofJ sa del pagamento, perché il PaymentIntent l'ha creato lui ed è legato al carrello (`checkoutRefId`).
+
+**C'è anche una terza strada, nella pagina «Agnostic cart» della documentazione.** È l'unica in cui il link è davvero di HofJ:
+- creiamo il carrello con `POST /v1/itineraries`;
+- costruiamo l'URL della **pagina di checkout del sito del brand** (Weebora) e ci mandiamo il viaggiatore;
+- lì il sito del brand gestisce dati del cliente, pagamento e conferma della prenotazione.
+
+In questo modo HofJ sa di sicuro del pagamento. Però Vela non fa più né il pagamento né il booking, quindi non riceverebbe il codice di prenotazione e non potrebbe confermarlo a voce. Cambierebbe buona parte di RF-18..24 e di M6.
+
+| | Chi crea il link o la pagina | HofJ sa del pagamento? | Cosa cambia per noi |
+|---|---|---|---|
+| M6 attuale | Vela (Checkout Session) | incerto: manca `checkoutRefId` | poco da cambiare |
+| `POST …/payment` + Stripe.js | Vela (pagina nostra) sul PaymentIntent di HofJ | sì | M6 da rifare in parte, serve la `pk_test` |
+| Agnostic cart | HofJ (checkout del sito del brand) | sì | Vela non prenota più: cambia la spec |
+
+Quale strada regga davvero può dirlo solo HofJ. Per questo la domanda a loro resta il passo che sblocca la scelta.
+
+## Utente 19:22
+
+ok con m6 attuale cosa ci rimane da cambiare? cosa rimane aperto?
+
+## Agente 19:22
+
+- 🔧 Bash: Check M6 amount, metadata and booking proof handling
+
+Ho guardato il codice di M6. Il quadro è questo.
+
+## Cosa resta da cambiare
+
+**Su M6 (poche righe in `vela/adapters/stripe_links.py`):**
+1. **Aggiungere `checkoutRefId`.** Nel PaymentIntent (`payment_intent_data.metadata`) va aggiunto `"checkoutRefId": itinerary_id` accanto a `order_id` e `itinerary_id`. È il campo con cui HofJ lega il pagamento al carrello nel suo PaymentIntent.
+
+**Su M5 (aggiornamenti al piano, nessun codice ancora scritto):**
+
+2. **Importo = `openAmount`.** M6 addebita `order.total`, e quel valore lo scrive il job d'acquisto di M5: basta che il passo 4 legga `openAmount`, come ho già messo nel piano. Anche il controllo dell'importo nel webhook di M6 (`amount_total == order.total`) resta coerente.
+3. **Il booking torna a inoltrare `paymentIntentId`.** Nel piano avevo deciso di non mandarlo. M6 però salva l'id del PaymentIntent dal webhook (`payment_ref`) e lo passa già a `create_booking`, e il contratto dice che HofJ lo «forwarded to the brand site». Mandarlo, insieme a `paymentStatus: "succeeded"`, dà a HofJ un secondo modo per collegare il pagamento. Inverto quella riga del piano.
+4. **Integrazione con M6 e M9 nel piano:**
+   - migrazione `0004` (la `0003` è di M6);
+   - frasi nuove in italiano e inglese;
+   - `create_payment_link(order, description)`;
+   - `PaymentsError` ripetuto dal job;
+   - il webhook accoda un job `booking` invece di `runner.submit`;
+   - niente più rifiuto del modo `live`.
+5. **Correggere `docs/decisions.md`.** La riga «il pagamento va fatto sul PaymentIntent di HofJ» va riformulata: si resta sulla Checkout Session di M6 con `checkoutRefId` e `openAmount`, in attesa della conferma di HofJ.
+
+## Cosa resta aperto
+
+| # | Questione | Chi la chiude |
+|---|---|---|
+| A | **HofJ riconosce come pagamento del carrello un PaymentIntent creato fuori da `POST …/payment`**, con `checkoutRefId` e `openAmount`? Dall'API non si vede | HofJ |
+| B | Perché su staging il booking restituisce l'`itineraryId` invece di un codice `R-…`, anche con il loro flusso | HofJ |
+| C | **Il webhook.** M6 ha bisogno di un endpoint webhook registrato **sull'account Stripe di HofJ** (e del suo `STRIPE_WEBHOOK_SECRET`). Con una chiave ristretta non abbiamo il loro Dashboard: serve che lo registrino loro o che la chiave abbia il permesso sui webhook. In più i loro sistemi vedranno anche i nostri eventi `checkout.session.*` | HofJ + test manuale di M6 |
+| D | La chiave `rk_test` può creare Checkout Session? Non è verificato | test manuale di M6 |
+| E | Differenza di 31 € tra `total` e `openAmount` | HofJ (non blocca: usiamo `openAmount`) |
+| F | Prodotti non tradotti in `it` falliscono alla creazione del carrello (visto su staging) | da controllare in M7, in produzione |
+| G | Test Postgres di M6 non eseguiti | chi ha `DATABASE_URL` |
+| H | Ordine dei merge: M6 su `master`, poi rebase di `task/m5` | tu |
+
+I punti **A, B e C** si risolvono con un solo messaggio a HofJ. Il **C** è il più urgente, perché senza il webhook il flusso di M6 non si chiude affatto.
+
+Posso procedere così:
+- scrivere la domanda per HofJ in `docs/`;
+- fare le modifiche 2-5 al piano M5 e a `docs/decisions.md`;
+- lasciare la modifica 1 (su `task/m6`) a te o alla sessione di M6.
+
+Va bene?
+
+## Utente 19:24
+
+mi sfugge pero perche stripe dovrebbe notificare noi del pagamento avvenuto
+
+## Agente 19:24
+
+Perché nel nostro flusso **è Vela a fare la prenotazione su HofJ dopo il pagamento** (RF-23, RF-51). La sequenza è:
+
+1. il viaggiatore paga sulla pagina di Stripe;
+2. **qualcuno deve dire a Vela «pagato»**;
+3. Vela chiama `POST /v1/bookings` su HofJ e ottiene il codice;
+4. al successivo `get_order_status` Vela risponde «confermato, codice …».
+
+Il pagamento però avviene **nel browser del viaggiatore, direttamente con Stripe**: Vela non vede nulla. Se nessuno avvisa Vela, l'ordine resta per sempre `awaiting_payment` e la prenotazione su HofJ non parte mai.
+
+**Perché proprio un webhook.** È il modo standard con cui Stripe comunica a un server che un pagamento è andato a buon fine: una chiamata diretta da Stripe al server, firmata, ripetuta finché il server non risponde OK. Le alternative sono più deboli:
+- **La pagina di ritorno `/checkout/success` non basta.** Il viaggiatore può chiudere la scheda prima del redirect, e chiunque può aprire quell'URL senza aver pagato.
+- **Il viaggiatore che dice «ho pagato» non basta.** Serve una prova.
+
+**Alternativa senza webhook: chiedere noi a Stripe.** Vela può leggere lo stato della Checkout Session con l'API (`checkout.sessions.retrieve`, stessa chiave), in due momenti:
+- quando il viaggiatore chiama `get_order_status`;
+- periodicamente, con un job del worker di M5, per gli ordini `awaiting_payment`.
+
+| | Webhook (M6 attuale) | Polling di Stripe |
+|---|---|---|
+| Serve registrare un endpoint sull'account Stripe di HofJ | **sì**, e senza il loro Dashboard dipende da loro | **no** |
+| Tempestività | immediata | al primo controllo (secondi o minuti) |
+| Chiamate a Stripe | nessuna | 1 per controllo, con quota Stripe ampia |
+| Codice già scritto | sì (M6) | da scrivere: un job nel worker di M5 |
+
+Il polling toglierebbe di mezzo il punto aperto più urgente (C), cioè registrare un webhook su un account che non controlliamo. Richiede però solo che la chiave `rk_test` abbia il permesso di **lettura** sulle Checkout Session, e anche questo è da verificare.
+
+**C'è anche un caso in cui non servirebbe affatto:** se fosse il sito del brand a registrare la prenotazione da solo, alla ricezione del pagamento con `checkoutRefId`. Il flusso documentato da HofJ però chiede esplicitamente di chiamare `POST /v1/bookings` dopo il pagamento, quindi il segnale a Vela serve comunque.
+
+Aggiungo il polling come opzione nella domanda a HofJ («possiamo registrare un webhook sul vostro account, o preferite che leggiamo lo stato delle sessioni?»)?
+
+## Utente 19:25
+
+si, scrivi la domanda per HofJ
+
+## Agente 19:25
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/docs/hofj-questions.md
+
+- 🔧 Bash: Commit the HofJ questions document
