@@ -150,3 +150,9 @@ T6 chiusa. T7: Dockerfile ed entrypoint, test sui file prima, poi build e smoke.
 - 🔧 Bash: Rebuild image, smoke test container with SQLite and check failure without DATABASE_URL
 
 - 🔧 Bash: Commit T7, ledger the manual verification and record completion
+
+T7 chiusa (build e smoke locale verdi). T8: `render.yaml` e README, test prima.
+
+- 🔧 Bash: Write failing tests for render.yaml and README
+
+- 🔧 Bash: Write render.yaml and README, run their tests
