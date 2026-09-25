@@ -188,3 +188,20 @@ sincrona entro 30 s) non teneva con 5 chiamate seriali da 2-6 s.
 | Sostituzione in coda | Errore prodotto → ordine `replaced` con proposta sostitutiva; nuovo accept rientra in testa | Il viaggiatore riacconsente perché prezzo e hotel cambiano; non perde il posto |
 | Dove nella roadmap | M5 (dominio, scheduler, worker, superfici adattate) e M13 (scenario twist); M2 non viene riaperta | M2 era già conclusa e mergiata quando è arrivato il twist |
 | Degradazione | Interruttore sul fallback Haiku (M9), catalogo in memoria per istanza (M14), MCP stateless (M3) | RNF-12, RNF-13 |
+
+## 2026-09-25 — M3: superficie MCP
+
+Origine: intervista sulla macro task M3, piano in `docs/plans/2026-09-25-m3-superficie-mcp.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Trasporto MCP | Streamable HTTP stateless (`stateless_http=True`) con risposte JSON (`json_response=True`) | Nessuna sessione in memoria: regge riavvii e sleep del piano free di Render e client semplici (ElevenLabs). Lo stato vive già in Postgres |
+| Montaggio | Le route di `streamable_http_app(streamable_http_path="/mcp")` sono innestate in `app.router.routes`; `session_manager.run()` nel lifespan dell'app | `Mount("/mcp")` risponde 307 a `POST /mcp`; `Mount("/")` trasformerebbe i 405 in 404 |
+| Argomenti dei tool | Piatti: `first_name`, `last_name`, `email`, `phone` opzionali, `participants` lista di `{first_name, last_name}`; `create_intent` ha anche `pax` | Schema semplice da compilare per un modello vocale; `accept_proposal` si richiama finché `missing` è vuoto |
+| Risultato dei tool | `CallToolResult` con `structuredContent` = `to_dict()` del caso d'uso e lo stesso JSON come testo; nessun `outputSchema`, nessun campo `kind` aggiunto | Contratto di M2 invariato; il modello distingue le varianti dalle chiavi (`question`, `failed_criterion`, `missing`) |
+| Errori | `isError=true` con una sola frase italiana: `say_not_found(kind)` per id sconosciuti, `say_unavailable()` senza dominio, `say_error()` per eccezioni inattese (loggate con `logger.exception` su `vela.mcp`, mai nel risultato) | Il modello legge una frase utile invece di uno stack trace; nessun dettaglio interno esce |
+| Lingua | Istruzioni del server e descrizioni dei tool in inglese; `say` resta italiano (M2) | I modelli seguono meglio le istruzioni in inglese; giudici anglofoni |
+| Protezione DNS rebinding | Attiva. Host ammessi: `localhost`, `127.0.0.1` (con qualunque porta), `testserver`, host di `VELA_PUBLIC_URL`. Origin ammessi: `https://claude.ai`, `http://localhost:*`, `http://127.0.0.1:*`, origin di `VELA_PUBLIC_URL`; richieste senza Origin accettate | Difesa gratuita dell'SDK, nessuna variabile d'ambiente nuova |
+| Dominio assente | `/mcp` sempre montato; senza `DATABASE_URL` ogni tool risponde `isError` con `say_unavailable()` | `/mcp` non va mai in crash; stesso comportamento di `/replay/checkout` (503) |
+| Deploy e prova | Merge su `master` fatto dall'utente → autodeploy Render; smoke test automatico con `scripts/mcp_smoke.py` contro l'URL live (solo replay, nessun costo); conversazione in claude.ai fatta dall'utente; esiti in `docs/acceptance.md` | Il connector di claude.ai si configura solo dall'account dell'utente |
+| "Troppo caro" | Resta a M9: in M3 il rifiuto produce una proposta diversa, non necessariamente più economica; criterio 1 in replay registrato come parziale | M3 resta solo superficie; nessun conflitto con il worktree di M9 su `intent.py`/`usecases.py` |
