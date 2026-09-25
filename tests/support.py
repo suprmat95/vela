@@ -173,3 +173,10 @@ def assert_problem(testcase, response, status, slug):
         testcase.assertTrue(body.get(key), "campo 7807 mancante: %s" % key)
     testcase.assertNotIn("http", body["say"])
     return body
+
+
+def inline_worker(vela, **settings):
+    """Worker senza thread per le app di test: la coda avanza solo con `drain()`."""
+    from vela.app import build_worker
+    from vela.config import Settings
+    return build_worker(vela, Settings(worker_concurrency=0, **settings))

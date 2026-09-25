@@ -5,9 +5,8 @@ from datetime import timedelta
 
 from mcp import Client
 
-from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
+from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product, inline_worker,
                      make_product)
-from vela.adapters.background import InlineRunner
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
@@ -110,7 +109,7 @@ class FlowTest(McpCase):
         self.assertEqual(again["order_id"], accepted["order_id"])
 
         self.vela.orders.mark_paid(accepted["order_id"], "pi_test")
-        InlineRunner(self.vela.orders).submit(accepted["order_id"])
+        inline_worker(self.vela).drain()
         status = await self.ok("get_order_status", order_id=accepted["order_id"])
         self.assertEqual(status["status"], "confirmed")
         self.assertEqual(status["booking_code"], "R-000001")

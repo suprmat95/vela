@@ -1,12 +1,12 @@
 import random
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW
-from vela.adapters.background import InlineRunner
+from support import inline_worker, NOW
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -35,7 +35,7 @@ def make_app(preload=False):
         repos.products.upsert_many(hofj.load_catalog())
     vela = Vela(repos, hofj, FakePayments("http://test"), DEFAULT_TRAVELER, now=Clock())
     app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
-                     vela=vela, runner=InlineRunner(vela.orders), catalog_loader=hofj.load_catalog)
+                     vela=vela, worker=inline_worker(vela), catalog_loader=hofj.load_catalog)
     return app, vela
 
 
@@ -59,12 +59,22 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(vela.repos.products.count(), 110)
 
     def test_resumes_pending_bookings(self):
+        """RF-27: un ordine pagato senza job di prenotazione (processo morto prima di accodarlo)."""
         app, vela = make_app(preload=True)
         oid = paid_order(vela).order_id
-        vela.orders.mark_paid(oid, "pi")
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi"))
         with TestClient(app):
             self.assertEqual(app.state.bootstrap["resumed"], [oid])
+            app.state.worker.drain()
             self.assertEqual(vela.get_order_status(oid).status, OrderStatus.CONFIRMED)
+
+    def test_bootstrap_reads_the_quota_once(self):
+        app, vela = make_app(preload=True)
+        with TestClient(app):
+            self.assertTrue(app.state.bootstrap["quota_synced"])
+            snap = vela.repos.quota.snapshot(vela.now())
+            self.assertEqual((snap["limit_per_minute"], snap["needs_refresh"]), (120, False))
 
 
 class CheckoutTest(unittest.TestCase):
@@ -79,6 +89,7 @@ class CheckoutTest(unittest.TestCase):
             self.assertEqual(body["order_id"], accepted.order_id)
             self.assertEqual(body["status"], "paid_pending_booking")
             self.assertIn("Pagamento", body["say"])
+            self.assertEqual(app.state.worker.drain(), 1)          # il job di prenotazione
             status = vela.get_order_status(accepted.order_id)
             self.assertEqual(status.status, OrderStatus.CONFIRMED)
             self.assertRegex(status.booking_code, r"^R-\d{6}$")
@@ -89,6 +100,7 @@ class CheckoutTest(unittest.TestCase):
             accepted = paid_order(vela)
             path = urlparse(accepted.payment_url).path
             c.get(path)
+            app.state.worker.drain()
             code = vela.get_order_status(accepted.order_id).booking_code
             r = c.get(path)
             self.assertEqual(r.status_code, 200)
@@ -160,5 +172,5 @@ class ModeTest(unittest.TestCase):
     def test_replay_with_database_builds_domain(self):
         app = create_app(Settings(database_url="sqlite://"))
         self.assertIsNotNone(app.state.vela)
-        self.assertIsNotNone(app.state.runner)
+        self.assertIsNotNone(app.state.worker)
         self.assertTrue(callable(app.state.catalog_loader))

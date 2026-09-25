@@ -377,7 +377,7 @@ class PostgresQuota:
 
 
 class PostgresRepositories:
-    def __init__(self, engine: Engine):
+    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20):
         self.engine = engine
         self.products = PostgresProducts(engine)
         self.intents = PostgresIntents(engine)
@@ -385,4 +385,4 @@ class PostgresRepositories:
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
-        self.quota = PostgresQuota(engine)
+        self.quota = PostgresQuota(engine, margin=quota_margin, reserve=booking_reserve)

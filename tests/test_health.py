@@ -7,8 +7,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from support import NOW, make_product
-from vela.adapters.background import InlineRunner
+from support import inline_worker, NOW, make_product
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -75,7 +74,7 @@ def catalog_client(products, database_url="sqlite://", now=NOW + timedelta(hours
     repos = MemoryRepositories()
     repos.products.upsert_many(products)
     vela = Vela(repos, ReplayHofJ(), FakePayments("http://test"), DEFAULT_TRAVELER, now=lambda: now)
-    app = create_app(Settings(database_url=database_url), vela=vela, runner=InlineRunner(vela.orders))
+    app = create_app(Settings(database_url=database_url), vela=vela, worker=inline_worker(vela))
     return TestClient(app)
 
 
@@ -86,7 +85,14 @@ class CatalogHealthTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["catalog"], {"products": 2, "fetched_at": "2026-09-25T12:00:00+00:00",
                                                "age_seconds": 3600})
-        self.assertIsNone(r.json()["quota"])
+
+    def test_reports_the_quota_window(self):
+        """M5: la finestra corrente del contatore condiviso, prima di ogni lettura di /v1/quota."""
+        r = catalog_client([make_product(1)]).get("/health")
+        self.assertEqual(r.json()["quota"], {
+            "limit_per_minute": 120, "effective_limit": 108, "reserve": 21, "used": 0,
+            "remaining": 108, "window_start": "2026-09-25T13:00:00+00:00",
+            "window_end": "2026-09-25T13:01:00+00:00", "needs_refresh": True})
 
     def test_empty_catalog(self):
         r = catalog_client([]).get("/health")

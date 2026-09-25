@@ -6,8 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW, FlakyPayments, assert_problem, assert_single_product, make_product
-from vela.adapters.background import InlineRunner
+from support import inline_worker, NOW, FlakyPayments, assert_problem, assert_single_product, make_product
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -32,7 +31,7 @@ class Clock:
 
 
 def make_client(products=None, token=TOKEN, payments=None):
-    """App con repository in memoria, adapter replay e runner sincrono. `products=None` = fixture."""
+    """App con repository in memoria, adapter replay e worker senza thread (`drain`). `products=None` = fixture."""
     repos = MemoryRepositories()
     hofj = ReplayHofJ(rng=random.Random(7))
     repos.products.upsert_many(hofj.load_catalog() if products is None else products)
@@ -40,7 +39,7 @@ def make_client(products=None, token=TOKEN, payments=None):
                 now=Clock())
     settings = Settings(vela_upstream_mode="replay", vela_public_url="http://test",
                         vela_api_token=token)
-    app = create_app(settings, vela=vela, runner=InlineRunner(vela.orders))
+    app = create_app(settings, vela=vela, worker=inline_worker(vela))
     return TestClient(app, raise_server_exceptions=False), vela
 
 
@@ -314,6 +313,7 @@ class FullFlowTest(unittest.TestCase):
 
         paid = c.get(urlparse(order["payment_url"]).path)   # checkout replay: nessun token
         self.assertEqual(paid.status_code, 200)
+        c.app.state.worker.drain()                           # il job di prenotazione
 
         final = call("get", "/v1/orders/%s" % order["order_id"], 200)
         self.assertEqual(final["status"], "confirmed")

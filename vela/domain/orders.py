@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Callable, List
 
 from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
-from vela.ports.hofj import HofJError, HofJPort, PaymentProof
+from vela.ports.hofj import HofJPort
 from vela.ports.payments import LinkStatus, to_cents
 from vela.ports.repositories import Repositories
 
@@ -86,21 +86,6 @@ class OrderService:
         if order.status != OrderStatus.AWAITING_PAYMENT:
             return order
         order = replace(order, status=OrderStatus.EXPIRED, updated_at=self.now())
-        self.repos.orders.save(order)
-        return order
-
-    def complete_booking(self, order_id: str) -> Order:
-        order = self.get(order_id)
-        if order.status != OrderStatus.PAID_PENDING_BOOKING:
-            return order
-        proof = PaymentProof(order.payment_ref or "", "succeeded")
-        try:
-            code = self.hofj.create_booking(order.itinerary_id, proof)
-            order = replace(order, status=OrderStatus.CONFIRMED, booking_code=code,
-                            updated_at=self.now())
-        except HofJError as exc:
-            order = replace(order, status=OrderStatus.BOOKING_FAILED, failure_reason=str(exc),
-                            updated_at=self.now())
         self.repos.orders.save(order)
         return order
 

@@ -165,7 +165,8 @@ class MemoryJobs:
 
 
 class MemoryRepositories:
-    def __init__(self):
+    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20):
+        self.quota_margin, self.booking_reserve = quota_margin, booking_reserve
         self.clear()
 
     def clear(self) -> None:
@@ -175,7 +176,7 @@ class MemoryRepositories:
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
         self.jobs = MemoryJobs()
-        self.quota = MemoryQuota()
+        self.quota = MemoryQuota(self.quota_margin, self.booking_reserve)
 
 
 class MemoryQuota:

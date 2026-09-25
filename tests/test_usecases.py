@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
-                     make_product)
+                     inline_worker, make_product)
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.models import (Area, IntentCreated, IntentQuestion, NoMatch, ProposalMade,
@@ -218,7 +218,6 @@ class RejectProposalTest(unittest.TestCase):
         self.assertEqual(vela.repos.intents.get(iid).criteria, before)
 
 
-from vela.adapters.background import InlineRunner
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
@@ -366,7 +365,7 @@ class OrderStatusTest(unittest.TestCase):
         vela, _, proposal = accepted_vela()
         oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
         vela.orders.mark_paid(oid, "pi_1")
-        vela.orders.complete_booking(oid)
+        inline_worker(vela).drain()
         r = vela.get_order_status(oid)
         self.assertEqual((r.status, r.total, r.payment_url),
                          (OrderStatus.CONFIRMED, Decimal("700"), None))
@@ -379,12 +378,12 @@ class OrderStatusTest(unittest.TestCase):
 class FullReplayFlowTest(unittest.TestCase):
     """Il flusso della roadmap M2 con gli adapter replay veri e il catalogo della fixture."""
 
-    def make(self, repos=None):
+    def make(self, repos=None, at=NOW):
         repos = repos or MemoryRepositories()
         hofj = ReplayHofJ()
         if repos.products.count() == 0:
             repos.products.upsert_many(hofj.load_catalog())
-        return Vela(repos, hofj, FakePayments("https://vela.test"), DEFAULT_TRAVELER, now=Clock())
+        return Vela(repos, hofj, FakePayments("https://vela.test"), DEFAULT_TRAVELER, now=Clock(at))
 
     def test_intent_to_confirmed(self):
         vela = self.make()
@@ -404,7 +403,7 @@ class FullReplayFlowTest(unittest.TestCase):
         self.assertEqual(accepted.payment_url, "https://vela.test/replay/checkout/" + accepted.order_id)
         # pagamento simulato: ciò che fa GET /replay/checkout/{order_id}
         vela.orders.mark_paid(accepted.order_id, "pi_replay_" + accepted.order_id)
-        InlineRunner(vela.orders).submit(accepted.order_id)
+        inline_worker(vela).drain()
         status = vela.get_order_status(accepted.order_id)
         responses.append(status)
         self.assertEqual(status.status, OrderStatus.CONFIRMED)
@@ -422,8 +421,9 @@ class FullReplayFlowTest(unittest.TestCase):
         proposal = vela.get_proposal(iid)
         oid = vela.accept_proposal(proposal.proposal.id).order_id
         vela.orders.mark_paid(oid, "pi")   # pagato, ma il processo "muore" prima della prenotazione
-        restarted = self.make(repos)       # nuovo processo: stessi repository, nuovo ReplayHofJ
-        self.assertEqual(InlineRunner(restarted.orders).resume(), [oid])
+        restarted = self.make(repos, at=NOW + timedelta(hours=1))   # nuovo processo, più tardi
+        self.assertEqual(restarted.orders.resume_bookings(), [])   # il job è già in coda (RF-27)
+        inline_worker(restarted).drain()
         self.assertEqual(restarted.get_order_status(oid).status, OrderStatus.CONFIRMED)
 
 

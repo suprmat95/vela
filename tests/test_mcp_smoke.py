@@ -11,8 +11,7 @@ from urllib.parse import urlparse
 from fastapi.testclient import TestClient
 from mcp import Client
 
-from support import NOW
-from vela.adapters.background import InlineRunner
+from support import inline_worker, NOW
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -40,7 +39,7 @@ def make_app(preload=True):
         repos.products.upsert_many(hofj.load_catalog())
     vela = Vela(repos, hofj, FakePayments("http://test"), DEFAULT_TRAVELER, now=Clock())
     app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
-                     vela=vela, runner=InlineRunner(vela.orders), catalog_loader=None)
+                     vela=vela, worker=inline_worker(vela), catalog_loader=None)
     return app
 
 
@@ -52,6 +51,7 @@ class SmokeFlowTest(unittest.IsolatedAsyncioTestCase):
             def open_url(url):
                 opened.append(url)
                 self.assertEqual(tc.get(urlparse(url).path).status_code, 200)
+                app.state.worker.drain()        # la prenotazione passa dal worker
 
             async with Client(app.state.mcp) as client:
                 summary = await mcp_smoke.run_flow(client, open_url, expected_base="http://test", delay=0)

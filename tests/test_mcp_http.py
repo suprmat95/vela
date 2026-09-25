@@ -3,8 +3,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from support import NOW, FakeHofJ, StubPayments, make_product
-from vela.adapters.background import InlineRunner
+from support import inline_worker, NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.app import create_app
 from vela.config import Settings
@@ -19,14 +18,14 @@ INIT = {"protocolVersion": "2025-06-18", "capabilities": {},
 
 def make_app(public_url="http://test", with_domain=True):
     vela = None
-    runner = None
+    worker = None
     if with_domain:
         repos = MemoryRepositories()
         repos.products.upsert_many([make_product(3, price=350, country="ES", destination="Valencia")])
         vela = Vela(repos, FakeHofJ(), StubPayments(), now=lambda: NOW)
-        runner = InlineRunner(vela.orders)
+        worker = inline_worker(vela)
     return create_app(Settings(vela_upstream_mode="replay", vela_public_url=public_url),
-                      vela=vela, runner=runner, catalog_loader=None)
+                      vela=vela, worker=worker, catalog_loader=None)
 
 
 def rpc(client, method, params=None, **headers):

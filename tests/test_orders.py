@@ -3,11 +3,9 @@ from datetime import timedelta
 from decimal import Decimal
 
 from support import NOW, FakeHofJ
-from vela.adapters.background import BookingRunner, InlineRunner
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain.models import Order, OrderStatus, TravelerProfile
 from vela.domain.orders import NotFound, OrderService
-from vela.ports.hofj import UpstreamError
 
 
 def order(oid="o1", status=OrderStatus.AWAITING_PAYMENT):
@@ -97,63 +95,8 @@ class ExpireTest(unittest.TestCase):
             service().expire("nope")
 
 
-class CompleteBookingTest(unittest.TestCase):
-    def test_confirms_with_code(self):
-        hofj = FakeHofJ(code="R-654321")
-        s = service(order(status=OrderStatus.PAID_PENDING_BOOKING), hofj=hofj)
-        o = s.complete_booking("o1")
-        self.assertEqual((o.status, o.booking_code), (OrderStatus.CONFIRMED, "R-654321"))
-        self.assertEqual(hofj.calls[-1][1], "it-1")
-        self.assertEqual(hofj.calls[-1][2].payment_intent_id, "pi_replay_o1")
-        self.assertEqual(hofj.calls[-1][2].payment_type, "full")
-
-    def test_not_paid_is_untouched_and_no_call(self):
-        hofj = FakeHofJ()
-        s = service(order(), hofj=hofj)
-        self.assertEqual(s.complete_booking("o1").status, OrderStatus.AWAITING_PAYMENT)
-        self.assertEqual(hofj.calls, [])
-
-    def test_confirmed_is_not_booked_twice(self):
-        hofj = FakeHofJ()
-        s = service(order(status=OrderStatus.PAID_PENDING_BOOKING), hofj=hofj)
-        s.complete_booking("o1")
-        s.complete_booking("o1")
-        self.assertEqual(hofj.bookings, 1)
-
-    def test_failure_is_recorded(self):
-        s = service(order(status=OrderStatus.PAID_PENDING_BOOKING),
-                    hofj=FakeHofJ(fail_booking=UpstreamError("timeout")))
-        o = s.complete_booking("o1")
-        self.assertEqual((o.status, o.failure_reason), (OrderStatus.BOOKING_FAILED, "timeout"))
-
+class PendingBookingsTest(unittest.TestCase):
     def test_pending_ids(self):
         s = service(order("a", OrderStatus.PAID_PENDING_BOOKING), order("b"),
                     order("c", OrderStatus.PAID_PENDING_BOOKING))
         self.assertEqual(s.pending_booking_ids(), ["a", "c"])
-
-
-class RunnerTest(unittest.TestCase):
-    def test_inline_runner_resume(self):
-        s = service(order("a", OrderStatus.PAID_PENDING_BOOKING), order("b"))
-        self.assertEqual(InlineRunner(s).resume(), ["a"])
-        self.assertEqual(s.get("a").status, OrderStatus.CONFIRMED)
-        self.assertEqual(s.get("b").status, OrderStatus.AWAITING_PAYMENT)
-
-    def test_thread_runner_submit_and_resume(self):
-        s = service(order("a", OrderStatus.PAID_PENDING_BOOKING),
-                    order("b", OrderStatus.PAID_PENDING_BOOKING), order("c"))
-        runner = BookingRunner(s)
-        self.assertEqual(runner.resume(), ["a", "b"])
-        runner.submit("c")
-        runner.shutdown(wait=True)
-        self.assertEqual([s.get(i).status for i in "abc"],
-                         [OrderStatus.CONFIRMED, OrderStatus.CONFIRMED, OrderStatus.AWAITING_PAYMENT])
-
-    def test_thread_runner_swallows_unexpected_errors(self):
-        s = service(order("a", OrderStatus.PAID_PENDING_BOOKING), hofj=FakeHofJ(fail_booking=RuntimeError("boom")))
-        runner = BookingRunner(s)
-        with self.assertLogs("vela.booking", "ERROR") as logs:
-            runner.submit("a")
-            runner.shutdown(wait=True)
-        self.assertIn("a", logs.output[0])
-        self.assertEqual(s.get("a").status, OrderStatus.PAID_PENDING_BOOKING)   # riprovato al prossimo avvio

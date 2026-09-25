@@ -2972,3 +2972,51 @@ Falliscono per la ragione attesa: mancano `payment_check` e `LinkStatus`. Prima 
 - 🔧 Bash: Give test worlds a payment check handler and run suite
 
 - 🔧 Bash: Commit Task 13b
+
+Task 13b fatto: 660 test verdi. Passo al Task 14 (worker, cablaggio dell'app, checkout di replay, `/health`). Leggo il codice attuale.
+
+- 🔧 Bash: Read app wiring and runner usages
+
+- 🔧 Bash: Read health endpoint and remaining order tests
+
+- 🔧 Bash: Read app and health tests and Vela init
+
+Scrivo i test del worker, poi il worker stesso.
+
+- 🔧 Bash: Write worker tests, see fail, implement worker
+
+- 🔧 Bash: Wire worker into app, replay checkout, health; update tests
+
+- 🔧 Bash: Read remaining runner-based tests
+
+- 🔧 Bash: Remove runner-era tests and complete_booking, run suite
+
+Questi fallimenti sono attesi: la prenotazione non è più sincrona e i test dei flussi devono far avanzare la coda con `drain()`. Li aggiorno uno per uno.
+
+- 🔧 Bash: Inspect failing usecase flow tests
+
+- 🔧 Bash: Fix usecase flow tests and read app replay tests
+
+- 🔧 Bash: Fix app replay tests and rerun affected files
+
+- 🔧 Bash: Inspect remaining failures
+
+- 🔧 Bash: Fix imports and inspect rest/smoke flow
+
+- 🔧 Bash: Fix imports, rest drain; inspect smoke failure
+
+Sistemo l'ultimo test rotto, lo smoke test MCP: lo script di prova si aspetta la conferma subito dopo il checkout, mentre ora la prenotazione passa dal worker.
+
+- 🔧 Bash: Read smoke script flow and its test
+
+Lo script fa già polling dello stato. Basta che il test, dopo la visita del checkout, faccia avanzare la coda con `drain()`.
+
+- 🔧 Bash: Drain in smoke test, add health quota test, run suite
+
+- 🔧 Bash: Inspect resume test failure
+
+- 🔧 Bash: Fix restart clock and run suite
+
+Tutto verde: 661 test. Faccio il commit del Task 14.
+
+- 🔧 Bash: Commit Task 14
