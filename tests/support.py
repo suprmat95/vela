@@ -102,3 +102,20 @@ class StubPayments:
                            "pi_%s" % order.id)
         self.links.append(link)
         return link
+
+
+PROBLEM_JSON = "application/problem+json"
+
+
+def assert_problem(testcase, response, status, slug):
+    """Risposta RFC 7807 completa con `say` leggibile; restituisce il corpo."""
+    testcase.assertEqual(response.status_code, status, response.text)
+    testcase.assertTrue(response.headers["content-type"].startswith(PROBLEM_JSON),
+                        response.headers["content-type"])
+    body = response.json()
+    testcase.assertEqual(body["type"], "/problems/" + slug)
+    testcase.assertEqual(body["status"], status)
+    for key in ("title", "detail", "instance", "say"):
+        testcase.assertTrue(body.get(key), "campo 7807 mancante: %s" % key)
+    testcase.assertNotIn("http", body["say"])
+    return body

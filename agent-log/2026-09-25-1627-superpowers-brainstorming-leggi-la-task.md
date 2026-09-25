@@ -238,3 +238,19 @@ I test falliscono perché mancano `catalog` e `quota`. `test_health_needs_no_tok
 - 🔧 Bash: Run health tests and full suite
 
 - 🔧 Bash: Commit Task 2
+
+**Task 3**, fase RED: l'helper `assert_problem` e i test 7807.
+
+- 🔧 Bash: Write 7807 tests and watch them fail
+
+- 🔧 Bash: Check test file convention for main guard
+
+- 🔧 Bash: Drop main guard to match domain test style
+
+Il modulo manca, come atteso. Fase GREEN:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m4/vela/surfaces/problems.py
+
+- 🔧 Bash: Run 7807 tests and full suite
+
+- 🔧 Bash: Check test output for noise
