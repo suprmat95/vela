@@ -261,3 +261,7 @@ Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il c
 **Task 7 (porte e repository in memoria)**.
 
 - 🔧 Bash: TDD Task 7, commit
+
+**Task 8 (orchestratore: intento, proposta, rifiuto)**.
+
+- 🔧 Bash: TDD Task 8, commit

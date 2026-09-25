@@ -41,3 +41,64 @@ def assert_single_product(testcase, d):
     testcase.assertIn("say", d)
     testcase.assertNotIn("http", d["say"])
     testcase.assertNotIn("**", d["say"])
+
+
+from decimal import Decimal as _Decimal
+from datetime import timedelta as _timedelta
+
+from vela.ports.hofj import Itinerary, Pax
+from vela.ports.payments import PaymentLink
+
+
+class FakeHofJ:
+    """Porta HofJ finta e ispezionabile: totale configurabile, errori a comando."""
+
+    def __init__(self, total=None, fail_itinerary=None, fail_booking=None, code="R-000001"):
+        self.total = total
+        self.fail_itinerary = fail_itinerary
+        self.fail_booking = fail_booking
+        self.code = code
+        self.calls = []
+        self.customers = {}
+        self.pax = {}
+        self.bookings = 0
+
+    def create_itinerary(self, product, start_date, adults, rooms, currency):
+        self.calls.append(("create_itinerary", product.id, start_date, adults, rooms, currency))
+        if self.fail_itinerary:
+            raise self.fail_itinerary
+        iid = "it-%s" % product.id
+        self.pax[iid] = [Pax("ref-%d" % i) for i in range(adults)]
+        total = self.total if self.total is not None else product.price * adults
+        return Itinerary(iid, _Decimal(total), currency)
+
+    def set_customer(self, itinerary_id, customer):
+        self.calls.append(("set_customer", itinerary_id, customer))
+        self.customers[itinerary_id] = customer
+
+    def get_pax(self, itinerary_id):
+        self.calls.append(("get_pax", itinerary_id))
+        return list(self.pax[itinerary_id])
+
+    def set_pax(self, itinerary_id, pax):
+        self.calls.append(("set_pax", itinerary_id, pax))
+        self.pax[itinerary_id] = list(pax)
+
+    def create_booking(self, itinerary_id, proof):
+        self.calls.append(("create_booking", itinerary_id, proof))
+        if self.fail_booking:
+            raise self.fail_booking
+        self.bookings += 1
+        return self.code
+
+
+class StubPayments:
+    def __init__(self, base="http://pay.test"):
+        self.base = base
+        self.links = []
+
+    def create_payment_link(self, order):
+        link = PaymentLink("%s/%s" % (self.base, order.id), NOW + _timedelta(hours=24),
+                           "pi_%s" % order.id)
+        self.links.append(link)
+        return link
