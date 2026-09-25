@@ -243,3 +243,7 @@ Eseguo il piano M2 un task alla volta in TDD: per ogni task scrivo prima il test
 Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il commit.
 
 - 🔧 Bash: Run full suite and commit Task 1
+
+**Task 2 (catalogo)** e **Task 3 (dizionario geografico)**: per ognuno il test fallisce, poi scrivo l'implementazione e la suite torna verde.
+
+- 🔧 Bash: TDD Task 2 and Task 3, commit each
