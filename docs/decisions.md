@@ -284,7 +284,7 @@ Origine: intervista sulla macro task M9, piano in `docs/plans/2026-09-25-m9-pars
 | Combinazione parser/Haiku | Haiku sovrascrive i campi che restituisce validi; valori invalidi scartati; la lingua resta quella del parser | Scelta dell'utente; la validazione evita valori impossibili |
 | "Troppo caro" | Budget = 80% di prezzo × persone della proposta rifiutata, mai sopra il budget attuale; una cifra nel motivo vince | Scelta dell'utente (sconto percentuale) |
 | Frasi inglesi | `say_*`, domande di RF-04 e motivazione del chooser in it/en secondo `criteria.language` | Rimandate da M2 a M9 |
-| Regioni | Aggiunte a mano (Andalusia, Catalogna, Costa del Sol, Comunità Valenciana, Lombardia, Veneto, Emilia-Romagna, Occitania); nel chooser v1 valgono come corrispondenza di paese | Il catalogo ha città; M11 raffina |
+| Regioni | Aggiunte a mano (Andalusia, Catalogna, Costa del Sol, Comunità Valenciana, Lombardia, Veneto, Emilia-Romagna, Occitania); dopo l'integrazione con M11 stanno nella gerarchia `PARENTS` (vedi sotto) | Il catalogo ha città |
 | Documenti | Design e microtask in un solo file in `docs/plans/`, senza spec separata | Scelta dell'utente, come M0-M2 |
 
 ## 2026-09-25 — M9: decisioni prese durante l'esecuzione
@@ -296,3 +296,16 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m9-parser-rifiuti-haiku.md`
 | Versione SDK | `anthropic>=1.8.0` (installata 1.8.0, basata su `httpx2`); i test costruiscono le eccezioni con un `Request` di `httpx2` | Nessuna deviazione dal piano; l'SDK 1.x non usa più `httpx` |
 | Test Postgres di `update_criteria` | Eseguiti con `DATABASE_URL` (External Database URL di Render, schema `vela_test`): suite completa 353 test verdi, nessuno saltato | L'URL interno di Render (`dpg-…-a`) non si risolve fuori da Render: in locale serve l'External Database URL |
 | Prova reale di Haiku | Eseguita il 2026-09-25 con OK dell'utente, 1 chiamata: "un'idea per il ponte dei morti con la racchetta, siamo in 2" → periodo 2026-11-01/02 (`llm`), sport `null`, pax 2, nessuna domanda | Il fallback riconosce una festività che il parser non conosce e non inventa lo sport quando il testo è ambiguo |
+
+## 2026-09-25 — M9: integrazione con M4 e M11
+
+Origine: rebase di `task/m9` su `master` (che conteneva già M3, M4 e M11) prima del merge.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Metodo | Rebase di `task/m9` su `master`, poi merge su `master` | Regola della roadmap ("chi arriva secondo fa rebase"); scelta dell'utente |
+| Frasi | Base di M4 (`on_date`, `say_no_match(criterio, criteri)` con il valore citato, frasi di errore delle superfici) più la versione inglese di M9; la lingua di `say_no_match` viene dai criteri | Nessuna regressione delle frasi italiane di M4; le frasi di errore delle superfici restano italiane perché non conoscono l'intento |
+| Motivazione della proposta | Frasi del chooser v2 di M11 rese bilingui con la stessa struttura; `geo.where(area, lang)` | La motivazione "la regione nomina il paese" di M9 era per il chooser v1 ed è stata sostituita dalla gerarchia di M11 |
+| Regioni di M9 | Aggiunte a `PARENTS` (Malaga → Costa del Sol → Andalusia, Barcellona → Catalogna, Valencia → Comunità Valenciana, Milano → Lombardia, ...) con le preposizioni ("in Andalusia", "sulla Costa del Sol", "nella Comunità Valenciana") | Senza gerarchia il chooser v2 dichiarava "Non ho partenze compatibili a Andalusia" per un prodotto a Malaga; le scelte fissate da M11 sul catalogo registrato non cambiano |
+| Collisione dei log | `scripts/agents_log.py` aggiunge le prime 8 cifre dell'id sessione al nome quando il file esiste già con un'altra sessione | Le sessioni M4 e M9 sono partite nello stesso minuto con lo stesso prompt e si sovrascrivevano; il log di M4 resta con il suo nome, quello di M9 è `...-leggi-la-task-612db060.*` |
+
