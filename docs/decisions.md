@@ -370,3 +370,22 @@ Origine: intervista sulla macro task M5, piano in `docs/plans/2026-09-25-m5-hofj
 | Posizione in coda | Parte da 1 e conta solo i `purchase` in stato `pending` con `enqueued_at` precedente; `wait_seconds = ceil(pos × 60 ÷ acquisti_per_finestra)`; `say` arrotonda i minuti per eccesso, minimo 1 | Stima semplice e spiegabile |
 | Contratto delle risposte | Accept: `{order_id, status, position, wait_seconds, say}`. Status: `{order_id, status, position, wait_seconds, total, currency, price_from_total, total_differs, payment_url, booking_code, failure_reason, proposal_changed, proposal, say}`, con `null` quando non pertinente | Forma stabile per MCP, REST e test |
 | REST accept | 202 Accepted, outcome `order_queued`, header `Location: /v1/orders/{id}`; un doppio accept risponde 200 `order_status` con lo stato attuale | Semantica HTTP corretta per il lavoro asincrono |
+
+## 2026-09-25 — M5: verifiche di spec §8
+
+Origine: Task 1 del piano `docs/plans/2026-09-25-m5-hofj-reale.md`, eseguito con l'utente su
+staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`). Forme osservate in
+`docs/api/internal-checkout.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiamate usate | 9 HofJ (budget alzato da 8 a 9 con l'utente per il controllo dopo il booking) + 1 Stripe in modalità test (`PaymentIntent` 368,00 € `succeeded`) | Il valore 8 della roadmap non ha una motivazione registrata: 7 chiamate erano necessarie, 1 è stata spesa per il 404 in `locale=it`, 1 per verificare lo stato dopo il booking |
+| §8 riga 1 (chiave interna) | Superata: `POST /v1/itineraries` risponde 200, nessun 403 | Carrello `dlp5lyj338uf` creato, customer e pax scritti |
+| §8 riga 4 (quota) | `limitPerMinute` 120, finestra fissa di 60 s con `windowStartedAt`/`windowEndsAt` | Conferma il modello della finestra deciso nell'intervista |
+| §8 riga 3 (pagamento sul nostro Stripe) | **Non dimostrata**: `POST /v1/bookings` con il nostro `paymentIntentId` risponde 200, ma `checkout.status` resta `BookingInitiated` e `openAmount` resta 337. HofJ sembra ignorare il `paymentIntentId`. Decisione sul fallback rinviata all'utente (cambia M6) | Il 200 dice solo che la richiesta è stata accettata, non che il pagamento sia registrato |
+| Lingua del carrello | Il prodotto 118 in `locale=it` dà 502 con `detail` "returned 404"; in `locale=en` funziona. Rischio da annotare per la produzione (catalogo `it` di M1) | Un prodotto non tradotto fallisce al passo 0 e diventa errore del prodotto |
+| Errore del prodotto nell'adapter | Il testo reale `... POST /itinerary returned 404: ...` entra nei test del Task 15 come caso di `ProductError` | Conferma il criterio "502 con upstream 4xx nel `detail`" |
+| Codice di prenotazione | `POST /v1/bookings` restituisce `data: "<itineraryId>"`, non `R-…`: `booking_code` = quella stringa. La frase vocale andrà scandita | Forma osservata |
+| Totale reale | `checkout.total` (368, coincide con `totalPrice`); `openAmount` e `originalTotal` (337) registrati ma non usati. Origine della differenza di 31 € non nota | `total` è l'importo del carrello completo con hotel preselezionato |
+| Pax | `pax-1` è precompilato dal customer: il `PUT pax` scrive comunque tutti i nomi preservando i `refId` | Nessun cambio al job |
+

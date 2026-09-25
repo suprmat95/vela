@@ -980,3 +980,349 @@ Il replay simula latenza e 429 con questi valori.
 - 🔧 ExitPlanMode
 
 - 🔧 Bash: Copy plan into docs and append decisions
+
+- 🔧 Bash: Commit the M5 plan and decisions
+
+Il piano di esecuzione per M5 è in `docs/plans/2026-09-25-m5-hofj-reale.md` e le decisioni dell'intervista sono state aggiunte in fondo a `docs/decisions.md`. Tutto è committato sul branch `task/m5`; non ho ancora scritto codice né lanciato test.
+
+**Come è organizzato.** Venti microtask, dal Task 0 al Task 19. Ognuno in TDD, con i file da toccare, le interfacce che usa e che produce, i nomi dei test e un commit. In fondo c'è una tabella che collega ogni test di completamento della roadmap ai task e ai test che lo coprono.
+
+**Le decisioni principali dell'intervista:**
+- **Verifiche di §8:** su staging, al massimo 8 chiamate HofJ più 1 chiamata Stripe in modalità test per ottenere il `paymentIntentId`.
+- **Quota:** finestra fissa di 60 s allineata a HofJ, margine del 10% sul limite (quindi 108 chiamate utili) e riserva di 21 per le prenotazioni.
+- **Worker:** thread dentro ogni processo, 4 per istanza, che prelevano i job dalla tabella con `FOR UPDATE SKIP LOCKED`.
+- **Accettazione via REST:** risponde 202 con posizione e attesa. Le risposte di accettazione e di stato hanno una forma fissa, con `null` sui campi non pertinenti.
+- **Modalità `live`:** si ferma all'avvio finché M6 non porta Stripe. Questo si discosta dalla roadmap ed è annotato in `docs/decisions.md`.
+
+**Quando lanci l'esecuzione, il Task 1 non procede da solo.** Il piano lo segna come manuale: prima di fare chiamate reali ti dichiaro quali e quante, e aspetto il tuo OK. Servono `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND` e `STRIPE_SECRET_KEY` nell'ambiente. Se HofJ rifiuta il nostro `paymentIntentId`, l'esecuzione si ferma e ti chiedo come procedere, perché cambia il design di M6.
+
+**Cosa non mi convince del tutto:**
+- Il criterio che distingue un errore del prodotto da un guasto di rete legge il testo del campo `detail` nei 502 di HofJ. È fragile, e va confermato con le risposte reali del Task 1.
+- Con 4 thread e acquisti da circa 20 secondi, una singola istanza fa circa 12 acquisti al minuto, sotto i 17,4 che la quota permetterebbe. Quindi, con una sola istanza, la stima di attesa sarà ottimistica. Lo vedremo nel load test di M13.
+- Se M6 aggiunge anch'essa una migrazione `0003`, chi mergia per secondo deve rinumerare la propria.
+
+Il log di sessione che l'hook ha aggiunto al commit ha "m8" nel nome, perché lo prende dal titolo della sessione. Il contenuto riguarda M5.
+
+## Utente 18:20
+
+aspetta pero continuo a non capire perche il massimo dell 8 chiamate,
+
+## Agente 18:21
+
+- 🔧 Bash: Trace origin of the 8-call limit
+
+- 🔧 Bash: Search session logs for the 8-call rationale
+
+Non c'è una ragione documentata per il numero 8. Il valore compare solo alla riga 240 di `docs/roadmap.md`, entrato con il commit `3c7d152`, lo stesso che ha creato la roadmap. Non ha una motivazione in `docs/decisions.md` né nei log di sessione in `agent-log/`. La spiegazione che ti ho dato prima, cioè 7 chiamate necessarie più 1 di margine, era una mia ricostruzione, non una decisione registrata da qualche parte.
+
+Di tecnico c'è solo questo:
+- **Un tetto serve.** `CLAUDE.md` chiede di dichiarare quante chiamate si fanno verso servizi esterni. Inoltre la quota di HofJ è di 120 chiamate al minuto ed è condivisa con chiunque usi la stessa chiave.
+- **Il numero giusto dipende da cosa si vuole verificare.** Per rispondere alla domanda principale di §8, cioè se HofJ accetta un pagamento fatto sul nostro Stripe, serve un booking su un carrello completo:
+
+| # | Chiamata | Perché serve |
+|---|---|---|
+| 1 | `GET /v1/quota` | limite reale |
+| 2 | `POST /v1/itineraries` | la chiave può creare carrelli? |
+| 3 | `PUT …/customer` | il carrello va completato prima del booking |
+| 4 | `GET …/pax` | servono i `refId` per il passo 5 |
+| 5 | `PUT …/pax` | completa il carrello |
+| 6 | `GET /v1/itineraries/{id}` | dove sta il totale reale |
+| 7 | `POST /v1/bookings` | la risposta a §8 riga 3 |
+
+Quindi il minimo è 7. Tutto il resto è margine per eventuali ripetizioni, per esempio un 502 da timeout che su staging è già capitato. Che il tetto sia 8, 9 o 10 è una scelta, non un calcolo. Rispetto alle 120 chiamate al minuto della quota la differenza è trascurabile.
+
+Nella riga che ho scritto in `docs/decisions.md` la motivazione suona più solida di quanto sia. La correggo così: «7 chiamate necessarie + N di margine per ripetizioni; il valore 8 della roadmap non ha una motivazione registrata». Scegli tu N, oppure tengo 8 come nella roadmap (1 di margine).
+
+## Utente 18:22
+
+/superpowers:test-driven-development: docs/plans/2026-09-25-m5-hofj-reale.md
+
+## Agente 18:22
+
+- 🔧 Bash: Run baseline suite and check env vars presence
+
+Ho seguito il piano con TDD. Il Task 0 era già fatto (piano e decisioni committati). La suite di partenza è verde: 390 test, 12 saltati perché manca `DATABASE_URL`.
+
+Il Task 1 (verifiche di §8 su staging) però non può partire: nell'ambiente di questa sessione mancano `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND` e `STRIPE_SECRET_KEY`. Ho controllato solo che ci fossero, senza leggerne il valore.
+
+Per le verifiche ti propongo di fare 7 chiamate a HofJ più 1 di margine, cioè tenere l'8 della roadmap, e 1 chiamata a Stripe in modalità test. Non mi hai ancora detto quanto margine vuoi: se non indichi altro resto su 8 e correggo la motivazione in `docs/decisions.md` come ti ho detto.
+
+Vedo due strade:
+
+1. **Mi dai le chiavi e faccio il Task 1 adesso.** Il modo più semplice è esportarle nel profilo della shell (per esempio `~/.zshrc`) e riavviare la sessione, perché ogni comando che lancio parte da lì. Prima di ogni chiamata ti chiedo comunque l'OK.
+2. **Rimando il Task 1 e passo al Task 2.** Dal Task 2 al Task 14 il lavoro non dipende da HofJ reale e si testa con finti in memoria. Solo l'adapter HTTP (Task 15) ha bisogno delle forme reali, quindi farei il Task 1 appena prima.
+
+Ti consiglio la seconda, così non resti bloccato sulle chiavi. `CLAUDE.md` chiede un task alla volta: quale scegli? Se scegli la seconda parto dal Task 2 (i nuovi parametri in `Settings`) e mi fermo a riferirti dopo quel task.
+
+## Utente 18:30
+
+cos'è HOFJ_BRAND?
+
+## Agente 18:30
+
+- 🔧 Bash: Find documentation of HOFJ_BRAND
+
+- 🔧 Bash: Read brand parameter docs
+
+`HOFJ_BRAND` dice a HofJ **per quale sito di vendita stiamo lavorando**. HofJ serve più siti di viaggi, che chiama "distribution channel" o "brand", e ognuno ha il proprio catalogo e i propri prezzi. Il valore finisce nel parametro `?brand=` che l'adapter aggiunge a ogni chiamata.
+
+**I brand che esistono** (da `docs/api/distribution-channels.md`):
+
+| Ambiente | Brand disponibili |
+|---|---|
+| Produzione (`api.hofj.com`) | `weebora.com` (padel, il default se il parametro manca), `terrarossa.com`, `booking.hofj.com` |
+| Staging (`staging.api.hofj.com`) | `staging.weebora.com`, `staging.tennis.weebora.com`, `staging.hofj.com` |
+
+- **Si può usare il nome o il dominio.** HofJ accetta sia il nome (`Weebora`) sia il dominio (`weebora.com`).
+- **Un brand sconosciuto dà 400.** HofJ risponde con un messaggio esplicito.
+- **In replay non serve.** Nel README risulta obbligatorio solo in modalità `live`.
+
+**Per noi:**
+
+- **Valore per il Task 1:** `HOFJ_BRAND=staging.weebora.com`, cioè il brand che abbiamo scelto per le verifiche su staging (`docs/decisions.md:279`).
+- **Non è un segreto,** a differenza di `HOFJ_API_KEY`. È un nome pubblico, quindi puoi scriverlo anche in chiaro qui in chat.
+- **Va abbinato all'host giusto:** `HOFJ_BASE_URL=https://staging.api.hofj.com`. Un brand di staging su un host di produzione darebbe 400.
+
+Di segreti restano quindi solo `HOFJ_API_KEY` e `STRIPE_SECRET_KEY`, che devono arrivare dall'ambiente e non dalla chat.
+
+La domanda di prima resta aperta: faccio il Task 1 adesso, dopo che hai impostato le chiavi, oppure lo rimando a prima del Task 15 e parto dal Task 2?
+
+## Utente 18:32
+
+invece la HOFJ_API_KEY non è VELA_API_TOKEN?
+
+## Agente 18:32
+
+No, sono due chiavi diverse che vanno in direzioni opposte:
+
+| | `HOFJ_API_KEY` | `VELA_API_TOKEN` |
+|---|---|---|
+| Direzione | **in uscita**: Vela → HofJ | **in entrata**: client → Vela |
+| Chi la rilascia | HofJ (è la chiave del brief, profilo `internal`) | la scegliamo noi, è un segreto qualsiasi |
+| Dove si usa | `Authorization: Bearer …` su ogni chiamata a `api.hofj.com`/`staging.api.hofj.com`, dentro l'adapter HTTP | i client la devono presentare per chiamare la nostra REST `/v1/*` (M4); se manca, `/v1/*` risponde 503 `rest-not-configured` |
+| Serve per il Task 1 | **sì** | no |
+
+In pratica `HOFJ_API_KEY` è il nostro badge per entrare in HofJ, mentre `VELA_API_TOKEN` è il badge che chiediamo a chi vuole entrare da noi. Se usassimo lo stesso valore per tutte e due, chiunque abbia accesso alla nostra REST potrebbe chiamare HofJ a nostro nome e consumarci la quota.
+
+Una cosa utile da sapere: in M1 gli script di registrazione del catalogo leggevano la chiave HofJ anche da `API_BEAR_KEY`, se `HOFJ_API_KEY` mancava (`docs/decisions.md`). Se nel tuo ambiente la chiave HofJ si chiama così, è quella giusta per il Task 1. L'app però legge solo `HOFJ_API_KEY`.
+
+## Utente 18:33
+
+ok ho messo le chiavi, dimmi se va
+
+## Agente 18:33
+
+- 🔧 Bash: Check which keys are set without printing secrets
+
+- 🔧 Bash: Check .env existence and zsh profile vars without values
+
+- 🔧 Bash: Look for precedent on loading .env
+
+- 🔧 Bash: Check how M1 ran scripts with the key
+
+C'è un precedente in M1: le variabili si caricano con `set -a; . ./.env; set +a` nella stessa shell del comando, senza mai aprire né stampare il file. Controllo che ci siano.
+
+- 🔧 Bash: Load .env silently and report which keys are present
+
+Le chiavi ci sono tutte. Le ho caricate dal `.env` con `set -a; . ./.env; set +a`, come in M1, senza aprire né stampare il file. Ho mostrato solo i due valori che non sono segreti.
+
+| Variabile | Esito |
+|---|---|
+| `HOFJ_API_KEY` | presente |
+| `STRIPE_SECRET_KEY` | presente, **chiave di test** (`sk_test_…`) ✓ |
+| `HOFJ_BASE_URL` | `api.hofj.com/v1/` ⚠️ |
+| `HOFJ_BRAND` | `Weebora` ⚠️ |
+
+**Due problemi prima del Task 1:**
+
+1. **L'ambiente è produzione, non staging.** `api.hofj.com` con il brand `Weebora` è il sito vero. Nell'intervista abbiamo deciso staging perché lì un booking non crea una prenotazione reale. Con questi valori il `POST /v1/bookings` rischierebbe una prenotazione vera. Per staging servono:
+   ```
+   HOFJ_BASE_URL=https://staging.api.hofj.com
+   HOFJ_BRAND=staging.weebora.com
+   ```
+   Resta un'incognita: non so se la tua chiave vale anche su staging. Una decisione precedente (`docs/decisions.md:78`) prevedeva di tornare a produzione se staging non accettava la chiave.
+
+2. **Il formato di `HOFJ_BASE_URL`.** Manca lo schema `https://` e c'è già `/v1/` in fondo. L'adapter aggiunge i percorsi completi (`/v1/itineraries` e simili), quindi uscirebbe `api.hofj.com/v1//v1/itineraries`. Il formato atteso è solo `https://host`. Anche lo script di M1 (`scripts/api_explore.py`) costruisce gli URL così.
+
+Non ho fatto nessuna chiamata. Come vuoi procedere?
+- **Correggi il `.env` per staging** con i due valori sopra, e poi ti dichiaro le chiamate.
+- **Resti su produzione.** In questo caso propongo di fermarmi prima del booking, cioè 6 chiamate. La verifica della riga 3 di §8 si farebbe su staging o in M7, e andrebbe registrata come modifica della decisione.
+
+## Utente 18:35
+
+cambiato
+
+## Agente 18:35
+
+- 🔧 Bash: Reload .env and verify corrected values
+
+Ricaricato, ma nel `.env` i valori non sono ancora quelli giusti:
+
+| Variabile | Adesso | Serve |
+|---|---|---|
+| `HOFJ_BASE_URL` | `https://staging.hofj.com/` | `https://staging.api.hofj.com` |
+| `HOFJ_BRAND` | `Weebora` | `staging.weebora.com` |
+
+- **`staging.hofj.com` non è l'host delle API.** Nei documenti compare come brand, cioè il sito di vendita di staging di House of Journey, non come host. Le API rispondono su `staging.api.hofj.com`, che è l'host dove sono stati verificati i carrelli (`docs/easter-eggs.md`). Va bene anche con la `/` finale: la tolgo io nell'adapter.
+- **`Weebora` è il brand di produzione.** Su staging il brand verificato è `staging.weebora.com`. Con `Weebora` staging potrebbe rispondere 400 «brand sconosciuto», oppure usare un catalogo diverso da quello di prova.
+
+Quando hai corretto il file dimmelo e ricontrollo. Finché i valori non tornano non faccio nessuna chiamata.
+
+## Utente 18:35
+
+fartto
+
+## Agente 18:35
+
+- 🔧 Bash: Reload .env and verify corrected values
+
+Ora il brand è giusto (`staging.weebora.com`). `HOFJ_BASE_URL` invece è ancora `https://staging.hofj.com/`: forse la riga non è stata salvata.
+
+Deve essere:
+```
+HOFJ_BASE_URL=https://staging.api.hofj.com
+```
+Nota il `.api.` in mezzo al nome. Senza, le chiamate andrebbero al sito di vendita e non alle API.
+
+## Utente 18:36
+
+fartto
+
+## Agente 18:36
+
+- 🔧 Bash: Reload .env and verify corrected values
+
+Adesso è tutto a posto:
+
+| Variabile | Valore |
+|---|---|
+| `HOFJ_BASE_URL` | `https://staging.api.hofj.com` ✓ |
+| `HOFJ_BRAND` | `staging.weebora.com` ✓ |
+| `HOFJ_API_KEY` | presente ✓ |
+| `STRIPE_SECRET_KEY` | chiave di test ✓ |
+
+## Task 1: le chiamate che farei
+
+**Su HofJ staging, 7 chiamate più al massimo 1 ripetizione (8 in tutto):**
+
+| # | Chiamata | Dati |
+|---|---|---|
+| 1 | `GET /v1/quota` | — |
+| 2 | `POST /v1/itineraries?brand=staging.weebora.com&locale=it` | `{"productId":118,"startDate":"2026-12-08","adults":2,"rooms":1,"currency":"EUR"}`, la stessa combinazione già riuscita su staging (`docs/easter-eggs.md`) |
+| 3 | `PUT …/customer` | un cliente di prova con dati finti (Mario Rossi, email `test@example.com`) e l'indirizzo nel formato del contratto OAS: `street1`, `postalCode`, `city`, `region`, `countryCode` |
+| 4 | `GET …/pax` | — |
+| 5 | `PUT …/pax` | nomi finti, `refId` invariati |
+| 6 | `GET /v1/itineraries/{id}` | lettura del totale reale |
+| 7 | `POST /v1/bookings` | `{itineraryId, paymentType:"full", paymentIntentId, paymentStatus:"succeeded"}` |
+| (8) | una sola ripetizione | solo se una chiamata risponde 502 per timeout; altrimenti non la faccio |
+
+**Su Stripe, 1 chiamata in modalità test**, tra la 6 e la 7:
+- Crea un `PaymentIntent` per il totale letto alla chiamata 6, confermato con la carta di prova `pm_card_visa`.
+- Non si muove denaro vero.
+
+**Come le eseguo:**
+- Uno script temporaneo nella cartella di lavoro della sessione (scratchpad), fuori dal repo. Carica le chiavi dal `.env` con `set -a` e non stampa mai chiavi né token.
+- Mi fermo alla prima risposta inattesa: un 403 sulla chiamata 2 o un booking rifiutato.
+- Salvo per ogni chiamata lo stato HTTP e la forma della risposta, poi ti riporto l'esito prima di scrivere in `docs/`.
+
+Il booking crea una prenotazione sull'ambiente di staging (non reale) e non abbiamo un modo per cancellarla. Procedo?
+
+## Utente 18:37
+
+vai
+
+## Agente 18:37
+
+- 🔧 Write /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m5/4e77c5e2-1cbd-49a4-a46b-71f152659842/scratchpad/s8_checks.py
+
+- 🔧 Bash: Run the section 8 checks against HofJ staging
+
+- 🔧 Bash: Check the earlier successful staging itinerary call
+
+Mi sono fermato alla seconda chiamata, come previsto per una risposta inattesa. Finora ho usato **2 chiamate HofJ su 8 e 0 Stripe**.
+
+| # | Chiamata | Esito |
+|---|---|---|
+| 1 | `GET /v1/quota` | 200: `limitPerMinute` 120, client `test-dev-2`, finestra di 60 s con inizio e fine (`windowStartedAt`/`windowEndsAt`), come abbiamo modellato |
+| 2 | `POST /v1/itineraries` (prodotto 118, `locale=it`) | **502** `upstream-error`, con `detail`: `Brand "staging.weebora.com" POST /itinerary returned 404 … NOT_FOUND_ERROR … {"productId":118,"locale":"it"}` |
+
+**Perché è fallita.** Il carrello riuscito in `docs/easter-eggs.md` usava `locale=en`, noi abbiamo mandato `locale=it`. Su staging il prodotto 118 sembra esistere solo in inglese: la chiave, il brand e il profilo interno funzionano (niente 403), manca il prodotto nella lingua richiesta.
+
+**Cosa ci dice già questo errore:**
+- **Riga 1 di §8:** probabilmente superata, visto che non è arrivato un 403. Lo confermerà un carrello creato.
+- **Errore del prodotto:** è un caso reale del criterio che abbiamo deciso: un 502 il cui `detail` riporta un 404 upstream va trattato come errore del prodotto. Userò questo testo nei test dell'adapter (Task 15).
+- **La lingua conta nella creazione del carrello.** L'app usa `it`, quindi un prodotto non tradotto fallirebbe al passo 0. In produzione il catalogo `it` di M1 esiste, ma è un rischio da annotare.
+
+**Per continuare** rifarei la stessa chiamata con `locale=en`. Il conto diventa esattamente 8: le 2 già fatte, il nuovo tentativo e le 5 che restano (customer, lettura pax, scrittura pax, lettura del totale, booking), più 1 chiamata Stripe. Non resta margine: se qualcosa va in timeout mi fermo e ti chiedo.
+
+Scegli tu:
+1. **Riprovo con `locale=en`**, con budget fisso a 8. Ti consiglio questa: è la combinazione già verificata.
+2. **Alzo il budget a 9**, per avere di nuovo 1 ripetizione di margine.
+3. **Mi fermo qui** e registro l'esito parziale.
+
+## Utente 18:39
+
+riprova con en
+
+## Agente 18:39
+
+- 🔧 Bash: Prepare rerun with locale en and carried-over call count
+
+- 🔧 Bash: Rerun section 8 checks with locale en
+
+- 🔧 Bash: Inspect recorded response shapes
+
+Il flusso completo è passato su staging. Ho usato **8 chiamate HofJ su 8** e **1 Stripe**.
+
+| # | Chiamata | Esito |
+|---|---|---|
+| 1 | `GET /v1/quota` | 200: limite 120, finestra fissa di 60 s |
+| 2 | `POST /v1/itineraries` con `locale=it` | 502: il prodotto 118 non esiste in italiano su staging |
+| 3 | `POST /v1/itineraries` con `locale=en` | 200: `itineraryId` `dlp5lyj338uf`, `meta: {now}` |
+| 4 | `PUT …/customer` (indirizzo nel formato OAS) | 200: `data: {now}`, `meta: {}` |
+| 5 | `GET …/pax` | 200: `refId` `pax-1`, `pax-2`. **Il primo passeggero è già compilato dai dati del cliente** |
+| 6 | `PUT …/pax` | 200 |
+| 7 | `GET /v1/itineraries/{id}` | 200 (dettagli sotto) |
+| — | Stripe `PaymentIntent` di test | `succeeded`, 368,00 € |
+| 8 | `POST /v1/bookings` con `paymentIntentId` | **200**: `{"data": "dlp5lyj338uf", "meta": {"now": …}}` |
+
+**Tre cose che cambiano le nostre ipotesi:**
+
+1. **Il booking non restituisce un codice `R-…`.** Restituisce lo stesso `itineraryId`. Il nostro `booking_code` sarà quindi quell'id. La frase «La tua prenotazione è confermata, codice R-789012» leggerebbe una stringa come `dlp5lyj338uf`. Si può fare, ma al telefono va scandita lettera per lettera.
+
+2. **Non sappiamo ancora se HofJ controlla il pagamento.** La risposta 200 dice che il booking è stato accettato, ma non se HofJ ha verificato il `paymentIntentId` o lo ha ignorato. La riga 3 di §8 chiede proprio questo: «rifiuta **o ignora**». Per saperlo servirebbero:
+   - 1 chiamata in più, `GET /v1/itineraries/{id}`, per vedere se `checkout.status` passa da `BookingInitiated` a uno stato pagato o confermato;
+   - oppure un secondo booking con un `paymentIntentId` inventato: se risponde 200 anche quello, il campo viene ignorato.
+
+3. **Il totale non è univoco.** `checkout` contiene tre importi:
+
+   | Campo | Importo |
+   |---|---|
+   | `total` | 368 € |
+   | `totalPrice` | 368,00 € |
+   | `originalTotal` | 337 € |
+   | `openAmount` | 337 € |
+
+   Il pagamento di prova è stato di 368 €. Non so da cosa venga la differenza di 31 € (commissioni? un supplemento sull'hotel preselezionato, che nel carrello vale 157 €?). Per il link di pagamento propongo `checkout.total`, perché coincide con `totalPrice`.
+
+**Cosa ti propongo adesso:**
+- **Per sciogliere il punto 2:** alzare il budget di 1 o 2 chiamate. Consiglio la sola lettura dell'itinerario dopo il booking, che costa 1 chiamata e non crea nulla.
+- **Poi:** registrare tutto in `docs/decisions.md` e `docs/api/internal-checkout.md` e fare il commit del Task 1, annotando anche la questione della lingua (`it` contro `en`) e il fatto che il `booking_code` è l'`itineraryId`.
+
+Faccio la chiamata di controllo in più?
+
+## Utente 18:42
+
+si alza il budget e per annota
+
+## Agente 18:42
+
+- 🔧 Bash: One extra call: read itinerary state after booking
+
+- 🔧 Bash: Read internal-checkout doc structure
+
+Nessuna novità dopo il booking: `checkout.status` è ancora `BookingInitiated` e `openAmount` resta a 337 €. Registro tutto nei documenti.
+
+- 🔧 Bash: Record section 8 results in docs
+
+- 🔧 Bash: Commit Task 1 results
