@@ -1,5 +1,8 @@
 """App FastAPI di Vela: un solo processo per REST, MCP e webhook (RNF-02).
 
+La superficie MCP (M3) è innestata su ``/mcp`` in ogni modalità; il suo session manager gira nel
+lifespan.
+
 ``create_app`` è la factory usata dai test; ``app`` è l'istanza per ``uvicorn vela.app:app``.
 In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan carica il
 catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
@@ -19,6 +22,7 @@ from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.models import Product
 from vela.domain.usecases import Vela
 from vela.surfaces.health import router as health_router
+from vela.surfaces.mcp import build_mcp, mcp_routes
 from vela.surfaces.replay import router as replay_router
 
 REPLAY = "replay"
@@ -53,11 +57,12 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        if app.state.vela is not None:
-            app.state.bootstrap = bootstrap(app.state.vela, app.state.runner, app.state.catalog_loader)
-        yield
-        if app.state.runner is not None:
-            app.state.runner.shutdown(wait=False)
+        async with app.state.mcp.session_manager.run():
+            if app.state.vela is not None:
+                app.state.bootstrap = bootstrap(app.state.vela, app.state.runner, app.state.catalog_loader)
+            yield
+            if app.state.runner is not None:
+                app.state.runner.shutdown(wait=False)
 
     app = FastAPI(title="Vela", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -66,9 +71,11 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     app.state.runner = runner
     app.state.catalog_loader = catalog_loader
     app.state.bootstrap = None
+    app.state.mcp = build_mcp(lambda: app.state.vela)
     app.include_router(health_router)
     if settings.vela_upstream_mode == REPLAY:
         app.include_router(replay_router)
+    app.router.routes.extend(mcp_routes(app.state.mcp, settings.vela_public_url))
     return app
 
 

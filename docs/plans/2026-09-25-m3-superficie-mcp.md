@@ -710,8 +710,9 @@ class McpHttpTest(unittest.TestCase):
 
 class McpSecurityTest(unittest.TestCase):
     def test_unknown_host_is_421(self):
-        with TestClient(make_app()) as c:
+        with TestClient(make_app()) as c, self.assertLogs(level="WARNING") as logs:
             self.assertEqual(rpc(c, "initialize", INIT, Host="evil.example").status_code, 421)
+        self.assertIn("Invalid Host header", "\n".join(logs.output))
 
     def test_public_url_host_is_accepted(self):
         with TestClient(make_app(public_url="https://vela-n506.onrender.com/")) as c:
@@ -719,8 +720,9 @@ class McpSecurityTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_foreign_origin_is_403(self):
-        with TestClient(make_app()) as c:
+        with TestClient(make_app()) as c, self.assertLogs(level="WARNING") as logs:
             self.assertEqual(rpc(c, "initialize", INIT, Origin="https://evil.example").status_code, 403)
+        self.assertIn("Invalid Origin header", "\n".join(logs.output))
 
     def test_claude_origin_is_accepted(self):
         with TestClient(make_app()) as c:

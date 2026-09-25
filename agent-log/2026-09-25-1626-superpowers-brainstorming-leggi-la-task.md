@@ -267,3 +267,13 @@ I 15 test passano. Resta una riga di log dell'SDK ("rejected arguments") che spo
 La suite è verde: 289 test, 11 saltati. Allineo il piano al test modificato e faccio il commit.
 
 - 🔧 Bash: Sync plan with test change and commit task 2
+
+Task 3, fase RED: test HTTP di `/mcp` nell'app FastAPI.
+
+- 🔧 Bash: Write HTTP tests and watch them fail
+
+Tutti falliscono perché `/mcp` risponde 404, che è il motivo giusto. `test_other_routes_are_unchanged` passa già: fa da guardia contro le regressioni. Ora modifico `vela/app.py`.
+
+- 🔧 Bash: Mount MCP routes and lifespan in app.py, run HTTP tests
+
+- 🔧 Bash: Capture SDK warnings in tests; run suite
