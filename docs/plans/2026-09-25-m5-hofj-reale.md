@@ -65,6 +65,29 @@ Data: 2026-09-25. Branch: `task/m5`. Destinazione di questo file: `docs/plans/20
 | Contratto delle risposte | Accept: `{order_id, status, position, wait_seconds, say}`. Status: `{order_id, status, position, wait_seconds, total, currency, price_from_total, total_differs, payment_url, booking_code, failure_reason, proposal_changed, proposal, say}`, con `null` quando non pertinente | Forma stabile per MCP, REST e test |
 | REST accept | 202 Accepted, outcome `order_queued`, header `Location: /v1/orders/{id}`; un doppio accept risponde 200 `order_status` con lo stato attuale | Semantica HTTP corretta per il lavoro asincrono |
 
+## Modifiche dopo le verifiche di §8 (Task 1, 2026-09-25)
+
+Il Task 1 è stato eseguito su staging (`docs/decisions.md`, "M5: verifiche di spec §8"). Queste
+regole prevalgono sul resto del piano dove differiscono:
+
+- **Importo del link = `checkout.openAmount`**, non `checkout.total`. DOCS: `paymentType: "full"`
+  addebita "the entire open amount". `get_itinerary` legge `Itinerary(total=openAmount)`;
+  `checkout.total` è registrato solo nei test dell'adapter come campo ignorato.
+  `Money.amount` è una stringa, a volte senza decimali (`"337"`): `Decimal(amount)`.
+- **Booking**: `create_booking` manda `{itineraryId, paymentType: "full"}`. Non si inoltra il
+  `paymentIntentId`, perché il pagamento previsto è sul PaymentIntent del brand site
+  (decisione su M6 qui sotto). `PaymentProof` resta nella porta ma l'adapter HTTP ignora
+  `payment_intent_id`.
+- **Codice di prenotazione** = la stringa `data` restituita, qualunque forma abbia (`R-…` da
+  DOCS, `itineraryId` osservato senza pagamento HofJ). Nessuna validazione del formato.
+- **Envelope reale**: `meta` è `{now}` o `{}`; `PUT customer` e `PUT pax` rispondono
+  `data: {now}`. L'adapter non legge `data` delle PUT.
+- **Test dell'adapter (Task 15)** con i corpi reali: 502 `detail` `Brand "…" POST /itinerary
+  returned 404: {…NOT_FOUND_ERROR…}` → `ProductError`; `GET pax` con `pax-1` precompilato.
+- **Lingua**: `HofJHttp` usa `locale` del costruttore (default `it`). Un prodotto non tradotto
+  dà 502 con 404 upstream → `ProductError` → sostituzione (RF-17). Nessun fallback su `en` in
+  M5; il rischio è annotato per M7.
+
 ## Global Constraints
 
 - Nessuna dipendenza nuova in `pyproject.toml` e nessuna modifica a `uv.lock`. Nessuna variabile d'ambiente nuova (spec §6).
@@ -149,7 +172,7 @@ queued ──(job ok)──────────────▶ awaiting_paym
 | 1 | `set_customer` | 1 | `job.step=2` |
 | 2 | `get_pax` | 1 | in memoria del job; il passo 3 lo ripete se ripreso (costo già nel blocco) |
 | 3 | `set_pax` (nomi, `refId` preservati) | 1 | `job.step=4` |
-| 4 | `get_itinerary` → totale reale | 1 | `order.total` |
+| 4 | `get_itinerary` → importo da pagare (`checkout.openAmount`) | 1 | `order.total` |
 | 5 | `payments.create_payment_link(order)` | 0 | `payment_url`, `payment_ref`, stato `awaiting_payment`, job `done` |
 
 Nota: i passi 2 e 3 sono un'unità di ripresa. Se il job si interrompe dopo il passo 2, riparte dal 2 prenotando 3 chiamate.
@@ -491,13 +514,15 @@ purchase_waiting(now) -> bool
 - `test_create_itinerary_request_shape`
 - `test_set_customer_uses_oas_address`
 - `test_set_pax_preserves_ref_ids`
-- `test_get_itinerary_reads_real_total`
-- `test_create_booking_request_shape_and_code`
+- `test_get_itinerary_reads_open_amount` (corpo reale: `total` 368, `openAmount` 337 → 337)
+- `test_create_booking_sends_only_itinerary_and_payment_type` (niente `paymentIntentId`)
+- `test_create_booking_returns_data_string_as_code`
 - `test_get_quota_snapshot`
 - `test_timeout_is_upstream_error`
 - `test_429_is_quota_error_with_retry_after`
 - `test_401_403_are_config_errors`
-- `test_502_wrong_id_is_product_error`
+- `test_502_wrong_id_is_product_error` (con il `detail` reale del Task 1)
+- `test_money_amount_without_decimals`
 - `test_502_reservation_period_is_product_error`
 - `test_502_upstream_timeout_is_upstream_error`
 - `test_502_on_customer_is_upstream_error`

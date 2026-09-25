@@ -1432,3 +1432,53 @@ I have enough to explain why. I'll update the docs and give you the full picture
 - 🔧 Bash: Correct overstated conclusions in docs with doc findings
 
 - 🔧 Bash: Commit corrected findings
+
+Ho letto il contratto OpenAPI e le pagine del sito di HofJ ("Checkout flow (internal)", "Agnostic cart", "Staging" e la pagina del booking). Il motivo principale è quasi certamente questo: **il pagamento che HofJ si aspetta non è il nostro.**
+
+**Come funziona secondo la documentazione.** È il diagramma di sequenza della pagina "Checkout flow (internal)":
+
+1. `POST /v1/itineraries/{id}/payment {paymentType}`: **il sito del brand (Weebora) crea un PaymentIntent sul proprio account Stripe** e restituisce il `client_secret`.
+2. Il client conferma quel PaymentIntent con Stripe.js (`confirmCardPayment`).
+3. `POST /v1/bookings {itineraryId, paymentType}`: il sito del brand restituisce il codice di prenotazione (`R-…`).
+
+**Cosa abbiamo fatto noi:**
+- Abbiamo creato il PaymentIntent sul **nostro** account Stripe e ne abbiamo passato l'id al booking.
+- Il contratto oggi prevede davvero `paymentIntentId` e `paymentStatus`, ma solo come «Optional; forwarded to the brand site when present», senza nessuna verifica documentata.
+- Un `pi_…` del nostro account non è visibile al sito del brand, che non può leggerlo con le sue chiavi. Quindi al massimo viene salvato così com'è, non verificato.
+- Per HofJ il carrello resta non pagato: il suo PaymentIntent non è mai stato né creato né confermato.
+
+**Tre segnali che vanno nella stessa direzione:**
+- **Niente codice di prenotazione.** Il booking ha restituito l'`itineraryId` invece del codice `R-…` che la documentazione promette dopo un pagamento riuscito. Probabilmente è un upsert di una prenotazione non pagata; lo schema `Booking` prevede infatti anche gli stati `pending` e `payment_failed`.
+- **`checkout.status` non prova niente, in nessuna delle due direzioni.** Non è documentato, quindi il fatto che sia rimasto `BookingInitiated` non conferma né smentisce il pagamento. Ho corretto la formulazione nei documenti.
+- **L'importo era probabilmente sbagliato.** La documentazione dice che `paymentType: "full"` addebita «the entire open amount», cioè `openAmount` = 337 €. Noi abbiamo pagato 368 € (`checkout.total`).
+
+Ho corretto `docs/api/internal-checkout.md` e `docs/decisions.md` con queste conclusioni, meno assertive di prima (commit `d35ed6d`).
+
+**Cosa implica.** La riga 3 di §8 va verso il fallback previsto dalla spec: il pagamento va fatto sul PaymentIntent di HofJ, non su un link di pagamento del nostro account Stripe. Questo cambia M6: la pagina di pagamento dovrebbe usare Stripe.js con la chiave pubblicabile del brand e il `client_secret` restituito da HofJ. Oggi non abbiamo quella chiave pubblicabile.
+
+Per M5 cambia poco:
+- il passo 5 del job resta dietro `PaymentsPort`;
+- il totale da mostrare diventa `openAmount`;
+- il booking dopo il pagamento non manda più il nostro `paymentIntentId`.
+
+**Prossimo passo, a tua scelta:**
+1. **Consigliato:** registrare la decisione «pagamento sul PaymentIntent di HofJ, da progettare in M6», aggiornare il piano M5 (totale = `openAmount`, niente `paymentIntentId` nel booking) e passare al Task 2.
+2. **Provare subito il flusso previsto:**
+   - `POST …/payment` su un carrello nuovo, che crea solo un PaymentIntent di test sul lato HofJ;
+   - conferma con carta di test;
+   - booking, per vedere se arriva il codice `R-…`.
+
+   Costo: circa 5 chiamate HofJ. Serve però la chiave pubblicabile Stripe del sito di staging, e va chiesta a HofJ.
+3. **Chiedere a HofJ** (chi ha scritto il brief) se l'uso del nostro `paymentIntentId` sia supportato davvero.
+
+## Utente 18:58
+
+fai 1 e 2
+
+## Agente 18:58
+
+Parto dal punto 1.
+
+- 🔧 Bash: Locate plan lines to update
+
+- 🔧 Bash: Record payment decision and update M5 plan

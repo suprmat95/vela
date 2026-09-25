@@ -388,4 +388,5 @@ staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`). Forme oss
 | Codice di prenotazione | `POST /v1/bookings` restituisce `data: "<itineraryId>"`, non `R-…`: `booking_code` = quella stringa. La frase vocale andrà scandita | Forma osservata |
 | Totale reale | Da decidere tra `checkout.total` (368, uguale a `totalPrice`) e `openAmount` (337, uguale a `originalTotal`): DOCS dice che `paymentType: "full"` addebita "the entire open amount". Origine della differenza di 31 € non nota | Il PaymentIntent di prova è stato creato su 368, probabilmente l'importo sbagliato |
 | Pax | `pax-1` è precompilato dal customer: il `PUT pax` scrive comunque tutti i nomi preservando i `refId` | Nessun cambio al job |
-
+| Pagamento (esito §8 riga 3) | Il pagamento va fatto sul PaymentIntent creato da HofJ (`POST /v1/itineraries/{id}/payment` → `client_secret`, conferma con Stripe.js), non su un Payment Link del nostro account Stripe. Il progetto concreto è M6; in M5 il job resta dietro `PaymentsPort` e il booking manda solo `{itineraryId, paymentType}` | È il flusso documentato da DOCS; il nostro `paymentIntentId` è solo inoltrato e non può essere verificato dal brand site |
+| Importo del link | `checkout.openAmount` (DOCS: `full` addebita "the entire open amount") | Il PaymentIntent di prova su `checkout.total` (368) era probabilmente l'importo sbagliato |
