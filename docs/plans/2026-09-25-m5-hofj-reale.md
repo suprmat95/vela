@@ -39,8 +39,8 @@ Data: 2026-09-25. Branch: `task/m5`. Destinazione di questo file: `docs/plans/20
   - `test_rest.py`: accept e `FullFlowTest`.
   - `test_app_replay.py`: `test_live_with_database_is_refused`, che cerca `"M5"`.
   - `test_migrations.py`: head `"0002"`.
-- Interprete: `uv run python` (3.12). Suite: `uv run python -m unittest discover -s tests`. Prima di iniziare, annotare il numero di test di partenza.
-- Parallelismo: M6 (Stripe) tocca `vela/domain/orders.py` e forse aggiunge anch'essa una migrazione `0003`. Chi mergia per secondo fa rebase e rinumera la propria migrazione.
+- Interprete: `uv run python` (3.12). Suite: `uv run python -m unittest discover -s tests`. Suite di partenza dopo il rebase su `master` (M6 + M9): 513 test, 13 saltati, verde.
+- Parallelismo: M6 e M9 sono già su `master` e `task/m5` è ribasato sopra (vedi "Integrazione con M6 e M9").
 
 ## Decisioni prese nell'intervista (da riportare in `docs/decisions.md`, Task 0)
 
@@ -75,7 +75,7 @@ regole prevalgono sul resto del piano dove differiscono:
   `checkout.total` è registrato solo nei test dell'adapter come campo ignorato.
   `Money.amount` è una stringa, a volte senza decimali (`"337"`): `Decimal(amount)`.
 - **Booking**: `create_booking` manda `{itineraryId, paymentType: "full", paymentIntentId,
-  paymentStatus}` da `PaymentProof` (il `payment_ref` salvato dal webhook o dal polling è l'id
+  paymentStatus}` da `PaymentProof` (il `payment_ref` salvato dal job di verifica del pagamento è l'id
   del PaymentIntent). OAS: "forwarded to the brand site when present"; è uno dei due modi con
   cui HofJ può riconoscere il pagamento (l'altro è `metadata.checkoutRefId`, messo da M6).
   Con `payment_intent_id` vuoto i due campi non vengono inviati.
@@ -91,12 +91,9 @@ regole prevalgono sul resto del piano dove differiscono:
 
 ## Integrazione con M6 e M9 (decisa il 2026-09-25, prima del Task 2)
 
-`master` contiene M9; M6 è completa su `task/m6` (Checkout Session, webhook, `stripe_events`).
-Ordine dei merge e rebase di `task/m5`: **da confermare con l'utente prima del Task 2**. Le
-regole sotto valgono sul codice dopo il rebase e prevalgono sul resto del piano.
+`task/m5` è stato ribasato su `master` (M6 senza webhook e M9, merge `de0fd25`). Le regole
+sotto prevalgono sul resto del piano.
 
-- **Migrazione**: M6 ha `0003_stripe_events`. La migrazione di M5 è `0004_jobs_quota`
-  (`down_revision = "0003"`); `test_migrations.py` attende head `"0004"`.
 - **Frasi**: M9 ha reso le frasi bilingui (`lang` da `criteria.language`, firma
   `say_status(status, booking_code, failure_reason, lang="it", total=None)` dopo il merge M6+M9).
   Il Task 9 scrive ogni frase nuova in italiano e in inglese, con un test per lingua.
@@ -108,14 +105,14 @@ regole sotto valgono sul codice dopo il rebase e prevalgono sul resto del piano.
   `payments-unavailable` di REST e la frase MCP di M6 non si applicano più all'accept.
 - **Niente webhook** (decisione del 2026-09-25 con l'utente, indicazione di HofJ): il pagamento
   si chiude con `POST /v1/bookings` (`paymentIntentId`, `paymentStatus`) e Vela scopre che il
-  viaggiatore ha pagato leggendo lo stato della Checkout Session (Task 13b). Il webhook, la
-  tabella `stripe_events` e l'obbligo di `STRIPE_WEBHOOK_SECRET` escono da M6 (modifica da
-  concordare su `task/m6`). Se al momento del rebase il webhook è ancora nel codice, il Task 13b
-  lo rimuove. La logica "pagamento arrivato" (stato, valuta, importo, `mark_paid`, accodamento del
+  viaggiatore ha pagato leggendo lo stato della Checkout Session (Task 13b). M6 ha già tolto
+  webhook, `stripe_events` e `STRIPE_WEBHOOK_SECRET` (`master`, merge `de0fd25`).
+  La logica "pagamento arrivato" (stato, valuta, importo, `mark_paid`, accodamento del
   `booking`) sta in `OrderService.settle_payment(order_id, status, amount_cents, currency,
   payment_ref)`.
-- **Migrazione con o senza `stripe_events`**: se M6 toglie la `0003_stripe_events`, la migrazione
-  di M5 torna `0003_jobs_quota`; altrimenti `0004`. Si decide al rebase.
+- **Migrazione**: su `master` ci sono `0003_stripe_events` e `0004_drop_stripe_events` (M6). La
+  migrazione di M5 è **`0005_jobs_quota`** (`down_revision = "0004"`); `test_migrations.py`
+  attende head `"0005"`.
 - **Modo live**: la scelta dei pagamenti è di M6 (`STRIPE_SECRET_KEY` → `StripePayments`). Il
   `RuntimeError` "live in attesa di M6" del Task 16 non si fa: `live` costruisce `HofJHttp` e i
   pagamenti di M6.
@@ -128,8 +125,7 @@ Nessun webhook: un job controlla lo stato delle Checkout Session degli ordini `a
 
 **Files:** Modify `vela/ports/payments.py`, `vela/adapters/stripe_links.py`,
 `vela/adapters/stripe_fake.py`, `vela/domain/orders.py`, `vela/domain/jobs.py`,
-`vela/domain/purchase.py`, `vela/domain/usecases.py`, `vela/config.py`; Remove (se ancora
-presenti dopo il rebase) `vela/surfaces/webhooks.py` e i suoi test; Test `tests/test_payment_check.py`,
+`vela/domain/purchase.py`, `vela/domain/usecases.py`, `vela/config.py`; Test `tests/test_payment_check.py`,
 `tests/test_stripe_links.py`, `tests/test_usecases.py`.
 
 **Produces:**
@@ -213,7 +209,7 @@ vela/ports/quota.py          NUOVO  QuotaStore
 vela/ports/repositories.py          ProductRepository.set_bookable; OrderRepository.get_by_replacement;
                                       Repositories.jobs, Repositories.quota
 vela/adapters/schema.py             jobs_t, quota_window_t; orders_t: total nullable, enqueued_at, replacement_proposal_id
-alembic/versions/0003_jobs_quota.py NUOVO
+alembic/versions/0005_jobs_quota.py NUOVO
 vela/adapters/repo_memory.py        MemoryJobs, MemoryQuota (lock), set_bookable, get_by_replacement
 vela/adapters/repo_postgres.py      PostgresJobs (SKIP LOCKED), PostgresQuota (UPDATE atomico)
 vela/adapters/hofj_replay.py        get_itinerary, get_quota, latency e limit simulati (429)
@@ -320,9 +316,9 @@ REST:
 - [ ] Test `SettingsDefaultsTest.test_m5_defaults`: i default elencati nel Design; `from_env` non legge variabili nuove (un env con `VELA_WORKER_CONCURRENCY=9` lascia 4).
 - [ ] Implementare i campi con default nel dataclass frozen. Commit «Add worker, quota and replay tuning to the settings».
 
-### Task 3: modello, stati e migrazione `0003`
+### Task 3: modello, stati e migrazione `0005`
 
-**Files:** Modify `vela/domain/models.py`, `vela/adapters/schema.py`, `vela/adapters/repo_postgres.py` (mapping di orders), `tests/test_migrations.py`, `tests/repo_contract.py`; Create `alembic/versions/0003_jobs_quota.py`.
+**Files:** Modify `vela/domain/models.py`, `vela/adapters/schema.py`, `vela/adapters/repo_postgres.py` (mapping di orders), `tests/test_migrations.py`, `tests/repo_contract.py`; Create `alembic/versions/0005_jobs_quota.py`.
 
 **Produces:**
 - `OrderStatus.QUEUED/REPLACED/CANCELLED/FAILED`.
@@ -333,14 +329,14 @@ REST:
 - `QuotaSnapshot(limit_per_minute, used_in_window, window_started_at, window_ends_at)` in `vela/ports/hofj.py`.
 
 - [ ] Test:
-  - `test_migrations.py`: head `"0003"` (3 punti), upgrade/downgrade su SQLite, idempotenza Postgres.
+  - `test_migrations.py`: head `"0005"`, upgrade/downgrade su SQLite, idempotenza Postgres.
   - Contratto: `test_order_roundtrip_with_queue_fields` (queued, `total=None`, `enqueued_at`, `replacement_proposal_id`).
 - [ ] Migrazione:
   - crea `jobs` con indice `(status, kind, run_after, enqueued_at)` e `ix_jobs_order_id`;
   - crea `quota_window`;
   - `orders`: `total` nullable, `enqueued_at`, `replacement_proposal_id` con indice.
   - Tipi neutri, così che la migrazione giri anche su SQLite (`batch_alter_table`).
-- [ ] Commit «Add queue states, jobs and quota window tables in migration 0003».
+- [ ] Commit «Add queue states, jobs and quota window tables in migration 0005».
 
 ### Task 4: regole pure della quota (`vela/domain/quota.py`)
 
@@ -693,7 +689,7 @@ purchase_waiting(now) -> bool
 
 ## Fuori scope (task successive)
 
-- Link Stripe reale e webhook, scadenza dei link (M6). Il job usa `PaymentsPort`; il modo live si avvia solo dopo M6.
+- Link Stripe e scadenza dei link: già in M6. Nessun webhook (verifica per interrogazione, Task 13b).
 - Sync incrementale del catalogo (M10): la classe `sync` esiste nello scheduler ma nessun job la usa.
 - Frasi `say` in inglese (M9). Load test con 120/min e 2-6 s (M13, usando `replay_limit` e `replay_latency`).
 - Cancellazione degli itinerari HofJ orfani dopo una rinuncia.

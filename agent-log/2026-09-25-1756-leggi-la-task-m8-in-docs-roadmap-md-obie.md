@@ -2095,3 +2095,138 @@ Questo cambia la parte del pagamento, soprattutto M6. Prima di toccare qualcosa 
 Aggiorno spec, piano, decisioni e domande a HofJ. M6 per ora non la tocco: a fine lavoro ti propongo le modifiche.
 
 - 🔧 Bash: Update spec, plan, decisions and HofJ questions for no-webhook payment
+
+Ho aggiornato tutto su `task/m5` (commit `f57f4ed`). Nessun codice scritto.
+
+- **Spec:**
+  - **RF-20** ora dice che Vela verifica il pagamento **per interrogazione, senza webhook**: legge la Checkout Session ogni 60 secondi, e subito quando il viaggiatore chiede lo stato.
+  - A pagamento riuscito parte la prenotazione, che chiude il pagamento su HofJ con `paymentIntentId` e `paymentStatus`.
+  - Adeguate anche RF-51 e la voce su Stripe.
+- **Piano M5:**
+  - **Task 13b** diventa il meccanismo principale: un job `payment_check` nel worker, che non consuma quota HofJ.
+  - Quando il viaggiatore chiede lo stato, il controllo viene anticipato, senza chiamate esterne nel caso d'uso.
+  - Un pagamento letto due volte produce comunque un solo booking.
+  - In replay, il checkout finto segna la sessione come pagata e il resto passa dallo stesso job.
+- **`docs/decisions.md`:** nuova sezione «M5: pagamento senza webhook». Le righe precedenti su webhook e polling di riserva sono segnate come superate.
+- **`docs/hofj-questions.md`:** le domande 1 e 3 risultano chiuse. Restano la 2 (codice `R-…`), la 4 (permessi della chiave, ora serve anche la **lettura** delle sessioni), la 5 (i 31 €), la 6 (lingua) e la 7 (carrelli di prova).
+
+## Modifiche proposte per M6 (non fatte)
+
+Da togliere su `task/m6`:
+- il webhook `POST /webhooks/stripe` e `vela/surfaces/webhooks.py`;
+- la tabella `stripe_events` (migrazione `0003`) e il suo repository;
+- l'obbligo di `STRIPE_WEBHOOK_SECRET` all'avvio;
+- le parti di `docs/stripe.md` sul webhook.
+
+Restano: Checkout Session, `checkoutRefId`, pagine di ritorno e scadenza del link.
+
+**Due decisioni restano a te:**
+1. **Chi toglie il webhook:** lo faccio io su `task/m6` prima del merge (a quel punto la migrazione di M5 torna `0003`), oppure si mergia M6 così com'è e lo rimuove M5 nel Task 13b.
+2. **Ordine dei merge e rebase di `task/m5`**, ancora in sospeso.
+
+Consiglio di toglierlo **su `task/m6` prima del merge**: `master` non avrebbe mai il webhook e M5 resterebbe più piccola.
+
+## Utente 19:55
+
+ok dimmi cosa dire ad m6
+
+## Agente 19:56
+
+Ecco il messaggio da incollare nella sessione di M6:
+
+```
+Cambio di requisito sul pagamento, deciso con HofJ: il pagamento si chiude
+unicamente con le API di HofJ, senza webhook Stripe.
+
+Contesto (dettagli su task/m5: docs/decisions.md, sezioni "M5: verifiche di spec §8",
+"M5: seconda sonda sul pagamento", "M5: pagamento senza webhook"):
+- La STRIPE_SECRET_KEY nel .env è una rk_test fornita da HofJ: le Checkout Session di
+  M6 nascono sull'account Stripe di HofJ.
+- Il pagamento si chiude con POST /v1/bookings inoltrando paymentIntentId e
+  paymentStatus. Lo fa M5 nel job di prenotazione.
+- Vela scopre che il viaggiatore ha pagato leggendo lo stato della Checkout Session
+  (checkout.sessions.retrieve) con un job del worker di M5: è il Task 13b del piano M5.
+  M6 non deve implementarlo.
+- Su task/m6 c'è già il mio commit 6aecb03: payment_intent_data.metadata porta anche
+  checkoutRefId = itinerary_id. Tienilo.
+
+Cosa togliere su task/m6, prima del merge su master:
+1. Il webhook: vela/surfaces/webhooks.py, il suo router in vela/app.py e i test
+   (test_webhooks.py, test_webhook_and_checkout_routes_always_mounted per la parte webhook).
+2. La tabella stripe_events: elimina alembic/versions/0003_stripe_events.py (non è mai
+   stata su master, quindi va tolta, non serve una migrazione di drop), lo schema, la
+   porta WebhookEventRepository, le implementazioni in memoria e Postgres e i test di
+   contratto. test_migrations.py torna ad attendere head "0002".
+3. L'obbligo di STRIPE_WEBHOOK_SECRET all'avvio: con STRIPE_SECRET_KEY si usa
+   StripePayments e basta VELA_PUBLIC_URL. Aggiorna test_app_replay.py.
+4. docs/stripe.md, README e docs/rest.md: niente registrazione dell'endpoint webhook
+   nel Dashboard né signing secret. Il test manuale diventa: accept → link → pagamento
+   con 4242… → lo stato passa a pagato quando c'è il job di verifica di M5, quindi il
+   test end-to-end si sposta dopo M5.
+
+Cosa tenere: Checkout Session (importo, metadata, checkoutRefId, idempotency_key,
+scadenza a 24 h meno 1 minuto), OrderService.expire, le pagine /checkout/success e
+/checkout/cancel, PaymentsError con la 503 su REST e la frase su MCP, i campi total,
+currency e payment_url in OrderStatusResponse, il checkout di replay.
+
+Vincoli:
+- Non toccare docs/spec.md RF-20, RF-51 e la voce Stripe di §2: sono già riscritte su
+  task/m5 e si eviterebbe un conflitto.
+- Nessuna chiamata a Stripe o HofJ.
+- Registra in docs/decisions.md, nella sezione delle decisioni di esecuzione di M6, la
+  rimozione del webhook con il motivo: "indicazione di HofJ, pagamento chiuso con POST
+  /v1/bookings, verifica per interrogazione in M5".
+- Suite verde, TDD dove cambi comportamento (avvio senza STRIPE_WEBHOOK_SECRET).
+```
+
+Quando M6 ha finito e il branch è mergiato su `master`, dimmelo. Allora aggiorno il piano M5: la migrazione torna `0003_jobs_quota` e dal Task 13b tolgo la parte «rimuovere il webhook se ancora presente». Poi resta da decidere solo il rebase o merge di `task/m5`.
+
+## Utente 19:59
+
+ok ho lanciato m6
+
+## Agente 19:59
+
+Bene. Finché M6 non è su `master` conviene che io non scriva codice M5. I primi task toccano `config.py`, `models.py`, `say.py` e le migrazioni, cioè gli stessi file che M6 e M9 hanno appena cambiato. Partire adesso vorrebbe dire risolvere conflitti poco dopo.
+
+Quando mi dici che M6 è mergiata:
+1. porto `task/m5` sul nuovo `master`;
+2. aggiorno il piano: migrazione `0003_jobs_quota`, e nel Task 13b niente più rimozione del webhook;
+3. rilancio la suite per il nuovo numero di partenza;
+4. comincio dal Task 2.
+
+Per non fermarmi di nuovo a quel punto, decidiamo adesso come allineare `task/m5`:
+- **rebase:** storia lineare. Riscrive i miei 10 commit di documentazione, tutti locali e mai pushati;
+- **merge di `master` dentro `task/m5`:** non riscrive niente, come è stato fatto per M6.
+
+Io consiglio il **rebase**: sono solo commit di documentazione, e la tua regola globale chiede che la PR contenga solo i commit della feature. Quale preferisci?
+
+## Utente 20:05
+
+ok m6 ha finito
+
+## Agente 20:05
+
+- 🔧 Bash: Check whether M6 is merged into master
+
+- 🔧 Bash: Inspect master migrations and potential conflicts
+
+- 🔧 Bash: Estimate conflicts between task/m5 and master
+
+- 🔧 AskUserQuestion
+
+- 🔧 Bash: Back up branch and rebase task/m5 onto master
+
+- 🔧 Bash: List conflicted files and markers
+
+- 🔧 Bash: Keep both sides in decisions.md and continue rebase
+
+- 🔧 Bash: Check rebase state for spec conflict
+
+- 🔧 Bash: Verify rebased history and spec content
+
+- 🔧 Bash: Update plan for migration 0005 and removed webhook
+
+- 🔧 Bash: Tidy remaining plan references and run baseline suite
+
+- 🔧 Bash: Check current hooks M5 must replace
