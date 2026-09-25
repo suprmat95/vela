@@ -52,3 +52,21 @@ Origine: intervista sul brief (`docs/brief.md`), risultato in `docs/spec.md`.
 | Segreti | Solo variabili d'ambiente (`HOFJ_API_KEY`, `STRIPE_SECRET_KEY`, ...); `.env` mai aperto dagli agenti | Regola del repo; il `.jsonl` in `agent-log/` è versionato. |
 | Cartella log | `git mv agents-log agent-log`, con script, hook, doc e test aggiornati | Il brief chiede `/agent-log/`; la storia resta con `git log --follow`. |
 | Email del codice | Fuori dalle 24h, elencata tra i prossimi passi | Richiederebbe un servizio non concordato; il codice resta disponibile via `get_order_status`. |
+
+## 2026-09-25 — Roadmap in macro task
+
+Origine: intervista sulla suddivisione del progetto, risultato in `docs/roadmap.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Primo prototipo | Replay end-to-end: 5 tool MCP, HofJ e Stripe finti | Test della conversazione completa da Claude senza quota né Stripe |
+| Client del primo test | claude.ai / Claude Desktop contro Render | Il deploy entra nel prototipo (M0), nessun tunnel |
+| Postgres | Solo Render Postgres, anche in sviluppo | Nessun setup locale. Conseguenza: test unitari senza DB (repository in memoria), test Postgres saltati se `DATABASE_URL` manca (RNF-09 aggiornato) |
+| Fixture | Nuovo giro in locale `it`: lista + `extended=true` dei non archiviati (~96 chiamate in 2-3 finestre) | Fixture nella lingua finale, con destinazione, venue e hotel |
+| Verifiche di spec §8 | Primo passo della macro task HofJ reale (M5) | Meno task; il prototipo replay non le richiede |
+| Formato roadmap | Un solo file `docs/roadmap.md` | Grafo, tabella, prompt per task e matrice requisiti in un posto solo |
+| Parser | Minimo nel prototipo (M2); completo con fallback Haiku in M9 | Prototipo prima |
+| Auth MCP | OAuth 2.1 (modifica RF-43), più token statico pre-provisionato per client senza OAuth (ElevenLabs) | I connector custom di claude.ai accettano OAuth o nessuna auth, non un header bearer impostato dall'utente |
+| Ponte auth | `/mcp` senza auth finché non esiste l'OAuth (M8) | Meno codice da buttare; l'URL resta aperto per poche ore |
+| Taglio | Fette verticali attorno a due traguardi: A prototipo replay (M3), B prenotazione reale (M7) | Prototipo presto, poi massimo parallelismo. Scartati il taglio per strato (prototipo tardi) e poche task grandi (piani illeggibili) |
+| DB layer | SQLAlchemy Core + psycopg 3 + Alembic | SQL esplicito, advisory lock semplice, migrazioni al boot |

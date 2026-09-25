@@ -1,6 +1,7 @@
 # Vela — specifica dei requisiti
 
-Data: 2026-09-25. Stato: bozza da rivedere. Origine: `docs/brief.md` e intervista del 2026-09-25
+Data: 2026-09-25. Stato: bozza da rivedere; RF-43 e RNF-09 aggiornati il 2026-09-25 con la
+roadmap (`docs/roadmap.md`). Origine: `docs/brief.md` e intervista del 2026-09-25
 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -208,9 +209,13 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-42** Ogni risposta dei casi d'uso include un campo `say`: una frase in lingua
   dell'intento, pronta per essere letta ad alta voce, senza markdown, senza URL letti per
   esteso (l'URL sta in un campo separato).
-- **RF-43** L'autenticazione delle superfici REST e MCP è un bearer token statico da
-  configurazione (`VELA_API_TOKEN`), sufficiente per il prototipo. Il webhook Stripe usa la
-  firma Stripe. `/health` è pubblico.
+- **RF-43** La superficie REST usa un bearer token statico da configurazione
+  (`VELA_API_TOKEN`). La superficie MCP usa OAuth 2.1 (authorization server nella stessa app:
+  metadata, registrazione dinamica, PKCE, token in Postgres), perché i connector custom di
+  claude.ai accettano OAuth o nessuna autenticazione; accetta inoltre `VELA_API_TOKEN` come
+  token statico per i client che non fanno OAuth (ElevenLabs). Finché l'OAuth non esiste,
+  `/mcp` resta senza autenticazione (decisione del 2026-09-25, roadmap M3 e M8). Il webhook
+  Stripe usa la firma Stripe. `/health` è pubblico.
 - **RF-44** A2A (Agent2Agent) non è nelle 24 ore. Il dominio non deve impedirlo: le superfici
   sono adapter separati che chiamano le stesse funzioni, e `ARCHITECTURE.md` descrive come
   aggiungere l'adapter A2A (agent card, mapping dei task sui cinque casi d'uso). Se resta
@@ -240,7 +245,8 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   implementazioni che leggono `fixtures/` e simulano il pagamento; usata da test e load test.
 - **RNF-09 Test.** `python3 -m unittest discover -s tests` copre parser, chooser,
   orchestratore (con porte fake), webhook, superfici REST e MCP. Nessun test chiama servizi
-  esterni.
+  esterni. Il dominio si testa con repository in memoria; i test che toccano Postgres girano
+  solo se `DATABASE_URL` è impostata (Render Postgres) e altrimenti vengono saltati.
 - **RNF-10 Load test.** `loadtest/locustfile.py` esercita il flusso completo in replay contro
   l'URL live o locale. `loadtest/RESULTS.md` riporta utenti simulati, RPS, p50/p95/p99, errori,
   più i numeri reali di `GET /v1/quota` (limite per minuto) e la latenza misurata di un
