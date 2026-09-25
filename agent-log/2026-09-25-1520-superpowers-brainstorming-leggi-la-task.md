@@ -195,3 +195,41 @@ System python3 is 3.7. I'll run the script with the venv's 3.12 interpreter.
 - 🔧 Bash: Run the Postgres repository contract tests from the plan against the real database in the vela_test schema
 
 - 🔧 Bash: Seed products in the repository contract, re-extract and re-run memory and Postgres repository tests
+
+Tutti i test dei repository passano, in memoria e su Postgres (17 test). Salvo il piano nel repo con un commit.
+
+- 🔧 Bash: Commit the M2 plan
+
+Piano completo e committato: `docs/plans/2026-09-25-m2-dominio-replay.md` (commit `bc1335d` su `task/m2`).
+
+**Cosa contiene**
+
+- Contesto, le 13 decisioni dell'intervista (da riportare in `docs/decisions.md` nel Task 0), vincoli globali, "Review Focus" con 5 casi limite e il test che li copre.
+- Design: struttura dei file, flusso dei dati, contratto `to_dict()` delle risposte per M3 e M4.
+- 14 microtask (0-13), ognuno con file, interfacce, test scritti per intero, implementazione per intero, comando di verifica e commit.
+- Tabella che mappa ogni test di completamento della roadmap M2 al test del piano, requisiti coperti, fuori scope.
+
+**Microtask in ordine**: piano e decisioni → modelli e invariante RF-10 → catalogo dalla fixture → dizionario geografico → parser it/en → chooser v1 → frasi `say` → porte e repository in memoria → orchestratore (intento, proposta, rifiuto) → adapter replay → accettazione, ordini, prenotazione in background e ripresa → tabelle, migrazione `0002`, repository Postgres → wiring app e `/replay/checkout` → documentazione e verifica finale.
+
+**Verifica fatta**: ho estratto tutto il codice del piano in una cartella temporanea e ho eseguito i test. I 13 moduli di test di M2 passano (parser, chooser, orchestratore, flusso completo sulla fixture reale, app in replay, migrazione su SQLite). I test dei repository passano anche su Postgres reale, nello schema isolato `vela_test`: ho sorgentito `.env` nella stessa riga di shell senza stamparlo. Questa verifica ha trovato e corretto tre difetti nel piano prima dell'esecuzione: un'aspettativa sbagliata su `missing_fields`, l'accesso a `route.path` su un router incluso, e proposte/ordini di test senza i prodotti referenziati (le foreign key Postgres li rifiutavano).
+
+**Due cose da sapere**
+
+- Lo schema `vela_test` con le 5 tabelle ora esiste nel Postgres di Render, creato dalla verifica. È lo stesso che il Task 11 usa; non tocca lo schema `public` dell'app.
+- Non ho eseguito la migrazione `0002` sullo schema `public`: avverrà al primo deploy dopo il merge (Task 13, step 5).
+
+**Metodo di esecuzione**: consiglio subagent-driven (`superpowers:subagent-driven-development`), perché i 14 task si passano interfacce esatte l'uno all'altro e una revisione fresca per task intercetta le derive prima che si propaghino. Quando lanci l'esecuzione, il Task 0 completa `docs/decisions.md`.
+
+## Utente 16:08
+
+/superpowers:test-driven-development: 2026-09-25-m2-dominio-replay.md
+
+## Agente 16:08
+
+Eseguo il piano M2 un task alla volta in TDD: per ogni task scrivo prima il test, lo guardo fallire, poi scrivo l'implementazione e faccio il commit. Il codice viene dai blocchi del piano, che ho già validato. Parto dall'elenco dei blocchi.
+
+- 🔧 Bash: Create a block extractor and list the plan's code blocks
+
+**Task 0**: aggiungo la tabella delle decisioni dell'intervista in fondo a `docs/decisions.md`.
+
+- 🔧 Bash: Append M2 decisions to decisions.md and commit

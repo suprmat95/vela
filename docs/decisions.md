@@ -131,3 +131,23 @@ Origine: intervista sulla macro task M1, piano in `docs/plans/2026-09-25-m1-fixt
 | Roadmap | `docs/roadmap.md` resta sul branch `doc/roadmap`, non mergiata su `task/m1` | Il piano è autosufficiente |
 | Soglia del test | `tests/test_catalog_fixture.py` richiede almeno 70 prodotti attivi invece di 80 | il catalogo `it` registrato il 2026-09-25 ha 110 prodotti e 77 attivi (en: 123/92); il catalogo `it` è un insieme di voci CMS distinto (id 181-1093, categoryId 8/7/9) — margine per il churn |
 | Brand nella fixture | letto dalle pagine di lista registrate, `HOFJ_BRAND` al build serve solo da controllo | `--build-only` può girare in una shell diversa: la fixture deve dire cosa è stato registrato |
+
+## 2026-09-25 — M2: dominio, casi d'uso e replay
+
+Origine: intervista sulla macro task M2, piano in `docs/plans/2026-09-25-m2-dominio-replay.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Sport del prodotto | Parole chiave `padel`/`tennis` cercate in ordine in titolo, slug, shortDescription, description; nessun segnale = `padel` | La fixture non ha un campo sport; il brand Weebora è padel; nessun prodotto perso |
+| Chooser v1 | Esclusioni: archiviati, non prenotabili, rifiutati, sport diverso, date, pax. Ordinamento: area coincidente (città > paese), totale entro budget, prezzo crescente, id | "Solo prezzo" proporrebbe l'Italia a chi chiede la Spagna nella demo M3. Versione semplificata di RF-07; M11 raffina con geohierarchy |
+| Date proposte | Il periodo dell'intento diventa un intervallo; il prodotto passa se l'intervallo interseca `[minDate, maxDate]` e ha una finestra di `availabilities` con inizio nel periodo e non nel passato: quella finestra è la data proposta. Senza periodo: prima finestra futura | RF-06 richiede date proposte; senza finestra non c'è data da dire |
+| Rifiuto (RF-08 base) | `reject_proposal` salva prodotto e motivo in `rejections`; i criteri non cambiano | L'interpretazione dei motivi è M9. Con l'ordinamento scelto "troppo caro" produce la successiva per prezzo |
+| Catalogo in replay | All'avvio, se `products` è vuota, la fixture viene caricata in Postgres (upsert idempotente). Il chooser legge sempre dal repository | Stesso codice in live; M10 sostituisce solo il caricatore |
+| Test repository | Solo Postgres, con `DATABASE_URL` dall'ambiente; saltati senza. Un contratto di test condiviso gira sempre sul repository in memoria | RNF-09; l'URL è disponibile nel `.env` |
+| Prenotazione post-pagamento | `BookingRunner` con `ThreadPoolExecutor` nel processo; `resume()` nel lifespan per gli ordini `paid_pending_booking`; `InlineRunner` nei test | RF-27 esercitata davvero; M6 riusa il runner dal webhook |
+| Default RF-13 | `TravelerDefaults` costante in `vela/config.py` | L'elenco di variabili di spec §6 resta chiuso |
+| Lingua di `say` | Solo italiano in M2; il parser riconosce comunque intenti in inglese e salva `language` | Semplifica; i template inglesi arrivano con M9 |
+| Dati viaggiatore mancanti | `accept_proposal` risponde con l'elenco dei campi mancanti e una `say`; nessun ordine finché i dati non sono completi | Nessuno stato aggiuntivo oltre RF-25 |
+| Proposta "aperta" | `get_proposal` restituisce l'ultima proposta dell'intento non rifiutata, anche se già accettata; una nuova scelta avviene solo dopo un rifiuto | Idempotenza: due `get_proposal` o un `get_proposal` dopo `accept` non producono un secondo prodotto né un secondo ordine |
+| Modalità `live` | `create_app` fallisce all'avvio con `RuntimeError("VELA_UPSTREAM_MODE=live non disponibile prima di M5")` | Niente porte finte spacciate per reali |
+| Denaro e id | `Decimal` per prezzi e totali (stringa con due decimali in `to_dict`), uuid4 come stringhe per id; codice prenotazione replay `R-` + 6 cifre | Coerente con `Money.amount` stringa di HofJ |
