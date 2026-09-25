@@ -3,7 +3,9 @@
 Contiene i paesi e le destinazioni presenti in `fixtures/catalog.json` con alias in italiano e
 inglese. `tests/test_geo.py` verifica che ogni destinazione della fixture sia coperta: quando
 la fixture cambia, il test dice quali voci aggiungere. M11 aggiunge la gerarchia statica
-`PARENTS` (città > regione > paese); `geohierarchy` della fixture non si usa perché è piatto.
+`PARENTS` (città > regione > paese); M9 aggiunge regioni, nomi inglesi e le tabelle "più a
+sud/nord". `geohierarchy` della fixture non si usa: è piatto (solo paese e id GeoNames, per
+Nicosia con il paese sbagliato).
 """
 import re
 from typing import Optional
@@ -45,6 +47,14 @@ PLACES = [
     ("Cap d'Agde", "city", "FR", "cap d agde"), ("Zante", "region", "GR", "zakynthos"),
     ("Zanzibar", "region", "TZ"), ("Canarie", "region", "ES", "canary islands", "canaries"),
     ("Baleari", "region", "ES", "balearic islands", "baleares"),
+    # regioni che contengono città del catalogo (M9)
+    ("Andalusia", "region", "ES", "andalucia", "andalucía"),
+    ("Catalogna", "region", "ES", "catalonia", "catalunya", "cataluña"),
+    ("Costa del Sol", "region", "ES"),
+    ("Comunità Valenciana", "region", "ES", "comunitat valenciana", "valencian community"),
+    ("Lombardia", "region", "IT", "lombardy"), ("Veneto", "region", "IT"),
+    ("Emilia-Romagna", "region", "IT", "emilia romagna"),
+    ("Occitania", "region", "FR", "occitanie"),
 ]
 
 # luogo → luogo che lo contiene (solo tra voci di PLACES); il paese chiude sempre la catena
@@ -79,6 +89,61 @@ def _build_index():
 
 
 _INDEX = _build_index()
+
+_BY_NAME.update({name: Area("country", name, code) for code, name in COUNTRIES.items()})
+
+EN_NAMES = {
+    "Spagna": "Spain", "Italia": "Italy", "Francia": "France", "Grecia": "Greece",
+    "Marocco": "Morocco", "Egitto": "Egypt", "Cipro": "Cyprus", "Thailandia": "Thailand",
+    "Barcellona": "Barcelona", "Firenze": "Florence", "Maiorca": "Mallorca", "Milano": "Milan",
+    "Minorca": "Menorca", "Sardegna": "Sardinia", "Siviglia": "Seville", "Toscana": "Tuscany",
+    "Venezia": "Venice", "Canarie": "Canary Islands", "Baleari": "Balearic Islands",
+    "Catalogna": "Catalonia", "Comunità Valenciana": "Valencian Community",
+    "Lombardia": "Lombardy", "Occitania": "Occitanie",
+}
+
+_CANARIES = ("Canarie", "Lanzarote", "Fuerteventura", "Tenerife")
+_BALEARICS = ("Baleari", "Maiorca", "Palma de Mallorca", "Ibiza", "Minorca")
+_ANDALUSIA = ("Andalusia", "Costa del Sol", "Malaga", "Estepona", "Torre del Mar", "Siviglia")
+_TUSCANY = ("Toscana", "Firenze", "Pietrasanta")
+
+# nome canonico → aree più a sud, dalla più vicina; tupla vuota = niente più a sud nel catalogo
+SOUTH_OF = {
+    "Francia": ("Spagna", "Italia"), "Reims": ("Cap d'Agde", "Barcellona"),
+    "Cap d'Agde": ("Barcellona", "Maiorca"), "Occitania": ("Barcellona", "Maiorca"),
+    "Italia": ("Tunisia", "Marocco"), "Milano": ("Toscana", "Sardegna"),
+    "Lombardia": ("Toscana", "Sardegna"), "Venezia": ("Riccione", "Toscana"),
+    "Veneto": ("Riccione", "Toscana"), "Riccione": ("Toscana", "Sardegna"),
+    "Emilia-Romagna": ("Toscana", "Sardegna"),
+    "Spagna": ("Marocco", "Canarie"), "Catalogna": ("Valencia", "Malaga"),
+    "Barcellona": ("Valencia", "Malaga"), "Lloret de Mar": ("Barcellona", "Valencia"),
+    "Tarragona": ("Valencia", "Malaga"), "Madrid": ("Siviglia", "Malaga"),
+    "Valencia": ("Alicante", "Malaga"), "Comunità Valenciana": ("Alicante", "Malaga"),
+    "Dénia": ("Alicante", "Malaga"), "Alicante": ("Malaga", "Marocco"),
+    "Grecia": ("Cipro", "Egitto"), "Cipro": ("Egitto",), "Marocco": ("Canarie",),
+    "Tunisia": ("Egitto",), "Egitto": ("Tanzania",), "Thailandia": ("Indonesia",),
+}
+SOUTH_OF.update({name: ("Sardegna",) for name in _TUSCANY})
+SOUTH_OF.update({name: ("Malaga", "Marocco") for name in _BALEARICS})
+SOUTH_OF.update({name: () for name in _CANARIES})
+
+# nome canonico → aree più a nord, dalla più vicina; tupla vuota = niente più a nord nel catalogo
+NORTH_OF = {
+    "Spagna": ("Francia", "Italia"), "Alicante": ("Valencia", "Barcellona"),
+    "Dénia": ("Valencia", "Barcellona"), "Valencia": ("Tarragona", "Barcellona"),
+    "Comunità Valenciana": ("Tarragona", "Barcellona"), "Madrid": ("Barcellona", "Francia"),
+    "Italia": ("Francia",), "Sardegna": ("Toscana", "Milano"),
+    "Riccione": ("Venezia", "Milano"), "Emilia-Romagna": ("Venezia", "Milano"),
+    "Francia": (), "Reims": (), "Cap d'Agde": ("Reims",), "Occitania": ("Reims",),
+    "Marocco": ("Spagna",), "Tunisia": ("Italia",), "Egitto": ("Cipro", "Grecia"),
+    "Cipro": ("Grecia",), "Grecia": ("Italia",), "Tanzania": ("Egitto",),
+    "Indonesia": ("Thailandia",),
+}
+NORTH_OF.update({name: ("Malaga", "Maiorca") for name in _CANARIES})
+NORTH_OF.update({name: ("Madrid", "Barcellona") for name in _ANDALUSIA})
+NORTH_OF.update({name: ("Venezia", "Milano") for name in _TUSCANY})
+
+_DIRECTIONS = {"south": SOUTH_OF, "north": NORTH_OF}
 
 
 def find_area(text: Optional[str]) -> Optional[Area]:
@@ -128,3 +193,23 @@ def where(area: Area) -> str:
     if area.name in _LOCATIVE:
         return _LOCATIVE[area.name]
     return ("in %s" if area.kind == "country" else "a %s") % area.name
+
+
+def area_by_name(name: Optional[str]) -> Optional[Area]:
+    return _BY_NAME.get(name)
+
+
+def display_name(area: Area, lang: str) -> str:
+    return EN_NAMES.get(area.name, area.name) if lang == "en" else area.name
+
+
+def move(area: Optional[Area], direction: str) -> Optional[Area]:
+    """Area più a sud o più a nord di `area` (RF-08): prima la voce del luogo, poi quella del paese."""
+    if area is None:
+        return None
+    table = _DIRECTIONS[direction]
+    for key in (area.name, COUNTRIES.get(area.country_code)):
+        if key in table:
+            targets = table[key]
+            return _BY_NAME[targets[0]] if targets else None
+    return None
