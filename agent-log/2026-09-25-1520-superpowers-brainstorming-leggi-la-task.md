@@ -265,3 +265,7 @@ Test rossi per il motivo giusto, poi verdi. Lancio la suite intera e faccio il c
 **Task 8 (orchestratore: intento, proposta, rifiuto)**.
 
 - 🔧 Bash: TDD Task 8, commit
+
+**Task 9 (adapter replay e pagamento finto)**.
+
+- 🔧 Bash: TDD Task 9, commit
