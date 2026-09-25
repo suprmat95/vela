@@ -29,14 +29,14 @@ def versions(url):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0003"])
+        self.assertEqual(heads, ["0004"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0003", res.stdout)
+        self.assertIn("0004", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -45,9 +45,11 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0003"])
+                self.assertEqual(versions(url), ["0004"])
                 with create_engine(url).connect() as conn:
-                    self.assertIn("stripe_events", inspect(conn).get_table_names())
+                    tables = inspect(conn).get_table_names()
+                    self.assertIn("orders", tables)
+                    self.assertNotIn("stripe_events", tables)   # creata da 0003, tolta da 0004
                 command.downgrade(alembic_config(), "base")
                 self.assertEqual(versions(url), [])
 
@@ -59,6 +61,15 @@ class SqliteUpgradeTest(unittest.TestCase):
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
         self.assertFalse(logger.disabled)
+
+    def test_downgrade_from_0004_restores_stripe_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "head")
+                command.downgrade(alembic_config(), "0003")
+                with create_engine(url).connect() as conn:
+                    self.assertIn("stripe_events", inspect(conn).get_table_names())
 
     def test_upgrade_without_database_url_fails_explicitly(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -73,4 +84,4 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0003"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0004"])

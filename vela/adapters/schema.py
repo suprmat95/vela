@@ -94,10 +94,3 @@ rejections_t = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("proposal_id", name="uq_rejections_proposal_id"),
 )
-
-stripe_events_t = Table(
-    "stripe_events", metadata,
-    Column("id", String(255), primary_key=True),            # id dell'evento Stripe (RNF-03)
-    Column("type", String(64), nullable=False),
-    Column("received_at", DateTime(timezone=True), nullable=False),
-)
