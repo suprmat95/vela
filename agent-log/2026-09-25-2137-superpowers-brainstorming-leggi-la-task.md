@@ -170,3 +170,51 @@ Rossi per i motivi attesi: manca la funzione e manca l'opzione. `test_without_tr
 - 🔧 Bash: Implement add_trap and --trap-from, run tests
 
 - 🔧 Bash: Commit Task 2
+
+- 🔧 Bash: Check replay catalog path and tests using wiring
+
+Task 2 è fatto: commit `76e2361`, suite verde con 721 test e 40 saltati.
+
+**Cosa ho fatto**
+- Ho aggiunto `add_trap(catalog, template_id)` e l'opzione `--trap-from ID` a `scripts/record_catalog.py`.
+- 9 test nuovi in `tests/test_record_catalog.py`, scritti prima del codice. Uno, `test_without_trap_from_no_trap_is_written`, passava già: è una guardia che nessun clone venga aggiunto senza l'opzione.
+- Un test salva la fixture con la trappola e la ricarica con `load_fixture`: la trappola risulta il prodotto attivo più economico. È il comportamento su cui conta il criterio 4.
+
+**Cosa ho deciso**
+- Oltre alle voci in `products` e in `details[id].catalog`, anche il JSON grezzo `raw` del clone porta il nuovo id e il nuovo prezzo, per coerenza. Il marcatore `vela_trap` sta nella voce di lista e nel `catalog`, non nel `raw`.
+- Se il modello non va bene, `--trap-from` esce con "fixture non scritta: …" e non scrive nulla.
+
+**Su cosa ho dubbi**
+- Il prezzo viene abbassato di 1 sul valore così com'è nella fixture, che oggi è un numero intero. Se su staging arrivasse come stringa, il clone fallirebbe al build. Lo vedremo nel Task 7, e il test lo farebbe emergere subito.
+
+**Proposta per il Task 3 (scelta della fixture per ambiente), aspetto il tuo OK:**
+- In `vela/domain/catalog.py`, accanto a `load_fixture`, due funzioni:
+  - `fixture_meta(path)` restituisce `{base_url, locale, brand}` letti dalla fixture;
+  - `select_fixture(fixtures_dir, base_url)` cerca tra i file `catalog*.json` quello con lo stesso `base_url`, senza badare allo `/` finale. Se nessuno coincide solleva `RuntimeError` con l'elenco dei `base_url` trovati.
+- In `vela/app.py` `build_vela`: in replay non cambia niente (`ReplayHofJ().load_catalog`, cioè `fixtures/catalog.json`). In live il loader diventa `ReplayHofJ(select_fixture(FIXTURES_DIR, settings.hofj_base_url)).load_catalog`. Una fixture mancante fa fallire l'avvio, come le altre variabili obbligatorie del live.
+- Test prima del codice:
+  - nuovo `tests/test_fixture_select.py` con fixture minime in una cartella temporanea: scelta per `base_url`, `/` finale indifferente, nessuna corrispondenza → errore con i `base_url` trovati, file non `catalog*.json` ignorati;
+  - in `tests/test_app_replay.py`: `build_vela` in live con impostazioni finte e cartella di fixture di prova, il loader carica gli id della fixture scelta.
+- Perché il test di `build_vela` possa usare una cartella temporanea invece di `fixtures/`, propongo un parametro `fixtures_dir` con default in `build_vela`. È un parametro interno, non tocca interfacce pubbliche.
+
+## Utente 21:49
+
+ok, procedi con il Task 3
+
+## Agente 21:49
+
+- 🔧 Bash: Read app wiring and replay app tests
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_fixture_select.py
+
+- 🔧 Bash: Update app tests and run, expect red
+
+`support` si importa solo lanciando da `-s tests`. Rilancio con `discover`:
+
+- 🔧 Bash: Run the two test modules via discover, expect red
+
+Rossi per i motivi attesi. GREEN:
+
+- 🔧 Bash: Implement fixture selection and run tests
+
+- 🔧 Bash: Commit Task 3

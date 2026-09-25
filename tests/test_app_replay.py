@@ -1,7 +1,11 @@
+import json
+import os
 import random
+import tempfile
 import unittest
 from dataclasses import replace
 from datetime import timedelta
+from unittest import mock
 from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
@@ -37,6 +41,18 @@ def make_app(preload=False):
     app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
                      vela=vela, worker=inline_worker(vela), catalog_loader=hofj.load_catalog)
     return app, vela
+
+
+def staging_fixtures_dir():
+    """Cartella con la sola fixture di staging (un prodotto, id 118): in live si sceglie per host."""
+    folder = tempfile.mkdtemp()
+    entry = {"id": "118", "title": "Padel Barcelona", "slug": "padel-barcelona", "price": 245,
+             "currency": "EUR", "minPax": 1, "availabilities": []}
+    with open(os.path.join(folder, "catalog-staging.json"), "w", encoding="utf-8") as fh:
+        json.dump({"locale": "en", "brand": "staging.weebora.com",
+                   "base_url": "https://staging.api.hofj.com", "products": [entry],
+                   "details": {"118": {"catalog": entry, "raw": entry}}}, fh)
+    return folder
 
 
 def ready_order(app, vela):
@@ -136,13 +152,32 @@ class ModeTest(unittest.TestCase):
     def test_live_builds_http_adapter_and_m6_payments(self):
         from vela.adapters.hofj_http import HofJHttp
         from vela.adapters.stripe_links import StripePayments
-        app = create_app(Settings(**self.LIVE))
+        with mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir()):
+            app = create_app(Settings(**self.LIVE))
         hofj = app.state.vela.hofj
         self.assertIsInstance(hofj, HofJHttp)
         self.assertEqual((str(hofj.client.base_url), hofj.brand, hofj.locale),
                          ("https://staging.api.hofj.com", "staging.weebora.com", "it"))
         self.assertIsInstance(app.state.vela.payments, StripePayments)
-        self.assertEqual(len(app.state.catalog_loader()), 110)      # fixture finché non c'è M10
+
+    def test_live_loads_the_fixture_recorded_on_hofj_base_url(self):
+        folder = staging_fixtures_dir()
+        with mock.patch("vela.app.FIXTURES_DIR", folder):
+            app = create_app(Settings(**self.LIVE))
+        self.assertEqual([p.id for p in app.state.catalog_loader()], ["118"])
+
+    def test_live_without_a_fixture_for_the_host_is_refused(self):
+        folder = staging_fixtures_dir()
+        settings = dict(self.LIVE, hofj_base_url="https://sandbox.api.hofj.com")
+        with mock.patch("vela.app.FIXTURES_DIR", folder), self.assertRaises(RuntimeError) as ctx:
+            create_app(Settings(**settings))
+        self.assertIn("https://sandbox.api.hofj.com", str(ctx.exception))
+        self.assertNotIn("hofj-segreta", str(ctx.exception))
+
+    def test_replay_keeps_the_production_fixture(self):
+        with mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir()):
+            app = create_app(Settings(database_url="sqlite://"))
+        self.assertEqual(len(app.state.catalog_loader()), 110)
 
     def test_live_requires_hofj_settings(self):
         for missing in ("hofj_api_key", "hofj_base_url", "hofj_brand"):

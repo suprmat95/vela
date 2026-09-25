@@ -4,6 +4,7 @@ Lo sport non è un campo dell'API: si cerca `padel`/`tennis` in titolo, slug, de
 e descrizione, in quest'ordine; senza segnale il prodotto è padel (decisione M2).
 """
 import json
+import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Iterable, Optional
@@ -90,6 +91,30 @@ def load_fixture(path, fetched_at: Optional[datetime] = None) -> list:
             products.append(product_from_entry(item, archived=bool(item.get("archived")),
                                                raw=item, fetched_at=fetched_at))
     return products
+
+
+def fixture_meta(path) -> dict:
+    """Host, locale e brand con cui la fixture è stata registrata (`record_catalog.py`)."""
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {"base_url": data.get("base_url"), "locale": data.get("locale"), "brand": data.get("brand")}
+
+
+def select_fixture(fixtures_dir, base_url: str) -> str:
+    """La fixture `catalog*.json` registrata sull'host `base_url` (decisione M7: una fixture per
+    ambiente). Lo `/` finale non conta. Nessuna corrispondenza → RuntimeError con gli host trovati."""
+    wanted = base_url.rstrip("/")
+    found = []
+    for name in sorted(os.listdir(fixtures_dir)):
+        if not (name.startswith("catalog") and name.endswith(".json")):
+            continue
+        path = os.path.join(fixtures_dir, name)
+        host = (fixture_meta(path)["base_url"] or "").rstrip("/")
+        if host == wanted:
+            return path
+        found.append("%s (%s)" % (host, name))
+    raise RuntimeError("nessuna fixture del catalogo registrata su %s; trovate: %s"
+                       % (wanted, ", ".join(found) or "nessuna"))
 
 
 BRAND_DESTINATIONS = ("Weebora",)

@@ -12,6 +12,7 @@ Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ 
 interrogando la Checkout Session (job di M5).
 Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 """
+import os
 from contextlib import asynccontextmanager
 from typing import Callable, List, Optional, Tuple
 
@@ -20,13 +21,14 @@ from sqlalchemy.engine import Engine
 
 from vela.adapters.db import make_engine
 from vela.adapters.hofj_http import HofJHttp
-from vela.adapters.hofj_replay import ReplayHofJ
+from vela.adapters.hofj_replay import FIXTURE_PATH, ReplayHofJ
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.booking import BookingJob
+from vela.domain.catalog import select_fixture
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
@@ -43,6 +45,7 @@ from vela.surfaces.rest import router as rest_router
 REPLAY = "replay"
 LIVE = "live"
 CatalogLoader = Callable[[], List[Product]]
+FIXTURES_DIR = os.path.dirname(FIXTURE_PATH)   # una fixture per ambiente HofJ (decisione M7)
 
 
 def build_payments(settings: Settings) -> PaymentsPort:
@@ -77,7 +80,10 @@ def build_hofj(settings: Settings):
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:
     hofj = build_hofj(settings)
-    catalog_loader = hofj.load_catalog if isinstance(hofj, ReplayHofJ) else ReplayHofJ().load_catalog
+    if isinstance(hofj, ReplayHofJ):
+        catalog_loader = hofj.load_catalog
+    else:   # in live: la fixture registrata su HOFJ_BASE_URL, finché non c'è il sync (M10)
+        catalog_loader = ReplayHofJ(select_fixture(FIXTURES_DIR, settings.hofj_base_url)).load_catalog
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
         from vela.adapters.haiku import HaikuExtractor
@@ -85,7 +91,7 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
                                  booking_reserve=settings.booking_reserve)
     vela = Vela(repos, hofj, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
-    return vela, catalog_loader   # in live: la fixture di M1 finché non c'è il sync (M10)
+    return vela, catalog_loader
 
 
 def build_worker(vela: Vela, settings: Settings) -> Worker:
