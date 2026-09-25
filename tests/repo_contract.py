@@ -71,6 +71,20 @@ class RepositoryContract:
         self.repos.products.upsert_many([make_product(1), replace(make_product(2), fetched_at=later)])
         self.assertEqual(self.repos.products.last_fetched_at(), later)
 
+    def test_products_archive_missing_archives_only_active_products_not_kept(self):
+        self.repos.products.upsert_many([make_product(1), make_product(2), make_product(3),
+                                         make_product(4, archived=True)])
+        self.assertEqual(self.repos.products.archive_missing(["1", "999"]), 2)
+        archived = {p.id: p.archived for p in self.repos.products.list_all()}
+        self.assertEqual(archived, {"1": False, "2": True, "3": True, "4": True})
+        self.assertEqual(self.repos.products.get("2").price, Decimal("500"))   # nessun altro campo
+
+    def test_products_archive_missing_with_nothing_to_keep_archives_everything(self):
+        self.repos.products.upsert_many([make_product(1), make_product(2)])
+        self.assertEqual(self.repos.products.archive_missing([]), 2)
+        self.assertEqual(self.repos.products.archive_missing([]), 0)
+        self.assertEqual(self.repos.products.count(), 2)
+
     # intenti
     def test_intents_round_trip(self):
         self.repos.intents.add(intent())
@@ -271,3 +285,6 @@ class RepositoryContract:
         self.assertEqual(self.repos.rejections.product_ids_for_intent("i1"), {"1", "2"})
         self.assertEqual(self.repos.rejections.proposal_ids_for_intent("i1"), {"p1", "p2"})
         self.assertEqual(self.repos.rejections.product_ids_for_intent("other"), set())
+        reasons = {r.proposal_id: r.reason for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual(reasons, {"p1": "troppo caro", "p2": ""})   # il primo motivo resta
+        self.assertEqual(self.repos.rejections.list_for_intent("other"), [])

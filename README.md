@@ -28,13 +28,15 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
-Al primo avvio con la tabella `products` vuota, l'app carica `fixtures/catalog.json` (110
-prodotti). A ogni avvio legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
+A ogni avvio l'app riallinea la tabella `products` alla fixture dell'ambiente
+(`fixtures/catalog.json`, 110 prodotti, in replay): se i prodotti attivi sono diversi carica la
+fixture e archivia gli altri, senza cancellarli; se sono gli stessi non tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
 prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
 
 `VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
-`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo resta
-quello della fixture finché non c'è il sync (M10).
+`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo è la
+fixture `fixtures/catalog*.json` registrata su `HOFJ_BASE_URL` (senza, l'app non parte), e le
+chiamate del carrello usano il suo locale; resta così finché non c'è il sync (M10).
 
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
@@ -114,8 +116,11 @@ errore esplicito.
 
 1. Dashboard Render → New → Blueprint → questo repository e branch.
 2. Render crea `vela-db` e il servizio `vela`; `DATABASE_URL` è collegata al database.
-3. Inserire nella dashboard le variabili marcate `sync: false` che servono alla modalità in uso
-   (per M0 basta `VELA_UPSTREAM_MODE=replay`, già nel file).
+3. Inserire nella dashboard le variabili marcate `sync: false`. Il Blueprint fissa
+   `VELA_UPSTREAM_MODE=live` (M7, HofJ staging): servono `HOFJ_API_KEY`,
+   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRAND=staging.weebora.com`,
+   `STRIPE_SECRET_KEY`, `VELA_PUBLIC_URL` e `VELA_API_TOKEN`, altrimenti l'app non parte. Per tornare
+   in replay si cambia il valore nel file.
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
 5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok","catalog":{...},"quota":{...}}`
    (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota`: finestra corrente, usate,
@@ -133,17 +138,19 @@ autenticazione fino a M8). Su Render `VELA_PUBLIC_URL` deve essere l'URL pubblic
 serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri ricevono 421).
 
 1. Verifica il servizio: `curl https://<servizio>.onrender.com/health`.
-2. Smoke test del flusso di spec §10.1 (solo replay, nessuna chiamata a HofJ o Stripe; lascia un
-   ordine di prova nel DB):
-   `uv run python scripts/mcp_smoke.py https://<servizio>.onrender.com/mcp`
+2. Solo con il servizio in replay: smoke test del flusso di spec §10.1 (nessuna chiamata a HofJ o
+   Stripe; lascia un ordine di prova nel DB):
+   `uv run python scripts/mcp_smoke.py https://<servizio>.onrender.com/mcp`. In live il flusso si
+   prova con `scripts/rest_flow.py` (`docs/rest.md`).
 3. In claude.ai: Settings → Connectors → Add custom connector, nome `Vela`, URL
    `https://<servizio>.onrender.com/mcp`, nessuna autenticazione.
 4. In una chat nuova, con il connector attivo: "Vorrei un weekend di padel in Spagna a ottobre,
    siamo in due, massimo 800 euro". Dopo il sì Vela dichiara un'attesa; il link arriva con la
-   domanda sullo stato. Il pagamento in replay si simula aprendo il link ricevuto.
+   domanda sullo stato. Il pagamento in replay si simula aprendo il link ricevuto; in live si paga
+   il Checkout di Stripe con `4242 4242 4242 4242`.
 
-In replay "troppo caro" produce una proposta diversa ma non necessariamente più economica:
-l'interpretazione del motivo del rifiuto arriva con M9.
+"Troppo caro" produce sempre una proposta più economica, anche fuori dall'area chiesta
+(dichiarandolo); se non ce n'è, Vela lo dice (M7).
 
 ## Struttura
 

@@ -460,3 +460,31 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, T
 | Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
 | Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
 
+
+## 2026-09-25 — M7: prima prenotazione reale end-to-end
+
+Origine: intervista sulla macro task M7, piano in
+`docs/plans/2026-09-25-m7-prima-prenotazione-reale.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ambiente live | HofJ staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`) con un catalogo di staging registrato apposta | Un booking su staging non crea una prenotazione vera; è l'ambiente verificato in M5. La fixture di M1 è il catalogo di produzione e i suoi id non esistono su staging |
+| Locale | Catalogo di staging registrato in `en`; `HofJHttp` usa il `locale` della fixture caricata, nessuna variabile d'ambiente nuova | Su staging il prodotto 118 dà 502 in `it` e funziona in `en`; le frasi `say` seguono comunque la lingua del viaggiatore |
+| Catalogo sul DB | Una fixture per ambiente (`fixtures/catalog.json` di produzione per replay e test, `fixtures/catalog-staging.json`). In live si sceglie la fixture con `base_url` = `HOFJ_BASE_URL`, altrimenti l'app non parte. Al boot, se gli id attivi nel DB differiscono da quelli della fixture: upsert e prodotti assenti marcati `archived` | Il DB di Render ha il catalogo di produzione referenziato da proposte e ordini: niente DELETE. Il riallineo solo su differenza preserva i flag `bookable` di RF-33 tra un riavvio e l'altro |
+| Criterio 4 | Prodotto trappola dichiarato nella fixture di staging: clone di un prodotto reale, id numerico inesistente su HofJ, prezzo più basso, `vela_trap: true` | Prova ripetibile; HofJ risponde con un vero errore di prodotto (502, upstream 404) |
+| Criterio 3 e latenza | Nuovo `scripts/rest_flow.py` cronometrato | Misura ripetibile per M13 |
+| Criterio 1 | Eseguito dall'utente in claude.ai col connector Vela; pagamento 4242 dall'utente; l'agente guida e registra | Lettura letterale di §10.1, ripetibile per il video |
+| `render.yaml` | `VELA_UPSTREAM_MODE: value: live` | Un valore cambiato solo in dashboard può essere riportato a `replay` da una sincronizzazione del Blueprint |
+| Allineamento del branch | `task/m7` portato a `master` (con M5) con un fast-forward | Nessun commit proprio sul branch, nessuna riscrittura della storia |
+
+## 2026-09-25 — M7: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m7-prima-prenotazione-reale.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| `build_hofj` | Restituisce l'adapter e il suo caricatore del catalogo; in live entrambi dalla fixture scelta per `HOFJ_BASE_URL`, i test la sostituiscono con `mock.patch("vela.app.FIXTURES_DIR")` | Un solo punto sceglie la fixture; nessun parametro in più da far passare per `create_app` |
+| Riallineo del catalogo | `realign_catalog` al boot, `ProductRepository.archive_missing` (UPDATE, mai DELETE); `/health` invariato (conta anche gli archiviati) | Il riallineo si verifica dal log di boot (`catalog_loaded`, `catalog_archived`) |
+| "Troppo caro" (Task 6b) | Dopo un rifiuto per prezzo (parole di RF-08 o una cifra nel motivo, `refine.is_price_reason`) il chooser esclude i prodotti con totale ≥ quello della proposta rifiutata: filtro `price` prima di `rejected`, tetto = totale più basso tra le proposte rifiutate per prezzo, ricavato dai rifiuti (`RejectionRepository.list_for_intent`). L'ordinamento non cambia (area prima), quindi può arrivare un altro paese, dichiarato dalla motivazione. Niente di più economico → `no_match` con `failed_criterion` `price` e frase it/en | Trovato da `scripts/rest_flow.py` contro il replay: con il chooser v2 (M11) la prima proposta è già la più economica dell'area, e dopo "troppo caro" arrivava la successiva nell'area, più cara (558 → 600 €), contro §10.1. Scelta dell'utente tra tetto di prezzo, budget come esclusione e nessun cambio. Il tetto non sta nei `Criteria` perché finiscono nella risposta pubblica `intent_created` |
+| Test aggiornati dal Task 6b | `test_filter_order` (nuovo filtro `price`), `test_no_match_covers_every_criterion` e `test_no_match` (6 frasi), `test_reject_gives_a_different_product` (dopo "troppo caro" il prodotto 1 a 300 € invece del 4 a 390 €), `test_too_expensive_lowers_budget` (resta solo la verifica del budget, la scelta passa al nuovo test) | Fissavano il comportamento cambiato da questa decisione |
+| Test Postgres | `archive_missing` e `list_for_intent` su Postgres non eseguiti in questo worktree (`DATABASE_URL` assente): 42 saltati | Da eseguire prima del merge dove l'URL è disponibile |

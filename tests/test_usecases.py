@@ -138,7 +138,7 @@ class RejectProposalTest(unittest.TestCase):
         second = vela.reject_proposal(first.proposal.id, "troppo caro")
         self.assertIsInstance(second, ProposalMade)
         self.assertNotEqual(second.product.product_id, first.product.product_id)
-        self.assertEqual(second.product.product_id, "4")
+        self.assertEqual(second.product.product_id, "1")                # più economico (M7)
         self.assertEqual(vela.repos.rejections.product_ids_for_intent(iid), {"3"})
         assert_single_product(self, second.to_dict())
 
@@ -171,10 +171,51 @@ class RejectProposalTest(unittest.TestCase):
         vela = make_vela()
         iid = vela.create_intent(INTENT).intent_id
         first = vela.get_proposal(iid)                  # prodotto 3, 350 × 2 = 700
-        second = vela.reject_proposal(first.proposal.id, "troppo caro")
+        vela.reject_proposal(first.proposal.id, "troppo caro")
         self.assertEqual(vela.repos.intents.get(iid).criteria.budget, Decimal("560.00"))
-        self.assertEqual(second.product.product_id, "4")
-        self.assertIn("più economica", second.proposal.reason)
+
+    def test_too_expensive_gives_a_cheaper_proposal_even_outside_the_area(self):
+        """§10.1 (decisione M7): in Spagna restano solo 390 e 450, più cari di 350: si passa
+        all'Italia a 300, dichiarando che non è in Spagna."""
+        vela = make_vela()
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)                  # prodotto 3, Valencia, 700 in totale
+        second = vela.reject_proposal(first.proposal.id, "troppo caro")
+        self.assertEqual(second.product.product_id, "1")                # Riccione, 600
+        self.assertIn("Spagna", second.proposal.reason)
+        assert_single_product(self, second.to_dict())
+
+    def test_repeated_too_expensive_keeps_lowering_the_total(self):
+        vela = make_vela([make_product(1, price=300, country="ES", destination="Valencia"),
+                          make_product(2, price=400, country="ES", destination="Madrid"),
+                          make_product(3, price=250, country="IT", destination="Firenze"),
+                          make_product(4, price=100, country="IT", destination="Riccione")])
+        iid = vela.create_intent(INTENT).intent_id
+        totals = []
+        r = vela.get_proposal(iid)
+        while isinstance(r, ProposalMade):
+            totals.append(r.proposal.total_from)
+            r = vela.reject_proposal(r.proposal.id, "costa troppo")
+        # Valencia 600; Madrid (800) è più cara, fuori area la più economica è Riccione (200)
+        self.assertEqual(totals, [Decimal("600"), Decimal("200")])
+        self.assertEqual(r.failed_criterion, "price")
+
+    def test_nothing_cheaper_is_a_no_match_that_says_so(self):
+        vela = make_vela([make_product(1, price=300, country="ES", destination="Valencia"),
+                          make_product(2, price=450, country="ES", destination="Madrid")])
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)
+        r = vela.reject_proposal(first.proposal.id, "troppo caro")
+        self.assertIsInstance(r, NoMatch)
+        self.assertEqual(r.failed_criterion, "price")
+        self.assertIn("più economico", r.say)
+
+    def test_non_price_reason_sets_no_ceiling(self):
+        vela = make_vela()
+        iid = vela.create_intent(INTENT).intent_id
+        first = vela.get_proposal(iid)                  # prodotto 3, 350
+        second = vela.reject_proposal(first.proposal.id, "non mi piace")
+        self.assertEqual(second.product.product_id, "4")                # 390, in Spagna
 
     def test_double_reject_does_not_lower_twice(self):
         vela = make_vela()

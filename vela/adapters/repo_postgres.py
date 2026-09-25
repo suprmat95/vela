@@ -89,6 +89,15 @@ class PostgresProducts:
             conn.execute(update(products_t).where(products_t.c.id == product_id)
                          .values(bookable=bookable, bookable_checked_at=checked_at))
 
+    def archive_missing(self, keep_ids: Iterable[str]) -> int:
+        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`."""
+        stmt = update(products_t).where(products_t.c.archived.is_(False))
+        keep = list(keep_ids)
+        if keep:
+            stmt = stmt.where(products_t.c.id.notin_(keep))
+        with self.engine.begin() as conn:
+            return conn.execute(stmt.values(archived=True)).rowcount
+
 
 class PostgresIntents:
     def __init__(self, engine: Engine):
@@ -229,6 +238,13 @@ class PostgresRejections:
             rows = conn.execute(select(rejections_t.c.proposal_id)
                                 .where(rejections_t.c.intent_id == intent_id)).all()
         return {r[0] for r in rows}
+
+    def list_for_intent(self, intent_id: str) -> List[Rejection]:
+        with self.engine.connect() as conn:
+            rows = conn.execute(select(rejections_t).where(rejections_t.c.intent_id == intent_id)
+                                .order_by(rejections_t.c.created_at)).mappings().all()
+        return [Rejection(m["intent_id"], m["proposal_id"], m["product_id"], m["reason"],
+                          m["created_at"]) for m in rows]
 
 
 def _job_row(j: Job) -> dict:

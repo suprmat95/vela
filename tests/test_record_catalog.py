@@ -13,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 import api_explore  # noqa: E402
 import record_catalog  # noqa: E402
+from vela.domain.catalog import load_fixture  # noqa: E402
 
 
 def item(pid, archived=False, **over):
@@ -271,6 +272,59 @@ class BuildCatalogTest(unittest.TestCase):
         self.assertIn("è", text)  # ensure_ascii=False
 
 
+class AddTrapTest(unittest.TestCase):
+    def setUp(self):
+        self.raw = os.path.join(tempfile.mkdtemp(), "raw")
+        server = FakeHofj([item(118, price=245), item(119, price=300), item(7, archived=True)])
+        record_pages_and_details(make_client(self.raw, server, []), ["118", "119"])
+        self.catalog = record_catalog.build_catalog(self.raw)
+
+    def test_clone_has_new_id_lower_price_and_marker(self):
+        record_catalog.add_trap(self.catalog, "118")
+        listed = [p for p in self.catalog["products"] if p["id"] == "900118"]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual((listed[0]["price"], listed[0]["vela_trap"]), (244, True))
+        trap = self.catalog["details"]["900118"]["catalog"]
+        self.assertEqual((trap["id"], trap["price"], trap["vela_trap"]), ("900118", 244, True))
+        self.assertEqual(self.catalog["details"]["900118"]["raw"]["id"], "900118")
+
+    def test_clone_keeps_dates_destination_and_hotels(self):
+        record_catalog.add_trap(self.catalog, "118")
+        trap = self.catalog["details"]["900118"]["catalog"]
+        self.assertEqual(trap["availabilities"][0]["startDate"], "2026-09-28")
+        self.assertEqual((trap["minDate"], trap["maxDate"]), ("2026-09-25", "2027-01-07"))
+        self.assertEqual(trap["destination"]["title"], "Sinalunga")
+        self.assertEqual(trap["hotels"]["data"][0]["attributes"]["name"], "Hotel Uno")
+
+    def test_template_is_left_untouched(self):
+        record_catalog.add_trap(self.catalog, "118")
+        template = self.catalog["details"]["118"]["catalog"]
+        self.assertEqual((template["id"], template["price"]), ("118", 245))
+        self.assertNotIn("vela_trap", template)
+        self.assertNotIn("vela_trap", [p for p in self.catalog["products"] if p["id"] == "118"][0])
+
+    def test_missing_or_archived_template_raises(self):
+        for template_id in ("555", "7"):
+            with self.assertRaises(record_catalog.BuildError):
+                record_catalog.add_trap(self.catalog, template_id)
+
+    def test_id_collision_raises(self):
+        self.catalog["products"].append(item(900118))
+        with self.assertRaises(record_catalog.BuildError):
+            record_catalog.add_trap(self.catalog, "118")
+
+    def test_trap_loads_as_the_cheapest_active_product(self):
+        record_catalog.add_trap(self.catalog, "118")
+        path = os.path.join(tempfile.mkdtemp(), "catalog.json")
+        record_catalog.write_catalog(self.catalog, path)
+        products = {p.id: p for p in load_fixture(path)}
+        self.assertEqual(str(products["900118"].price), "244")
+        self.assertFalse(products["900118"].archived)
+        self.assertEqual(products["900118"].destination, "Sinalunga")
+        active = sorted((p for p in products.values() if not p.archived), key=lambda p: p.price)
+        self.assertEqual(active[0].id, "900118")
+
+
 class RecordTest(unittest.TestCase):
     def setUp(self):
         self.raw = tempfile.mkdtemp()
@@ -439,6 +493,60 @@ class MainTest(unittest.TestCase):
         self.assertEqual(catalog["brand"], "weebora.com")
         self.assertEqual(sorted(catalog["details"]), ["1", "3"])
         self.assertNotIn("SECRET-KEY", text)
+
+    def test_locale_option_records_and_writes_that_locale(self):
+        server = FakeHofj([item(1)])
+        with mock.patch("urllib.request.urlopen", server):
+            run_main(["--raw-dir", self.raw, "--out", self.out, "--locale", "en"],
+                     {"HOFJ_API_KEY": "SECRET-KEY"})
+        product_calls = [query for path, query, _ in server.calls if path.startswith("/v1/products")]
+        self.assertEqual([q["locale"] for q in product_calls], ["en", "en"])   # lista + dettaglio
+        with open(self.out, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        self.assertEqual(catalog["locale"], "en")
+        self.assertEqual(sorted(catalog["details"]), ["1"])
+
+    def test_build_only_with_locale_uses_pages_of_that_locale(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"], locale="en")
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("rete usata")):
+            text = run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only",
+                             "--locale", "en"], {})
+        self.assertIn("1 prodotti, 1 dettagli", text)
+        with open(self.out, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["locale"], "en")
+
+    def test_build_only_default_locale_ignores_pages_of_other_locales(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"], locale="en")
+        with self.assertRaises(SystemExit) as ctx:
+            run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only"], {})
+        self.assertIn("locale it", str(ctx.exception))
+
+    def test_build_only_with_trap_from_writes_the_trap(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"])
+        run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only", "--trap-from", "1"], {})
+        with open(self.out, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        self.assertEqual(sorted(catalog["details"]), ["1", "900001"])
+
+    def test_without_trap_from_no_trap_is_written(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"])
+        run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only"], {})
+        with open(self.out, encoding="utf-8") as fh:
+            catalog = json.load(fh)
+        self.assertEqual(sorted(catalog["details"]), ["1"])
+
+    def test_trap_from_unknown_template_exits_without_writing(self):
+        server = FakeHofj([item(1)])
+        record_pages_and_details(make_client(self.raw, server, []), ["1"])
+        with self.assertRaises(SystemExit) as ctx:
+            run_main(["--raw-dir", self.raw, "--out", self.out, "--build-only",
+                      "--trap-from", "42"], {})
+        self.assertIn("42", str(ctx.exception))
+        self.assertFalse(os.path.exists(self.out))
 
     def test_build_only_rebuilds_without_calls(self):
         server = FakeHofj([item(1)])

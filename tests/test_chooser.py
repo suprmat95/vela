@@ -30,9 +30,49 @@ def sentences(text):
     return [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
 
 
+class PriceCeilingTest(unittest.TestCase):
+    """Decisione M7: dopo "troppo caro" solo totali strettamente minori del rifiutato (§10.1)."""
+
+    def test_equal_or_higher_totals_are_excluded(self):
+        products = [make_product(1, price=350), make_product(2, price=349), make_product(3, price=300)]
+        r = choose(products, crit(), set(), TODAY, max_total=Decimal("700"))   # 2 persone
+        self.assertEqual(r.product.id, "3")
+        r = choose(products[:2], crit(), set(), TODAY, max_total=Decimal("700"))
+        self.assertEqual(r.product.id, "2")                                   # 698 < 700
+
+    def test_area_still_ranks_first_among_cheaper_products(self):
+        products = [make_product(1, price=300, country="ES", destination="Valencia"),
+                    make_product(2, price=100, country="IT", destination="Riccione"),
+                    make_product(3, price=400, country="ES", destination="Madrid")]
+        r = choose(products, crit(), set(), TODAY, max_total=Decimal("800"))
+        self.assertEqual(r.product.id, "1")
+
+    def test_cheaper_product_in_another_country_is_proposed_and_declared(self):
+        products = [make_product(1, price=300, country="ES", destination="Valencia"),
+                    make_product(2, price=200, country="IT", destination="Riccione")]
+        r = choose(products, crit(), {"1"}, TODAY, max_total=Decimal("600"))
+        self.assertEqual(r.product.id, "2")
+        self.assertIn("Spagna", r.reason)
+
+    def test_nothing_cheaper_is_price(self):
+        products = [make_product(1, price=300), make_product(2, price=400)]
+        self.assertEqual(choose(products, crit(), {"1"}, TODAY, max_total=Decimal("600")),
+                         NoChoice("price"))
+
+    def test_cheaper_products_all_rejected_is_rejected(self):
+        products = [make_product(1, price=300), make_product(2, price=200)]
+        self.assertEqual(choose(products, crit(), {"1", "2"}, TODAY, max_total=Decimal("700")),
+                         NoChoice("rejected"))
+
+    def test_no_ceiling_keeps_expensive_products(self):
+        r = choose([make_product(1, price=900)], crit(), set(), TODAY)
+        self.assertEqual(r.product.id, "1")
+
+
 class FilterTest(unittest.TestCase):
     def test_filter_order(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rejected"))
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "price",
+                                   "rejected"))
 
     def test_archived_bookable_rejected_are_never_chosen(self):
         products = [make_product(1, archived=True), make_product(2, bookable=False),

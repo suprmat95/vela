@@ -13,7 +13,7 @@ services:
           name: vela-db
           property: connectionString
       - key: VELA_UPSTREAM_MODE
-        value: replay
+        value: live
       - key: HOFJ_API_KEY
         sync: false
       - key: HOFJ_BASE_URL

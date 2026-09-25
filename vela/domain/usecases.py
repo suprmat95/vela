@@ -6,6 +6,7 @@ iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodo
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Callable, Optional, Tuple, Union
 
 from vela.domain import geo, say
@@ -17,7 +18,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
                                 ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
 from vela.domain.quota import estimated_wait_seconds, purchases_per_window, wait_minutes
-from vela.domain.refine import refine
+from vela.domain.refine import is_price_reason, refine
 from vela.ports.hofj import HofJPort
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
@@ -114,7 +115,7 @@ class Vela:
         rejected_products = self.repos.rejections.product_ids_for_intent(intent.id)
         now = self.now()
         result = choose(self.repos.products.list_all(), intent.criteria, rejected_products,
-                        today=now.date(), now=now)
+                        today=now.date(), now=now, max_total=self._price_ceiling(intent.id))
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
                            say.say_no_match(result.failed_criterion, intent.criteria))
@@ -123,6 +124,15 @@ class Vela:
                             result.product.currency, result.reason, self.now())
         self.repos.proposals.add(proposal)
         return self._made(proposal, result.product, lang)
+
+    def _price_ceiling(self, intent_id: str) -> Optional[Decimal]:
+        """Decisione M7 (§10.1): dopo un rifiuto per prezzo si propone solo qualcosa che costa
+        meno; il tetto è il totale più basso tra le proposte rifiutate per prezzo."""
+        by_price = {r.proposal_id for r in self.repos.rejections.list_for_intent(intent_id)
+                    if is_price_reason(r.reason)}
+        totals = [p.total_from for p in self.repos.proposals.list_for_intent(intent_id)
+                  if p.id in by_price]
+        return min(totals) if totals else None
 
     def _made(self, proposal: Proposal, product: Optional[Product] = None,
               lang: str = "it") -> ProposalMade:

@@ -1,0 +1,101 @@
+"""Fixture del catalogo di staging (M7) e scenari dei criteri 1, 3 e 4 su di essa.
+
+`fixtures/catalog-staging.json` è registrata su HofJ staging in `en` con il prodotto trappola del
+criterio 4 (`record_catalog.py --trap-from 78`). Gli scenari usano le frasi di
+`scripts/rest_flow.py` e il dominio vero con repository in memoria, alla data della
+registrazione: gli id attesi valgono per la fixture del 2026-09-25 e vanno rivisti se la si
+rigenera.
+"""
+import json
+import os
+import sys
+import unittest
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from vela.adapters.hofj_replay import ReplayHofJ
+from vela.adapters.repo_memory import MemoryRepositories
+from vela.adapters.stripe_fake import FakePayments
+from vela.config import DEFAULT_TRAVELER
+from vela.domain.catalog import select_fixture
+from vela.domain.models import NoMatch, ProposalMade
+from vela.domain.usecases import Vela
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+import rest_flow  # noqa: E402
+
+FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
+FIXTURE = os.path.join(FIXTURES, "catalog-staging.json")
+STAGING = "https://staging.api.hofj.com"
+RECORDED = datetime(2026, 9, 25, 9, 0, tzinfo=timezone.utc)
+TRAP = "900078"
+
+
+def vela_on_staging():
+    repos = MemoryRepositories()
+    repos.products.upsert_many(ReplayHofJ(FIXTURE).load_catalog())
+    return Vela(repos, ReplayHofJ(), FakePayments("http://test"), DEFAULT_TRAVELER, now=lambda: RECORDED)
+
+
+@unittest.skipUnless(os.path.exists(FIXTURE), "fixtures/catalog-staging.json assente")
+class StagingFixtureTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with open(FIXTURE, encoding="utf-8") as fh:
+            cls.catalog = json.load(fh)
+
+    def test_recorded_on_staging_in_english_for_the_staging_brand(self):
+        self.assertEqual((self.catalog["base_url"], self.catalog["locale"], self.catalog["brand"]),
+                         (STAGING, "en", "staging.weebora.com"))
+
+    def test_live_on_staging_selects_it_and_production_keeps_the_m1_fixture(self):
+        self.assertEqual(os.path.basename(select_fixture(FIXTURES, STAGING)), "catalog-staging.json")
+        self.assertEqual(os.path.basename(select_fixture(FIXTURES, "https://api.hofj.com")), "catalog.json")
+
+    def test_exactly_one_declared_trap_cloned_from_product_78(self):
+        traps = [p["id"] for p in self.catalog["products"] if p.get("vela_trap")]
+        self.assertEqual(traps, [TRAP])
+        trap = self.catalog["details"][TRAP]["catalog"]
+        self.assertTrue(trap["vela_trap"])
+        self.assertEqual((trap["price"], self.catalog["details"]["78"]["catalog"]["price"]), (249, 250))
+
+    def test_every_active_product_has_a_detail(self):
+        active = sorted(p["id"] for p in self.catalog["products"] if not p["archived"])
+        self.assertEqual(active, sorted(self.catalog["details"]))
+
+
+@unittest.skipUnless(os.path.exists(FIXTURE), "fixtures/catalog-staging.json assente")
+class CriteriaScenarioTest(unittest.TestCase):
+    def test_flow_intent_then_too_expensive_gives_a_cheaper_single_proposal(self):
+        """Criteri 1 e 3: Marbella a 398 €, poi il 867 a 200 € (fuori dalla Spagna, dichiarato)."""
+        vela = vela_on_staging()
+        iid = vela.create_intent(rest_flow.INTENT_FLOW).intent_id
+        first = vela.get_proposal(iid)
+        self.assertEqual((first.product.product_id, first.proposal.total_from), ("28", Decimal("398")))
+        second = vela.reject_proposal(first.proposal.id, rest_flow.REASON)
+        self.assertIsInstance(second, ProposalMade)
+        self.assertEqual((second.product.product_id, second.proposal.total_from), ("867", Decimal("200")))
+        self.assertIn("Spagna", second.proposal.reason)
+        self.assertNotEqual(second.product.product_id, TRAP)
+
+    def test_trap_intent_proposes_the_trap_first_and_a_real_product_after_it_fails(self):
+        """Criterio 4: la trappola è la prima proposta; il sostituto è il 78 vero, a Firenze."""
+        vela = vela_on_staging()
+        iid = vela.create_intent(rest_flow.INTENT_TRAP).intent_id
+        first = vela.get_proposal(iid)
+        self.assertEqual(first.product.product_id, TRAP)
+        replacement = vela.reject_proposal(first.proposal.id, "prodotto non prenotabile")
+        self.assertEqual(replacement.product.product_id, "78")
+
+    def test_flow_intent_ends_with_nothing_cheaper(self):
+        vela = vela_on_staging()
+        iid = vela.create_intent(rest_flow.INTENT_FLOW).intent_id
+        r = vela.get_proposal(iid)
+        for _ in range(2):
+            r = vela.reject_proposal(r.proposal.id, rest_flow.REASON)
+        self.assertIsInstance(r, NoMatch)
+        self.assertEqual(r.failed_criterion, "price")
+
+
+if __name__ == "__main__":
+    unittest.main()
