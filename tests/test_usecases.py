@@ -87,6 +87,7 @@ class GetProposalTest(unittest.TestCase):
         r = vela.get_proposal(iid)
         self.assertIsInstance(r, NoMatch)
         self.assertEqual(r.failed_criterion, "sport")
+        self.assertIn("di padel", r.say)
         self.assertEqual(vela.repos.proposals.list_for_intent(iid), [])
         assert_single_product(self, r.to_dict())
 

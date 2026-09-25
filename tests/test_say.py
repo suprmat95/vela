@@ -72,3 +72,31 @@ class SayTest(unittest.TestCase):
 
     def test_paid(self):
         self.assertIn("Pagamento", say.say_paid())
+
+
+class SayM11Test(unittest.TestCase):
+    OCT = Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre")
+
+    def test_on_date(self):
+        self.assertEqual(say.on_date(date(2026, 10, 1)), "il 1 ottobre 2026")
+        self.assertEqual(say.on_date(date(2026, 10, 8)), "l'8 ottobre 2026")
+        self.assertEqual(say.on_date(date(2026, 10, 11)), "l'11 ottobre 2026")
+        self.assertEqual(say.on_date(date(2026, 10, 18)), "il 18 ottobre 2026")
+
+    def test_intent_created_uses_the_right_preposition(self):
+        s = say.say_intent_created(Criteria("padel", Area("region", "Sardegna", "IT")))
+        self.assertIn("in Sardegna", s)
+        s = say.say_intent_created(Criteria("padel", Area("region", "Canarie", "ES")))
+        self.assertIn("alle Canarie", s)
+
+    def test_no_match_cites_the_value(self):
+        c = Criteria("tennis", None, self.OCT, 8)
+        self.assertIn("di tennis", say.say_no_match("sport", c))
+        self.assertIn("tra il 1 ottobre 2026 e il 31 ottobre 2026", say.say_no_match("dates", c))
+        self.assertIn("per 8 persone", say.say_no_match("pax", c))
+        self.assertIn("scartato", say.say_no_match("rejected", c))
+        self.assertEqual(say.say_no_match("trip", c), say.say_no_match("archived"))
+
+    def test_no_match_without_value_falls_back(self):
+        self.assertIn("periodo", say.say_no_match("dates", Criteria()))
+        self.assertIn("sport", say.say_no_match("sport"))

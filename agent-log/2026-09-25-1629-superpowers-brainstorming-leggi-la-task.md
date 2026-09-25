@@ -306,3 +306,17 @@ Fallisce per il motivo atteso. Ora il codice, come scritto nel piano.
 - 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/geo.py
 
 - 🔧 Bash: Run geo tests and full suite
+
+- 🔧 Bash: Commit task 1
+
+Task 1 committata. Task 2: frasi. Prima i test.
+
+- 🔧 Bash: Add say/usecase tests and watch them fail
+
+Falliscono tutti per i motivi attesi. Ora il codice in `say.py` e `usecases.py`.
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/task-m11/vela/domain/say.py
+
+- 🔧 Bash: Implement say changes and run full suite
+
+- 🔧 Bash: Commit task 2

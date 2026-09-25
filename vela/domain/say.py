@@ -3,7 +3,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from vela.domain.models import Criteria, OrderStatus, ProductSummary, Proposal
+from vela.domain import geo
+from vela.domain.models import Criteria, OrderStatus, Period, ProductSummary, Proposal
 
 MONTHS_IT = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
              "settembre", "ottobre", "novembre", "dicembre"]
@@ -11,6 +12,11 @@ MONTHS_IT = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "lugl
 
 def fmt_date(d: date) -> str:
     return "%d %s %d" % (d.day, MONTHS_IT[d.month - 1], d.year)
+
+
+def on_date(d: date) -> str:
+    """Data con l'articolo: "il 1 ottobre 2026", "l'8 ottobre 2026", "l'11 ottobre 2026"."""
+    return ("l'%s" if d.day in (8, 11) else "il %s") % fmt_date(d)
 
 
 def fmt_money(value: Decimal) -> str:
@@ -32,15 +38,18 @@ def _join(parts: list) -> str:
     return ", ".join(parts[:-1]) + " e " + parts[-1]
 
 
+def _when(period: Period) -> str:
+    if period.start == period.end:
+        return on_date(period.start)
+    return "tra %s e %s" % (on_date(period.start), on_date(period.end))
+
+
 def say_intent_created(c: Criteria) -> str:
     parts = ["un viaggio di %s" % c.sport if c.sport else "un viaggio"]
     if c.area:
-        parts.append(("in %s" if c.area.kind == "country" else "a %s") % c.area.name)
+        parts.append(geo.where(c.area))
     if c.period:
-        if c.period.start == c.period.end:
-            parts.append("il %s" % fmt_date(c.period.start))
-        else:
-            parts.append("tra il %s e il %s" % (fmt_date(c.period.start), fmt_date(c.period.end)))
+        parts.append(_when(c.period))
     if c.pax:
         parts.append("per %s" % _people(c.pax))
     if c.budget is not None:
@@ -52,7 +61,7 @@ def say_proposal(product: ProductSummary, p: Proposal) -> str:
     where = " a %s" % product.destination if product.destination else ""
     hotel = ", hotel %s" % product.hotel if product.hotel else ""
     if p.start_date == p.end_date:
-        when = "il %s" % fmt_date(p.start_date)
+        when = on_date(p.start_date)
     else:
         when = "dal %s al %s" % (fmt_date(p.start_date), fmt_date(p.end_date))
     return ("Ti propongo %s%s%s, %s per %s, a partire da %s a persona. %s Ti va?"
@@ -62,6 +71,7 @@ def say_proposal(product: ProductSummary, p: Proposal) -> str:
 _NO_MATCH = {
     "archived": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
     "bookable": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
+    "trip": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
     "rejected": "Hai già scartato tutte le proposte compatibili con la tua richiesta: prova a riformularla.",
     "sport": "Non trovo nessun viaggio per lo sport che hai chiesto: prova con l'altro sport o riformula la richiesta.",
     "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
@@ -69,7 +79,17 @@ _NO_MATCH = {
 }
 
 
-def say_no_match(criterion: str) -> str:
+def say_no_match(criterion: str, criteria: Optional[Criteria] = None) -> str:
+    """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore."""
+    c = criteria or Criteria()
+    if criterion == "sport" and c.sport:
+        return ("Non trovo nessun viaggio di %s: prova con l'altro sport o riformula la richiesta."
+                % c.sport)
+    if criterion == "dates" and c.period:
+        return "Non trovo partenze %s: prova con un altro periodo." % _when(c.period)
+    if criterion == "pax" and c.pax:
+        return ("Non trovo viaggi per %s: prova a cambiare il numero di persone."
+                % _people(c.pax))
     return _NO_MATCH.get(criterion, "Non trovo nessun viaggio compatibile: prova a riformulare la richiesta.")
 
 
