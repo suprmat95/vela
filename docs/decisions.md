@@ -70,3 +70,11 @@ Origine: intervista sulla suddivisione del progetto, risultato in `docs/roadmap.
 | Ponte auth | `/mcp` senza auth finché non esiste l'OAuth (M8) | Meno codice da buttare; l'URL resta aperto per poche ore |
 | Taglio | Fette verticali attorno a due traguardi: A prototipo replay (M3), B prenotazione reale (M7) | Prototipo presto, poi massimo parallelismo. Scartati il taglio per strato (prototipo tardi) e poche task grandi (piani illeggibili) |
 | DB layer | SQLAlchemy Core + psycopg 3 + Alembic | SQL esplicito, advisory lock semplice, migrazioni al boot |
+
+## 2026-09-25 — Caccia agli easter egg: ambiente e credenziali
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ambiente per i carrelli di prova | Staging `https://staging.api.hofj.com`, con fallback a produzione se la chiave non è accettata | Il brand `staging.weebora.com` richiesto dalla traccia esiste solo nel CMS di staging; in produzione i canali sono `weebora.com`, `terrarossa.com`, `booking.hofj.com`. |
+| Credenziali | Chiave `API_BEAR_KEY` del client interno `test-dev-2`, caricata nell'ambiente della singola riga di shell, mai letta né stampata | Le rotte itinerari richiedono un client `internal`; la chiave era già disponibile nel worktree `api-recognition`. |
+| Dove annotare le chiavi trovate | `docs/easter-eggs.md`, una sezione per chiave con chiamate ed esiti | Riproducibilità: le note guidano le chiavi successive e restano nel repo. |
