@@ -3094,3 +3094,19 @@ Suite verde: 675 test. `say_accept` non è più usata da nessuna parte, perché 
 Tutto verde: 674 test. Faccio il commit del blocco Task 10 + 17.
 
 - 🔧 Bash: Commit Task 10 and 17
+
+Il blocco 10 + 17 è committato. Passo al **Task 15**, l'adapter HTTP verso HofJ. Uso le forme reali osservate nel Task 1 e testo tutto con `httpx.MockTransport`, senza rete.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/tests/test_hofj_http.py
+
+- 🔧 Bash: Run HTTP adapter tests to see them fail
+
+Il test fallisce perché il modulo non esiste. Scrivo l'adapter.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m5/vela/adapters/hofj_http.py
+
+- 🔧 Bash: Run HTTP adapter tests
+
+I 27 test passano. Faccio il commit del Task 15.
+
+- 🔧 Bash: Run suite and commit Task 15
