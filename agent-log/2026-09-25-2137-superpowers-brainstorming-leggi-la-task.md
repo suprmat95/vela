@@ -119,3 +119,54 @@ Rossi per il motivo giusto: l'opzione non esiste. Il terzo test passa già: è u
 - 🔧 Bash: Add --locale option, run tests and full suite
 
 - 🔧 Bash: Commit Task 1
+
+- 🔧 Bash: Check price field shape in fixture
+
+Task 0 e Task 1 sono fatti. Mi fermo qui come da working agreement: una task alla volta, con il tuo OK prima della successiva.
+
+**Cosa ho fatto**
+- **Task 0:** ho registrato le decisioni dell'intervista in una nuova sezione "M7" di `docs/decisions.md` (commit `5393816`). La suite di partenza era verde: 709 test, 40 saltati perché qui manca `DATABASE_URL`.
+- **Task 1:** ho aggiunto `--locale` a `scripts/record_catalog.py` (commit `e9b5f08`). L'opzione vale sia per la registrazione sia per `--build-only`. I test nuovi sono in `tests/test_record_catalog.py` e prima del codice fallivano perché l'opzione non esisteva. Ora la suite è verde: 712 test, 40 saltati.
+
+**Cosa ho deciso**
+- Il compito era più piccolo del previsto: `record` e `build_catalog` accettavano già `locale`, mancava solo l'opzione nel `main`.
+- `base_url` nella fixture viene da `HOFJ_BASE_URL` letto all'avvio dello script, quindi non serviva codice nuovo. L'ho verificato leggendo il codice, senza un test apposito.
+
+**Su cosa ho dubbi**
+- Uno dei tre test nuovi (`test_build_only_default_locale_ignores_pages_of_other_locales`) passava già prima della modifica. Protegge il default `it` ma non verifica codice nuovo: posso tenerlo o toglierlo.
+
+**Proposta per il Task 2 (prodotto trappola), aspetto il tuo OK:**
+- Nuova funzione `add_trap(catalog, template_id)` in `record_catalog.py`. Clona la voce in `products` e in `details` con id `str(900000 + int(template_id))`.
+- Il prezzo è quello del modello meno 1. Nella fixture il prezzo è un numero semplice (es. `578`), e il loader lo legge dalla voce in `products`: va abbassato sia in `products` sia in `details[id].catalog`.
+- Il marcatore `vela_trap: true` va nella voce clonata in `products` e in `details[id].catalog`.
+- Opzione `--trap-from ID`, applicata dopo `build_catalog`: funziona sia con la registrazione sia con `--build-only`.
+- I test, scritti prima del codice:
+  - il clone ha stesse date, destinazione e hotel;
+  - il prezzo è inferiore di 1 (valore letterale);
+  - il marcatore è presente;
+  - modello assente → `BuildError`, poi uscita senza scrivere la fixture;
+  - id già esistente → `BuildError`;
+  - senza l'opzione nessun clone;
+  - la fixture con la trappola si carica con `load_fixture` e il prodotto trappola risulta il più economico.
+
+## Utente 21:48
+
+ok, procedi con il Task 2
+
+## Agente 21:48
+
+- 🔧 Bash: Read test fixtures helpers and loader
+
+RED: i test di `add_trap` e di `--trap-from`.
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_record_catalog.py
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m7/tests/test_record_catalog.py
+
+- 🔧 Bash: Add import and run tests, expect red
+
+Rossi per i motivi attesi: manca la funzione e manca l'opzione. `test_without_trap_from_no_trap_is_written` passa già ed è una guardia. GREEN:
+
+- 🔧 Bash: Implement add_trap and --trap-from, run tests
+
+- 🔧 Bash: Commit Task 2
