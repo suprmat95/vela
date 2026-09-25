@@ -638,3 +638,59 @@ Suite verde. Aggiungo a `docs/fixtures.md` come si rigenera la fixture di stagin
 - 🔧 Bash: Read fixtures doc structure
 
 - 🔧 Bash: Document staging fixture, run suite, commit Task 7
+
+Task 7 è fatto: commit `f62b01e`, suite verde con 772 test e 42 saltati.
+
+**Cosa ho fatto**
+- Ho registrato `fixtures/catalog-staging.json` su HofJ staging: 58 chiamate, 87 prodotti, 56 attivi, più la trappola `900078` clonata dal 78.
+- Le frasi di prova sono fissate in `scripts/rest_flow.py`:
+  - `INTENT_FLOW` è la frase di §10.1;
+  - `INTENT_TRAP` è "un weekend di padel a Firenze a ottobre, siamo in due".
+- Nuovo `tests/test_staging_fixture.py` con 7 test:
+  - la fixture è registrata sull'host di staging, in `en`, con il brand di staging;
+  - il live su staging sceglie questa fixture;
+  - c'è una sola trappola;
+  - scenari del dominio vero: Marbella a 398 €, poi il 867 a 200 € fuori dalla Spagna (dichiarato), poi `no_match` `price`; la trappola esce per prima e il sostituto è il 78.
+- Ho aggiunto una sezione a `docs/fixtures.md` con i comandi per rigenerare la fixture.
+
+**Cosa ho deciso**
+- I test di staging stanno in un file nuovo invece che in `test_catalog_fixture.py` e `test_chooser_fixture.py`, che sono costruiti sulla fixture di produzione.
+
+**Su cosa ho dubbi**
+- Solo il test della trappola è stato rosso prima del codice. Gli altri verificano dati appena registrati e comportamento già costruito nel 6b.
+- Gli scenari sono fissati al 25 settembre. In live, con il passare dei giorni, le date proposte cambiano: al 2 ottobre la simulazione dava ancora gli stessi prodotti.
+- Staging ha dati sporchi. In live la prova vera sarà se HofJ accetta il carrello del 28 e del 867.
+
+**Proposta per il Task 8 (Render in live), aspetto il tuo OK:**
+1. **Codice.** `render.yaml` passa a `VELA_UPSTREAM_MODE: value: live`, con `tests/test_render_yaml.py` aggiornato prima in rosso. In `docs/rest.md` aggiungo la sezione "Flusso §10.3 con `scripts/rest_flow.py`"; aggiorno anche `docs/stripe.md` (il test manuale ora si può fare) e il README. Commit.
+2. **Test Postgres prima del merge.** Con `DATABASE_URL` preso dal `.env`, passato solo a quel processo e con `PGOPTIONS=-csearch_path=vela_test` come in M5. Così girano i contratti di `archive_missing` e `list_for_intent`. Chiamate solo al DB di Render, nello schema di test. Ho bisogno che il `.env` contenga l'External Database URL: controllo solo che la variabile ci sia, come ho fatto per la chiave.
+3. **Variabili su Render: le imposti tu dalla dashboard prima del merge.** Con `live` nel Blueprint, un'app senza `HOFJ_BASE_URL` di staging non parte. Render tiene la versione precedente, ma il deploy fallisce. Valori:
+   - `HOFJ_API_KEY` = la chiave interna;
+   - `HOFJ_BASE_URL` = `https://staging.api.hofj.com`;
+   - `HOFJ_BRAND` = `staging.weebora.com`;
+   - `STRIPE_SECRET_KEY` = la `rk_test` di HofJ;
+   - `VELA_PUBLIC_URL` = `https://vela-n506.onrender.com`;
+   - `VELA_API_TOKEN` = già impostato in M4, da verificare.
+4. **Merge.** Merge di `task/m7` su `master` con il tuo OK: stesso metodo delle altre task, `git merge` da `master` senza riscrivere la storia. Poi il push su `origin/master`, sempre col tuo OK, fa partire l'autodeploy.
+5. **Verifica.** `curl https://vela-n506.onrender.com/health`, che non richiede token. Mi aspetto `db ok`, `catalog.products` = 110 + 88 = 198 righe (gli archiviati restano) e `quota` valorizzata. Il riallineo si legge nei log di boot su Render (`catalog_loaded` 88, `catalog_archived` 77): quelli li guardi tu dalla dashboard.
+6. **Costo.** 1 chiamata HofJ `/v1/quota` al boot. Nessuna chiamata Stripe.
+
+## Utente 22:14
+
+ok, procedi con il Task 8
+
+## Agente 22:14
+
+- 🔧 Bash: Read render.yaml test
+
+Il test esistente controlla il testo del Blueprint. Lo porto a `live` (RED), poi cambio `render.yaml` (GREEN):
+
+- 🔧 Bash: Update render.yaml test red, then set live
+
+Ora la documentazione: `docs/rest.md`, `docs/stripe.md` e il README.
+
+- 🔧 Bash: Find README and stripe doc parts to update
+
+- 🔧 Bash: Read README deploy section
+
+- 🔧 Bash: Update docs, run suite, commit Task 8 code part

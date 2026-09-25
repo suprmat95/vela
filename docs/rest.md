@@ -66,6 +66,25 @@ Solo sotto `/v1`: `content-type: application/problem+json`, corpo
 
 Ordine dei controlli: token configurato (503), token valido (401), validazione (422), dominio (503).
 
+## Flusso §10.3 con `scripts/rest_flow.py` (M7)
+
+Lo script esegue il flusso e cronometra ogni passo (latenza per M13). Il token si legge solo da
+`VELA_API_TOKEN` e non viene stampato.
+
+```bash
+# criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, link,
+# pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
+uv run python scripts/rest_flow.py https://vela-n506.onrender.com
+# criterio 4: la prima proposta di INTENT_TRAP è la trappola della fixture di staging; dopo
+# l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
+uv run python scripts/rest_flow.py https://vela-n506.onrender.com --trap
+```
+
+Opzioni: `--intent` (altra frase), `--poll` (secondi tra due stati, default 5), `--timeout` (attesa
+massima per stato, default 900). Esito: una riga per campo (ordine, prodotti, codice) e una tabella
+Markdown dei tempi. Uscita 1 con `FALLITO: ...` se un controllo non passa (più di un prodotto, seconda
+proposta non più economica, stato terminale inatteso, timeout).
+
 ## Flusso §10.3 con `curl`
 
 Richiede `curl` e `jq`. Il token si legge da una variabile già esportata e non va mai scritto

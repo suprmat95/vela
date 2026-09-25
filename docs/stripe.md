@@ -40,8 +40,12 @@ dati. La conferma del pagamento non arriva da lì ma dal job di verifica.
 
 Il test end-to-end: ordine `confirmed` dopo un pagamento reale.
 
-Costo: 1 Checkout Session e 1 pagamento di test sull'account Stripe di test di HofJ; nessuna
-chiamata a HofJ in replay.
+Costo: 1 Checkout Session e 1 pagamento di test sull'account Stripe di test di HofJ, più le
+letture della sessione ogni 60 s finché l'ordine è da pagare; in live (M7) anche 5 chiamate HofJ
+per l'acquisto e 1 per la prenotazione.
+
+Con `scripts/rest_flow.py` (`docs/rest.md`) i passi 1-4 sono automatici tranne il pagamento: lo
+script stampa il link e aspetta `confirmed`.
 
 1. Flusso REST fino all'ordine (vedi `docs/rest.md`, sezione del flusso con `curl`): dopo l'attesa
    dichiarata `GET /v1/orders/<order_id>` è `awaiting_payment` e `payment_url` inizia con

@@ -41,8 +41,10 @@ class RenderYamlTest(unittest.TestCase):
             self.assertIsNotNone(m, var)
             self.assertEqual(m.group(1), "sync", var)
 
-    def test_upstream_mode_defaults_to_replay(self):
-        self.assertRegex(self.text, r"key: VELA_UPSTREAM_MODE\n\s+value: replay")
+    def test_upstream_mode_is_live_on_render(self):
+        """M7: Render gira contro HofJ staging; il valore sta nel Blueprint perché una
+        sincronizzazione non lo riporti a replay."""
+        self.assertRegex(self.text, r"key: VELA_UPSTREAM_MODE\n\s+value: live")
 
 
 class ReadmeTest(unittest.TestCase):
