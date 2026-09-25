@@ -348,3 +348,15 @@ Task 5: test sulla fixture, poi il controllo che le proprietà si accorgano di u
 - 🔧 Bash: Remove stale chooser bytecode and rerun
 
 - 🔧 Bash: Commit task 5
+
+Task 6: decisioni in `docs/decisions.md` e verifica finale.
+
+- 🔧 Bash: Record decisions and run final checks
+
+`git diff master` elenca dei file, ma perché nel frattempo `master` è andato avanti (M3/M4). Serve il confronto con il punto di biforcazione.
+
+- 🔧 Bash: Diff from merge base only
+
+Nessun file vietato è stato toccato; i file in `agent-log/` li genera l'hook al commit. Committo le decisioni.
+
+- 🔧 Bash: Commit task 6
