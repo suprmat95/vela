@@ -287,3 +287,18 @@ Origine: intervista sulla macro task M6, piano in `docs/plans/2026-09-25-m6-stri
 | Errore di Stripe in `accept` | L'adapter solleva `PaymentsError`; REST → 503 `/problems/payments-unavailable`; MCP → frase `say_payments_unavailable()`. Un nuovo accept sulla stessa proposta trova l'ordine senza link e lo ricrea | L'ordine resta unico; M5 poi sposterà tutto nel job d'acquisto con retry |
 | Setup Stripe e test manuale | Fatti dall'utente seguendo `docs/stripe.md`; gli agenti non chiamano mai Stripe | Nessuna chiamata a servizi esterni durante l'esecuzione del piano |
 | Etichetta del line item | `create_payment_link(order, description)`: il caso d'uso passa il titolo del prodotto | Il viaggiatore vede nel Checkout che cosa paga; modifica interna della porta |
+
+## 2026-09-25 — M6: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m6-stripe.md` in TDD.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Logging di Alembic | `alembic/env.py` chiama `fileConfig(..., disable_existing_loggers=False)`; nuovo test `test_upgrade_keeps_existing_loggers_enabled` | Le migrazioni lanciate nello stesso processo dei test (`test_migrations`) spegnevano i logger `vela.*` già creati: gli `assertLogs` dei moduli eseguiti dopo (`test_webhooks`) fallivano solo nella suite completa. In produzione le migrazioni girano in un processo separato (`docker-entrypoint.sh`), quindi nessun effetto lì |
+| Log nei test | `test_thread_runner_swallows_unexpected_errors` e i test del webhook e di MCP che producono warning ora li verificano con `assertLogs` | Con i logger non più spenti il traceback finiva in console; ora il log è un'asserzione e l'output della suite è pulito |
+| Valori attesi letterali | `test_stripe_links.py` e `test_checkout_pages.py` usano URL, path e scadenza letterali (`2026-09-26 11:59 UTC`) invece delle costanti del modulo | Un'aspettativa ricavata dal codice sotto test passa sempre; i path letterali legano anche i `success_url`/`cancel_url` alle route reali |
+| Test delle route montate | `test_webhook_and_checkout_routes_always_mounted` verifica le risposte HTTP (503/200) invece di `app.routes` | In questa versione di FastAPI le route dei router inclusi non espongono `path` in `app.routes`. Lo stesso motivo rende vuoto il test esistente `test_replay_router_absent_in_live` (fuori scope M6, da correggere a parte) |
+| Test Postgres | Non eseguiti: `DATABASE_URL` non è nell'ambiente di questo worktree, quindi il contratto `claim`/`release` su Postgres e la migrazione `0003` su Postgres sono saltati | Il `.env` non va aperto. Da eseguire dove `DATABASE_URL` è disponibile |
+| Merge con `master` | Non fatto: `master` contiene M9, con 9 conflitti testuali (aggiunte adiacenti in README, `decisions.md`, `tests/test_app_replay.py`, `repo_contract.py`, `repo_memory.py`, `repo_postgres.py`, `vela/app.py`, `say.py`, `test_say.py`/`test_usecases.py`). In `vela/app.py` vanno tenuti sia `build_payments(settings)` sia `extractor=extractor` | Risoluzione meccanica, ma rebase o merge vanno concordati con l'utente |
+| Suite finale | 445 test, 13 saltati (Postgres), verde (erano 390 a inizio M6) | — |
+
