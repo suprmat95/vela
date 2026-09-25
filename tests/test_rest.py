@@ -6,8 +6,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW, FlakyPayments, assert_problem, assert_single_product, make_product
-from vela.adapters.background import InlineRunner
+from support import NOW, assert_problem, assert_single_product, inline_worker, make_product
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -32,7 +31,7 @@ class Clock:
 
 
 def make_client(products=None, token=TOKEN, payments=None):
-    """App con repository in memoria, adapter replay e runner sincrono. `products=None` = fixture."""
+    """App con repository in memoria, adapter replay e worker senza thread (`drain`). `products=None` = fixture."""
     repos = MemoryRepositories()
     hofj = ReplayHofJ(rng=random.Random(7))
     repos.products.upsert_many(hofj.load_catalog() if products is None else products)
@@ -40,7 +39,7 @@ def make_client(products=None, token=TOKEN, payments=None):
                 now=Clock())
     settings = Settings(vela_upstream_mode="replay", vela_public_url="http://test",
                         vela_api_token=token)
-    app = create_app(settings, vela=vela, runner=InlineRunner(vela.orders))
+    app = create_app(settings, vela=vela, worker=inline_worker(vela))
     return TestClient(app, raise_server_exceptions=False), vela
 
 
@@ -223,15 +222,24 @@ class ProposalEndpointsTest(unittest.TestCase):
         self.assertEqual(body["outcome"], "no_match")
         self.assertEqual(body["failed_criterion"], "rejected")
 
-    def test_double_accept_returns_same_order(self):
+    def test_accept_returns_202_order_queued_with_location(self):
+        r = self.c.post("/v1/proposals/%s/accept" % self.first["proposal_id"], json={}, headers=AUTH)
+        self.assertEqual(r.status_code, 202, r.text)
+        body = r.json()
+        self.assertEqual(body, {"outcome": "order_queued", "order_id": body["order_id"],
+                                "status": "queued", "position": 1, "wait_seconds": 4,
+                                "say": body["say"]})
+        self.assertEqual(r.headers["location"], "/v1/orders/%s" % body["order_id"])
+        self.assertNotIn("http", body["say"])
+        assert_single_product(self, body)
+
+    def test_double_accept_returns_200_order_status(self):
         path = "/v1/proposals/%s/accept" % self.first["proposal_id"]
         r1 = self.c.post(path, json={}, headers=AUTH)
         r2 = self.c.post(path, headers=AUTH)
-        self.assertEqual((r1.status_code, r2.status_code), (201, 201))
-        self.assertEqual(r1.json()["outcome"], "order")
-        self.assertEqual(r1.json()["order_id"], r2.json()["order_id"])
-        self.assertTrue(r1.json()["payment_url"].startswith("http://test/replay/checkout/"))
-        self.assertNotIn("http", r1.json()["say"])
+        self.assertEqual((r1.status_code, r2.status_code), (202, 200))
+        self.assertEqual(r2.json()["outcome"], "order_status")
+        self.assertEqual((r2.json()["order_id"], r2.json()["status"]), (r1.json()["order_id"], "queued"))
 
     def test_missing_traveler_data_then_complete(self):
         iid = new_intent(self.c, profile=None)["intent_id"]
@@ -244,18 +252,21 @@ class ProposalEndpointsTest(unittest.TestCase):
         self.assertIn("participants[0].last_name", body["missing"])
         assert_single_product(self, body)
         r = self.c.post(path, json={"traveler": FULL}, headers=AUTH)
-        self.assertEqual(r.status_code, 201, r.text)
-        self.assertEqual(r.json()["outcome"], "order")
+        self.assertEqual(r.status_code, 202, r.text)
+        self.assertEqual(r.json()["outcome"], "order_queued")
 
-    def test_order_status(self):
+    def test_order_status_new_contract(self):
         order = self.c.post("/v1/proposals/%s/accept" % self.first["proposal_id"],
                             headers=AUTH).json()
         r = self.c.get("/v1/orders/%s" % order["order_id"], headers=AUTH)
         self.assertEqual(r.status_code, 200)
         body = r.json()
-        self.assertEqual(body["outcome"], "order_status")
-        self.assertEqual(body["status"], "awaiting_payment")
-        self.assertIsNone(body["booking_code"])
+        self.assertEqual(set(body), {"outcome", "order_id", "status", "position", "wait_seconds",
+                                     "total", "currency", "price_from_total", "total_differs",
+                                     "payment_url", "booking_code", "failure_reason",
+                                     "proposal_changed", "proposal", "say"})
+        self.assertEqual((body["outcome"], body["status"], body["position"], body["booking_code"]),
+                         ("order_status", "queued", 1, None))
         assert_single_product(self, body)
 
     def test_unknown_ids_are_404(self):
@@ -306,14 +317,17 @@ class FullFlowTest(unittest.TestCase):
         second = call("post", "/v1/proposals/%s/reject" % first["proposal_id"], 200,
                       json={"reason": "troppo caro"})
         self.assertNotEqual(second["product"]["product_id"], first["product"]["product_id"])
-        order = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 201)
-        again = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 201)
+        order = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 202)
+        self.assertEqual(order["status"], "queued")
+        again = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 200)
         self.assertEqual(again["order_id"], order["order_id"])
+        c.app.state.worker.drain()                           # job d'acquisto: link pronto
         status = call("get", "/v1/orders/%s" % order["order_id"], 200)
         self.assertEqual(status["status"], "awaiting_payment")
 
-        paid = c.get(urlparse(order["payment_url"]).path)   # checkout replay: nessun token
+        paid = c.get(urlparse(status["payment_url"]).path)  # checkout replay: nessun token
         self.assertEqual(paid.status_code, 200)
+        c.app.state.worker.drain()                           # il job di prenotazione
 
         final = call("get", "/v1/orders/%s" % order["order_id"], 200)
         self.assertEqual(final["status"], "confirmed")
@@ -328,25 +342,14 @@ def proposal_id(c):
     return c.get("/v1/intents/%s/proposal" % iid, headers=AUTH).json()["proposal_id"]
 
 
-class PaymentsErrorTest(unittest.TestCase):
-    def test_payments_error_is_503_and_retry_gives_the_link(self):
-        c, vela = make_client(payments=FlakyPayments(failures=1))
-        pid = proposal_id(c)
-        r = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)
-        body = assert_problem(self, r, 503, "payments-unavailable")
-        self.assertNotIn("fornitore", body["detail"])
-        r = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)
-        self.assertEqual(r.status_code, 201, r.text)
-        self.assertTrue(r.json()["payment_url"].startswith("http://pay.test/"))
-        self.assertEqual(vela.payments.attempts, 2)
-
-
 class OrderStatusPaymentTest(unittest.TestCase):
     def test_awaiting_payment_status_has_link_and_amount(self):
         c, _ = make_client()
         order = c.post("/v1/proposals/%s/accept" % proposal_id(c), headers=AUTH).json()
+        c.app.state.worker.drain()
         r = c.get("/v1/orders/%s" % order["order_id"], headers=AUTH).json()
         self.assertEqual((r["outcome"], r["status"]), ("order_status", "awaiting_payment"))
-        self.assertEqual((r["payment_url"], r["total"], r["currency"]),
-                         (order["payment_url"], order["total"], order["currency"]))
+        self.assertTrue(r["payment_url"].startswith("http://test/replay/checkout/"))
+        self.assertEqual((r["currency"], r["total_differs"]), ("EUR", False))
+        self.assertEqual(r["total"], r["price_from_total"])
         assert_single_product(self, r)

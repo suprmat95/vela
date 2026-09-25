@@ -46,7 +46,8 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   legge al viaggiatore le risposte. Ha già il proprio modello linguistico.
 - **Vela core.** Un servizio FastAPI che espone gli stessi cinque casi d'uso su REST e MCP.
 - **House of Journeys.** Unica fonte di catalogo, disponibilità, itinerari e prenotazioni.
-- **Stripe (test mode).** Incasso tramite Payment Link e notifica via webhook.
+- **Stripe (test mode).** Incasso tramite Checkout Session sull'account fornito da HofJ;
+  pagamento verificato per interrogazione e chiuso con `POST /v1/bookings` (nessun webhook).
 - **Giudici.** Usano l'URL live, leggono il repo, lanciano il load test, guardano il video.
 
 ## 4. Requisiti funzionali
@@ -122,10 +123,13 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   accettazione contiene solo id ordine, stato `queued`, attesa stimata e frase (RF-45). È
   compito dell'agente consegnare il link nel canale del viaggiatore (messaggio, SMS, lettura ad
   alta voce dell'importo con link inviato via testo).
-- **RF-20** Vela riceve la conferma di pagamento tramite webhook Stripe firmato
-  (`checkout.session.completed`), verifica la firma con `STRIPE_WEBHOOK_SECRET`, aggiorna
-  l'ordine a `paid_pending_booking` e avvia la prenotazione. Eventi duplicati non producono
-  effetti doppi.
+- **RF-20** Vela verifica il pagamento per interrogazione, senza webhook: un job del worker legge
+  con la chiave Stripe fornita da HofJ lo stato della Checkout Session di ogni ordine
+  `awaiting_payment` (ogni 60 s, e subito quando il viaggiatore chiede lo stato). A pagamento
+  riuscito, con importo e valuta dell'ordine, l'ordine passa a `paid_pending_booking` e parte la
+  prenotazione, che chiude il pagamento su HofJ inoltrando `paymentIntentId` e `paymentStatus` a
+  `POST /v1/bookings`. Una verifica ripetuta non produce effetti doppi (decisione del
+  2026-09-25, M5).
 - **RF-21** Vela non riceve, memorizza né inoltra dati di carta. Il link scade dopo 24 ore;
   un ordine con link scaduto passa a `expired`.
 - **RF-22** Un solo pagamento per ordine, tipo `full`. Nessun pagamento a rate, nessun promo
@@ -266,7 +270,8 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
   tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
   istanza configurabile (default 4). Un job è idempotente e ripartibile (RF-27).
-- **RF-51** Un ordine pagato viene prenotato entro la finestra successiva al webhook, salvo
+- **RF-51** Un ordine pagato viene prenotato entro la finestra successiva alla verifica del
+  pagamento (RF-20), salvo
   errori di RF-24: la riserva `booking` garantisce che la prenotazione avvenga anche a coda
   d'acquisto piena.
 

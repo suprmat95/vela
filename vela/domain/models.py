@@ -196,9 +196,14 @@ class Proposal:
 
 
 class OrderStatus(str, Enum):
+    """Stati dell'ordine nell'ordine di RF-25."""
+    QUEUED = "queued"                  # RF-45: accettato, in attesa del job d'acquisto
     AWAITING_PAYMENT = "awaiting_payment"
     PAID_PENDING_BOOKING = "paid_pending_booking"
     CONFIRMED = "confirmed"
+    REPLACED = "replaced"              # RF-17: prodotto non prenotabile, proposta sostitutiva
+    CANCELLED = "cancelled"            # RF-49: il viaggiatore ha rinunciato
+    FAILED = "failed"                  # RF-46: job d'acquisto fallito dopo i tentativi
     BOOKING_FAILED = "booking_failed"
     EXPIRED = "expired"
 
@@ -212,7 +217,7 @@ class Order:
     status: OrderStatus
     pax: int
     price_from: Decimal        # per persona, dalla proposta
-    total: Decimal             # totale reale dell'itinerario
+    total: Optional[Decimal]   # importo reale da HofJ (openAmount); None finché l'ordine è in coda
     currency: str
     traveler: TravelerProfile
     created_at: datetime
@@ -223,6 +228,43 @@ class Order:
     booking_code: Optional[str] = None
     failure_reason: Optional[str] = None
     paid_at: Optional[datetime] = None
+    enqueued_at: Optional[datetime] = None            # posizione FIFO (RF-48); ereditata in RF-17
+    replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
+
+
+class JobKind(str, Enum):
+    PURCHASE = "purchase"              # RF-46
+    BOOKING = "booking"                # RF-23, RF-51
+    PAYMENT_CHECK = "payment_check"    # RF-20
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    DEAD = "dead"
+
+
+class QuotaClass(str, Enum):
+    """Classi dello scheduler della quota HofJ (RF-47)."""
+    BOOKING = "booking"
+    PURCHASE = "purchase"
+    SYNC = "sync"
+
+
+@dataclass(frozen=True)
+class Job:
+    """Un'unità di lavoro del worker (RF-50), ripartibile dal passo salvato (RF-27)."""
+    id: str
+    kind: JobKind
+    order_id: str
+    status: JobStatus
+    enqueued_at: datetime
+    run_after: datetime
+    step: int = 0
+    attempts: int = 0
+    locked_at: Optional[datetime] = None
+    last_error: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -307,22 +349,17 @@ class NoMatch:
 
 
 @dataclass(frozen=True)
-class AcceptResponse:
+class OrderQueued:
+    """RF-45, RF-19: risposta dell'accettazione. Nessun link: arriva con `get_order_status`."""
     order_id: str
     status: OrderStatus
-    total: Decimal
-    currency: str
-    price_from_total: Decimal
-    total_differs: bool
-    payment_url: str
+    position: Optional[int]
+    wait_seconds: Optional[int]
     say: str
 
     def to_dict(self) -> dict:
-        return {"order_id": self.order_id, "status": self.status.value,
-                "total": money_str(self.total), "currency": self.currency,
-                "price_from_total": money_str(self.price_from_total),
-                "total_differs": self.total_differs, "payment_url": self.payment_url,
-                "say": self.say}
+        return {"order_id": self.order_id, "status": self.status.value, "position": self.position,
+                "wait_seconds": self.wait_seconds, "say": self.say}
 
 
 @dataclass(frozen=True)
@@ -337,16 +374,31 @@ class MissingTravelerData:
 
 @dataclass(frozen=True)
 class OrderStatusResponse:
+    """RF-25, RF-39: stessi campi per ogni stato, `None` quando non pertinenti."""
     order_id: str
     status: OrderStatus
-    booking_code: Optional[str]
-    total: Decimal
-    currency: str
-    payment_url: Optional[str]   # solo per awaiting_payment (RF-19)
     say: str
+    position: Optional[int] = None             # queued (RF-48)
+    wait_seconds: Optional[int] = None         # queued (RF-48)
+    total: Optional[Decimal] = None            # importo reale, dopo il job d'acquisto
+    currency: Optional[str] = None
+    price_from_total: Optional[Decimal] = None
+    total_differs: Optional[bool] = None       # RF-16
+    payment_url: Optional[str] = None          # solo awaiting_payment (RF-19)
+    booking_code: Optional[str] = None         # confirmed
+    failure_reason: Optional[str] = None       # failed, booking_failed
+    proposal: Optional["ProposalMade"] = None  # replaced (RF-17)
 
     def to_dict(self) -> dict:
-        return {"order_id": self.order_id, "status": self.status.value,
-                "booking_code": self.booking_code, "total": money_str(self.total),
-                "currency": self.currency, "payment_url": self.payment_url, "say": self.say}
+        return {"order_id": self.order_id, "status": self.status.value, "position": self.position,
+                "wait_seconds": self.wait_seconds,
+                "total": None if self.total is None else money_str(self.total),
+                "currency": self.currency,
+                "price_from_total": None if self.price_from_total is None else money_str(self.price_from_total),
+                "total_differs": self.total_differs, "payment_url": self.payment_url,
+                "booking_code": self.booking_code, "failure_reason": self.failure_reason,
+                "proposal_changed": self.proposal is not None,
+                "proposal": None if self.proposal is None else self.proposal.to_dict(),
+                "say": self.say}
+
 

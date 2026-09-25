@@ -28,12 +28,37 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
-In replay, al primo avvio con la tabella `products` vuota, l'app carica `fixtures/catalog.json`
-(110 prodotti) e riprende gli ordini `paid_pending_booking`. `VELA_UPSTREAM_MODE=live` è rifiutato
-fino a M5.
+Al primo avvio con la tabella `products` vuota, l'app carica `fixtures/catalog.json` (110
+prodotti). A ogni avvio legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
+prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
+
+`VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
+`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo resta
+quello della fixture finché non c'è il sync (M10).
 
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
+
+## Coda e worker (M5)
+
+L'accettazione mette l'ordine in coda e risponde subito con posizione e attesa stimata. Un worker
+in ogni istanza (thread nel processo) preleva i job da Postgres con `FOR UPDATE SKIP LOCKED`:
+acquisto (carrello HofJ e link di pagamento), verifica del pagamento, prenotazione. Nessuna
+chiamata a HofJ parte senza un blocco di quota prenotato nel contatore condiviso (finestra di
+60 s, limite effettivo 108 su 120, riserva di 21 per le prenotazioni).
+
+I parametri sono campi di `Settings` con default, non variabili d'ambiente (spec §6):
+
+| Campo | Default | Uso |
+|---|---|---|
+| `worker_concurrency` | 4 | thread del worker per istanza (0 = nessun thread, solo `drain` nei test) |
+| `quota_margin` | 0,10 | margine sul `limitPerMinute` di HofJ |
+| `booking_reserve` | 0,20 | quota della finestra riservata alle prenotazioni |
+| `purchase_max_attempts` | 3 | tentativi del job d'acquisto su rete/5xx |
+| `booking_max_attempts`, `booking_backoff` | 5, (5, 10, 20, 40) s | tentativi e attese della prenotazione |
+| `job_lease_seconds` | 120 | dopo quanto un job `running` di un'istanza morta torna prelevabile |
+| `payment_poll_seconds` | 60 | intervallo della verifica della Checkout Session |
+| `replay_latency`, `replay_limit` | (0, 0), nessuno | latenza e quota simulate dal replay (M13) |
 
 ## Test
 
@@ -61,12 +86,12 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | Variabile | Obbligatoria | Uso |
 |---|---|---|
 | `DATABASE_URL` | sì | Postgres (`postgres://...` di Render viene riscritto in `postgresql+psycopg://`). Senza, `/health` risponde 503 e le migrazioni falliscono. |
-| `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ e Stripe (da M5/M6). |
+| `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. |
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
 | `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
 | `STRIPE_SECRET_KEY` | per Stripe reale | Chiave Stripe di test (una `rk_test` fornita da HofJ). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; richiede `VELA_PUBLIC_URL`. Vedi `docs/stripe.md`. |
-| `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe, il pagamento si chiude con le API di HofJ (M5). |
+| `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe; il pagamento si verifica leggendo la Checkout Session e si chiude con `POST /v1/bookings` di HofJ (M5). |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
 | `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. Obbligatoria con `STRIPE_SECRET_KEY`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) quando il parser non trova né sport né periodo; timeout 5 s, 1 retry. Prova manuale (una chiamata): `uv run python scripts/try_haiku.py "testo"`. |
@@ -92,8 +117,9 @@ errore esplicito.
 3. Inserire nella dashboard le variabili marcate `sync: false` che servono alla modalità in uso
    (per M0 basta `VELA_UPSTREAM_MODE=replay`, già nel file).
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
-5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok","catalog":{...},"quota":null}`
-   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota` arriva con M5).
+5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok","catalog":{...},"quota":{...}}`
+   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota`: finestra corrente, usate,
+   residue, limite effettivo e riserva).
 
 Il piano free spegne il servizio dopo inattività: la prima richiesta può richiedere
 qualche decina di secondi. Il Postgres free scade dopo 30 giorni.
@@ -113,7 +139,8 @@ serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri rice
 3. In claude.ai: Settings → Connectors → Add custom connector, nome `Vela`, URL
    `https://<servizio>.onrender.com/mcp`, nessuna autenticazione.
 4. In una chat nuova, con il connector attivo: "Vorrei un weekend di padel in Spagna a ottobre,
-   siamo in due, massimo 800 euro". Il pagamento in replay si simula aprendo il link ricevuto.
+   siamo in due, massimo 800 euro". Dopo il sì Vela dichiara un'attesa; il link arriva con la
+   domanda sullo stato. Il pagamento in replay si simula aprendo il link ricevuto.
 
 In replay "troppo caro" produce una proposta diversa ma non necessariamente più economica:
 l'interpretazione del motivo del rifiuto arriva con M9.
@@ -121,9 +148,9 @@ l'interpretazione del motivo del rifiuto arriva con M9.
 ## Struttura
 
 ```
-vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2)
-vela/ports      HofJPort, PaymentsPort, repository (M2)
-vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto, runner (M2); HofJ HTTP (M5), Stripe (M6)
+vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2); quota, job d'acquisto, prenotazione e verifica del pagamento, processore (M5)
+vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5)
+vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6)
 vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), checkout_pages.py (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni

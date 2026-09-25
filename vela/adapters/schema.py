@@ -3,8 +3,8 @@
 Tipi neutri (JSON, Numeric, String, Date, DateTime): `tests/test_migrations.py` applica le
 migrazioni anche su SQLite. Postgres è l'unico backend di produzione (RNF-01).
 """
-from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric,
-                        String, Table, Text, UniqueConstraint)
+from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
+                        Numeric, String, Table, Text, UniqueConstraint)
 
 from vela.adapters.db import metadata
 
@@ -70,7 +70,7 @@ orders_t = Table(
     Column("status", String(24), nullable=False, index=True),
     Column("pax", Integer, nullable=False),
     Column("price_from", Numeric(12, 2), nullable=False),
-    Column("total", Numeric(12, 2), nullable=False),
+    Column("total", Numeric(12, 2)),
     Column("currency", String(3), nullable=False),
     Column("traveler", JSON, nullable=False),
     Column("itinerary_id", Text),
@@ -81,6 +81,8 @@ orders_t = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("paid_at", DateTime(timezone=True)),
+    Column("enqueued_at", DateTime(timezone=True)),
+    Column("replacement_proposal_id", String(36), index=True),
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
@@ -93,4 +95,30 @@ rejections_t = Table(
     Column("reason", Text, nullable=False, default=""),
     Column("created_at", DateTime(timezone=True), nullable=False),
     UniqueConstraint("proposal_id", name="uq_rejections_proposal_id"),
+)
+
+# M5: coda dei job (RF-50) e finestra di quota condivisa (RF-36, RF-47).
+jobs_t = Table(
+    "jobs", metadata,
+    Column("id", String(36), primary_key=True),
+    Column("kind", String(16), nullable=False),
+    Column("order_id", String(36), ForeignKey("orders.id"), nullable=False, index=True),
+    Column("status", String(16), nullable=False),
+    Column("step", Integer, nullable=False, default=0),
+    Column("attempts", Integer, nullable=False, default=0),
+    Column("enqueued_at", DateTime(timezone=True), nullable=False),
+    Column("run_after", DateTime(timezone=True), nullable=False),
+    Column("locked_at", DateTime(timezone=True)),
+    Column("last_error", Text),
+    Index("ix_jobs_claim", "status", "kind", "run_after", "enqueued_at"),
+)
+
+quota_window_t = Table(
+    "quota_window", metadata,
+    Column("id", Integer, primary_key=True),
+    Column("window_start", DateTime(timezone=True), nullable=False),
+    Column("window_end", DateTime(timezone=True), nullable=False),
+    Column("limit_per_minute", Integer, nullable=False),
+    Column("used", Integer, nullable=False, default=0),
+    Column("needs_refresh", Boolean, nullable=False, default=False),
 )

@@ -346,3 +346,117 @@ Origine: rebase di `task/m9` su `master` (che conteneva già M3, M4 e M11) prima
 | Regioni di M9 | Aggiunte a `PARENTS` (Malaga → Costa del Sol → Andalusia, Barcellona → Catalogna, Valencia → Comunità Valenciana, Milano → Lombardia, ...) con le preposizioni ("in Andalusia", "sulla Costa del Sol", "nella Comunità Valenciana") | Senza gerarchia il chooser v2 dichiarava "Non ho partenze compatibili a Andalusia" per un prodotto a Malaga; le scelte fissate da M11 sul catalogo registrato non cambiano |
 | Collisione dei log | `scripts/agents_log.py` aggiunge le prime 8 cifre dell'id sessione al nome quando il file esiste già con un'altra sessione | Le sessioni M4 e M9 sono partite nello stesso minuto con lo stesso prompt e si sovrascrivevano; il log di M4 resta con il suo nome, quello di M9 è `...-leggi-la-task-612db060.*` |
 
+## 2026-09-25 — M5: HofJ reale, coda d'acquisto e scheduler della quota
+
+Origine: intervista sulla macro task M5, piano in `docs/plans/2026-09-25-m5-hofj-reale.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ambiente delle verifiche §8 e di M7 | Staging: `staging.api.hofj.com`, brand `staging.weebora.com`, un prodotto di staging (es. 118) invece di `t0054825` | È l'unico ambiente dove i carrelli sono già stati verificati; un booking non crea una prenotazione reale |
+| Budget delle verifiche §8 | ≤ 8 chiamate HofJ: quota, POST itinerary, PUT customer, GET pax, PUT pax, GET itinerary, POST booking, più 1 di margine | Il booking (§8 riga 3) richiede il carrello completo; con meno chiamate la risposta resterebbe ambigua. La riga 2 è già coperta da M1 e la riga 5 è M12 |
+| `paymentIntentId` per la verifica del booking | Lo crea l'agente con 1 chiamata Stripe in modalità test (`PaymentIntent` confermato con `pm_card_visa`), `STRIPE_SECRET_KEY` da env | Nessuna dipendenza da operazioni manuali in dashboard |
+| Momento delle verifiche §8 | Task 1 del piano, manuale con l'utente; l'adapter HTTP (Task 15) parte dalle forme reali | Le forme reali arrivano prima di scrivere l'adapter; il resto procede con porte in memoria |
+| Modello della finestra di quota | Finestra fissa di 60 s allineata a HofJ: `window_start`/`window_end` da `/v1/quota` al boot e dopo un 429, poi avanza di 60 s col nostro orologio | È il comportamento osservato su HofJ (finestra ancorata alla prima richiesta) e si realizza con una riga e un `UPDATE` atomico |
+| Margine di sicurezza sul limite | Configurabile, default 10%: limite effettivo = floor(`limitPerMinute` × 0,9) = 108 | La chiave è condivisa con script ed esplorazioni |
+| Riserva `booking` e formula dell'attesa | Riserva = floor(limite effettivo × 0,20) = 21; acquisti per finestra = (108 − 21) ÷ 5 = 17,4 | Coerenti con il margine: la formula usa il limite effettivo |
+| Parametri "configurabili" | Campi di `Settings` con default, senza variabili d'ambiente nuove | L'elenco delle variabili d'ambiente di §6 resta chiuso; M13 imposta i valori nel proprio setup |
+| Retry della prenotazione (RF-24) | 5 tentativi, attese di 5, 10, 20 e 40 s tra un tentativo e l'altro, solo su rete, timeout o 5xx; un 4xx porta subito a `booking_failed` | Circa 75 s in totale, vicino a RF-51 |
+| Errore "del prodotto" (RF-17, RF-33) | Solo su `POST /v1/itineraries`: 400/404, oppure 502 il cui `detail` riporta un errore upstream 4xx/500 che non sia un timeout. Timeout, rete e altri 5xx sono errori di rete (retry). 401/403 sono errori di configurazione (`failed`, prodotto non marcato) | HofJ risponde 502 sia per un id sbagliato sia per un guasto; non si vogliono marcare prodotti buoni per 24 h |
+| Posizione dopo una sostituzione | Il nuovo ordine eredita l'`enqueued_at` dell'ordine sostituito | FIFO per `enqueued_at`: passa davanti a chi è arrivato dopo, senza priorità speciali |
+| Rinuncia (RF-49) esteso | Ordine `queued`, in lavorazione o `awaiting_payment` → `cancelled`, e si restituisce la proposta successiva; il job si ferma al passo seguente; l'itinerario HofJ resta orfano. Dopo il pagamento l'ordine non si tocca | Un rifiuto è sempre rispettato finché non c'è denaro in gioco |
+| Pagamento in M5 | Il job usa `PaymentsPort`. `VELA_UPSTREAM_MODE=live` rifiuta l'avvio finché M6 non c'è (il `RuntimeError` cita M6) | Scostamento dalla roadmap («con live tutto avviene contro HofJ vero»): la prova reale di M5 passa da Task 1 e dai test con `MockTransport` |
+| Esecuzione del worker | N thread per processo (default 4) con polling di 1 s sulla tabella `jobs`; un job `running` con lease scaduto (2 min) torna prelevabile | Il dominio è sincrono; il lease copre RF-27 anche con più istanze |
+| Blocco di quota per job | Un acquisto prenota le chiamate HofJ dei passi che restano (nuovo job: 5); una prenotazione ne prenota 1 | Non si spreca budget su retry e riprese; la formula dell'attesa resta a 5 |
+| Posizione in coda | Parte da 1 e conta solo i `purchase` in stato `pending` con `enqueued_at` precedente; `wait_seconds = ceil(pos × 60 ÷ acquisti_per_finestra)`; `say` arrotonda i minuti per eccesso, minimo 1 | Stima semplice e spiegabile |
+| Contratto delle risposte | Accept: `{order_id, status, position, wait_seconds, say}`. Status: `{order_id, status, position, wait_seconds, total, currency, price_from_total, total_differs, payment_url, booking_code, failure_reason, proposal_changed, proposal, say}`, con `null` quando non pertinente | Forma stabile per MCP, REST e test |
+| REST accept | 202 Accepted, outcome `order_queued`, header `Location: /v1/orders/{id}`; un doppio accept risponde 200 `order_status` con lo stato attuale | Semantica HTTP corretta per il lavoro asincrono |
+
+## 2026-09-25 — M5: verifiche di spec §8
+
+Origine: Task 1 del piano `docs/plans/2026-09-25-m5-hofj-reale.md`, eseguito con l'utente su
+staging (`https://staging.api.hofj.com`, brand `staging.weebora.com`). Forme osservate in
+`docs/api/internal-checkout.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiamate usate | 9 HofJ (budget alzato da 8 a 9 con l'utente per il controllo dopo il booking) + 1 Stripe in modalità test (`PaymentIntent` 368,00 € `succeeded`) | Il valore 8 della roadmap non ha una motivazione registrata: 7 chiamate erano necessarie, 1 è stata spesa per il 404 in `locale=it`, 1 per verificare lo stato dopo il booking |
+| §8 riga 1 (chiave interna) | Superata: `POST /v1/itineraries` risponde 200, nessun 403 | Carrello `dlp5lyj338uf` creato, customer e pax scritti |
+| §8 riga 4 (quota) | `limitPerMinute` 120, finestra fissa di 60 s con `windowStartedAt`/`windowEndsAt` | Conferma il modello della finestra deciso nell'intervista |
+| §8 riga 3 (pagamento sul nostro Stripe) | **Non dimostrata.** `POST /v1/bookings` con il nostro `paymentIntentId` risponde 200 ma con l'`itineraryId` invece di un codice `R-…`; `checkout.status` resta `BookingInitiated` (valori non documentati). Da DOCS/OAS il pagamento previsto è sul PaymentIntent creato dal brand site sul proprio account Stripe (`POST .../payment` → `client_secret` → Stripe.js); il nostro `pi_` vive su un altro account e viene solo inoltrato. Decisione sul fallback rinviata all'utente (cambia M6) | Il 200 dice solo che l'upsert è avvenuto; il brand site non può vedere un PaymentIntent del nostro account |
+| Lingua del carrello | Il prodotto 118 in `locale=it` dà 502 con `detail` "returned 404"; in `locale=en` funziona. Rischio da annotare per la produzione (catalogo `it` di M1) | Un prodotto non tradotto fallisce al passo 0 e diventa errore del prodotto |
+| Errore del prodotto nell'adapter | Il testo reale `... POST /itinerary returned 404: ...` entra nei test del Task 15 come caso di `ProductError` | Conferma il criterio "502 con upstream 4xx nel `detail`" |
+| Codice di prenotazione | `POST /v1/bookings` restituisce `data: "<itineraryId>"`, non `R-…`: `booking_code` = quella stringa. La frase vocale andrà scandita | Forma osservata |
+| Totale reale | Da decidere tra `checkout.total` (368, uguale a `totalPrice`) e `openAmount` (337, uguale a `originalTotal`): DOCS dice che `paymentType: "full"` addebita "the entire open amount". Origine della differenza di 31 € non nota | Il PaymentIntent di prova è stato creato su 368, probabilmente l'importo sbagliato |
+| Pax | `pax-1` è precompilato dal customer: il `PUT pax` scrive comunque tutti i nomi preservando i `refId` | Nessun cambio al job |
+| Pagamento (esito §8 riga 3) | ~~Pagamento sul PaymentIntent di HofJ invece del link~~ Superata dalla riga "Pagamento: scelta" della sezione "M5: integrazione con M6 e M9" | La seconda sonda ha mostrato che la chiave Stripe è di HofJ e che il flusso documentato dà lo stesso esito |
+| Importo del link | `checkout.openAmount` (DOCS: `full` addebita "the entire open amount") | Il PaymentIntent di prova su `checkout.total` (368) era probabilmente l'importo sbagliato |
+
+## 2026-09-25 — M5: seconda sonda sul pagamento (flusso documentato)
+
+Origine: richiesta dell'utente dopo la rilettura di DOCS/OAS. 6 chiamate HofJ + 2 Stripe (test).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Esito del flusso documentato | `POST .../payment` → PaymentIntent del brand da 337 € (`openAmount`) con `metadata.checkoutRefId = itineraryId`, confermato `succeeded`; booking 200 con `data = itineraryId`; `checkout.status` resta `BookingInitiated` | Stesso comportamento della prima sonda: su staging il booking restituisce l'`itineraryId` e lo stato del carrello non cambia, pagamento o no |
+| Conclusione sulla §8 riga 3 | La conclusione "HofJ ignora il nostro pagamento" è **ritirata**: la chiave Stripe è di HofJ, i due PaymentIntent stanno sullo stesso account, e dall'API non si distingue un booking pagato da uno non pagato. Differenze reali del nostro PaymentIntent: importo (`total` invece di `openAmount`) e assenza di `metadata.checkoutRefId` | Nessun segnale osservabile dall'API interna; `GET /v1/bookings/{id}` richiede il token dell'utente finale |
+| Pagamento in M6 (da decidere in M6) | Due strade compatibili con quanto osservato: (a) usare il PaymentIntent del brand (`POST .../payment`) e confermarlo da una pagina nostra; (b) creare noi il PaymentIntent sullo stesso account con `amount = openAmount` e `metadata.checkoutRefId = itineraryId`. Da chiedere a HofJ quale riconcilia il pagamento lato brand | La chiave è ristretta e di HofJ: serve la loro conferma |
+| Importo del link | Confermato `openAmount` (il PaymentIntent del brand è di 337 €) | Osservato |
+
+## 2026-09-25 — M5: integrazione con M6 e M9
+
+Origine: lettura di `task/m6` e di `master` (M9) prima del Task 2; decisioni prese con l'utente.
+Dettagli nella sezione "Integrazione con M6 e M9" del piano M5.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Pagamento: scelta | Si resta sulla Checkout Session di M6 (account Stripe di HofJ), con `metadata.checkoutRefId = itineraryId` sul PaymentIntent (fatto su `task/m6`, commit `6aecb03`) e importo = `openAmount` (scritto dal job d'acquisto di M5). Conferma attesa da HofJ (`docs/hofj-questions.md`, domanda 1) | Compatibile con quanto osservato; il flusso con Stripe.js cambierebbe molto M6 e richiede la `pk_test` |
+| `paymentIntentId` nel booking | Inoltrato con `paymentStatus` (inverte la regola del piano dopo il Task 1) | OAS lo inoltra al brand site: secondo modo con cui HofJ può riconoscere il pagamento |
+| Notifica del pagamento a Vela | ~~Webhook principale, polling di riserva~~ Superata: vedi "M5: pagamento senza webhook" | — |
+| Logica del pagamento | `OrderService.settle_payment`, usata dal job di verifica (Task 13b) | Una sola regola per importo, valuta e transizione |
+| Eventi Stripe senza `order_id` | ~~Log `debug`~~ Superata: nessun webhook | — |
+| Migrazione | `0004_jobs_quota` dopo `0003_stripe_events` di M6 | Numerazione lineare dopo il merge di M6 |
+| Frasi | Ogni frase nuova in italiano e inglese | M9 ha reso le frasi bilingui |
+| Modo live | Nessun rifiuto all'avvio: `live` usa `HofJHttp` e i pagamenti scelti da M6 | M6 esiste; la decisione "live in attesa di M6" dell'intervista è superata |
+
+## 2026-09-25 — M5: pagamento senza webhook
+
+Origine: indicazione di HofJ riportata dall'utente ("chiudere il pagamento sfruttando unicamente
+le API di HofJ, senza webhook"; la chiave Stripe fornita permette di pagare passando dall'API
+bookings), interpretazione confermata dall'utente.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiusura del pagamento | Il pagamento (Checkout Session creata con la chiave di HofJ) si chiude con `POST /v1/bookings` che inoltra `paymentIntentId` e `paymentStatus` | Indicazione di HofJ |
+| Come Vela sa che il viaggiatore ha pagato | Job `payment_check` nel worker: legge la Checkout Session ogni 60 s e subito quando il viaggiatore chiede lo stato; `paid` → `settle_payment` → job `booking` | Nessun webhook; il booking non va chiamato alla cieca perché su staging risponde 200 anche senza pagamento |
+| Spec | RF-20 riscritta (verifica per interrogazione), RF-51 e la voce Stripe di §2 adeguate | La spec descriveva il webhook |
+| M6 | Da togliere: webhook `POST /webhooks/stripe`, tabella `stripe_events` (migrazione `0003`), obbligo di `STRIPE_WEBHOOK_SECRET`. Resta: Checkout Session, `checkoutRefId`, pagine di ritorno, scadenza. Modifica da concordare su `task/m6`, oppure rimozione nel Task 13b di M5 dopo il rebase | Coerenza con la nuova RF-20 |
+| Domande a HofJ | Domanda 3 (webhook) chiusa; domanda 1 chiusa per la parte "come si chiude" (booking con `paymentIntentId`) | Risposta arrivata tramite l'utente |
+
+## 2026-09-25 — M5: decisioni prese durante l'esecuzione
+
+Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, Task 2-19.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Ordine dei task | 11 → 12 → 13 → 13b → 14 → 10+17 → 15 → 16 → 18 → 19 (deciso con l'utente) | Con l'accettazione asincrona nessuno produce il link finché job, processore e worker non esistono: la suite resta verde a ogni commit |
+| Contatore di quota su Postgres | Riga unica bloccata con `SELECT ... FOR UPDATE` per tutta la decisione, invece di un solo `UPDATE` condizionale | Stessa atomicità, e le regole restano funzioni pure in `vela/domain/quota.py` condivise da memoria e Postgres. Verificato con 8 thread sullo stesso contatore: concessi esattamente 87 acquisti |
+| Percentuali della quota | Calcolate con `Decimal` | In float 100 × 0,29 = 28,999… e il floor sbaglia |
+| Test dei job | Nel contratto dei repository, non in un file a parte | I job hanno una foreign key sugli ordini |
+| Ordine di prelievo | `booking`, poi `payment_check`, poi `purchase` per `enqueued_at` | La verifica del pagamento non consuma quota HofJ e sblocca pagamenti già fatti |
+| Quota non usata | Le chiamate prenotate e non usate da un job interrotto non tornano nel budget | Semplicità; il costo è al massimo un blocco per errore |
+| Lettura della quota fallita | Si riprova solo nella finestra successiva; intanto si lavora con la finestra che si ha | Evita un ciclo di chiamate a `/v1/quota` (RF-47) |
+| Proposta sostituita | Chiusa registrando un rifiuto con motivo "prodotto non prenotabile" | Altrimenti `_propose` riproporrebbe la stessa proposta aperta |
+| Accept sulla proposta sostitutiva | Riusa i dati del viaggiatore dell'ordine sostituito | Trovato dai test: senza, Vela richiedeva dati già dati |
+| Ordine in coda ma già in lavorazione | Niente posizione né attesa; frase "Sto preparando il pagamento con il fornitore" | L'attesa stimata vale solo per chi aspetta il proprio turno |
+| Chiedere lo stato di un ordine da pagare | Anticipa a subito la verifica del pagamento, senza chiamate nel caso d'uso | Il viaggiatore che dice "ho pagato" non aspetta i 60 s del polling |
+| Motivi di fallimento della prenotazione | Codici `booking_upstream` e `booking_rejected` con frasi it/en | Il piano non li elencava |
+| Checkout di replay | Paga il link finto e applica subito l'esito (`settle_payment`), la prenotazione passa dal worker | Stesso percorso della verifica reale, risposta immediata in replay |
+| `say_accept` | Rimossa con i suoi test | L'accettazione non dà più totale né link |
+| Errore del fornitore di pagamento | Ripetuto dal job d'acquisto (3 tentativi, poi `failed`); la 503 `payments-unavailable` di REST e la frase MCP non sono più raggiungibili dall'accept (codice lasciato, riga tolta da `docs/rest.md`) | Il link lo crea il job, non l'accettazione |
+| Modo live | Richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND` e `STRIPE_SECRET_KEY`; il catalogo resta la fixture di M1 finché non c'è M10 | Con il pagamento finto il link punterebbe a `/replay/checkout`, che in live non esiste |
+| Downgrade della `0005` | Cancella gli ordini senza totale (in coda) | Lo schema precedente non li rappresenta; alternativa era un totale falso |
+| Smoke test MCP | `scripts/mcp_smoke.py` interroga lo stato finché il link è pronto, poi finché l'ordine è confermato; parametro `tick` per far avanzare la coda nei test | Il flusso ora è asincrono |
+| Test Postgres | Eseguiti con l'External Database URL, passando al processo solo `DATABASE_URL` e isolando lo schema con `PGOPTIONS=-csearch_path=vela_test`: lo schema dell'app resta alla head di `master` | Il test della migrazione altrimenti porterebbe lo schema dell'app alla `0005` e il deploy di `master` non partirebbe |
+| Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
+| Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
+

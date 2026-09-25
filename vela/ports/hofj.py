@@ -1,6 +1,6 @@
 """Porta verso House of Journeys (spec §2 "Porta", RF-14, RF-23). Implementazioni: replay (M2), HTTP (M5)."""
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Protocol
 
@@ -16,7 +16,15 @@ class ProductError(HofJError):
 
 
 class QuotaError(HofJError):
-    """Quota esaurita (RF-37)."""
+    """Quota esaurita, 429 (RF-37, RF-38). `retry_after` in secondi se HofJ lo dichiara."""
+
+    def __init__(self, message: str = "quota esaurita", retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class ConfigError(HofJError):
+    """401/403: chiave o profilo sbagliati. Non è colpa del prodotto né della rete."""
 
 
 class UpstreamError(HofJError):
@@ -26,7 +34,7 @@ class UpstreamError(HofJError):
 @dataclass(frozen=True)
 class Itinerary:
     id: str
-    total: Decimal
+    total: Decimal       # importo da pagare: `checkout.openAmount` (verifiche §8)
     currency: str
 
 
@@ -51,6 +59,15 @@ class Pax:
 
 
 @dataclass(frozen=True)
+class QuotaSnapshot:
+    """Risposta di `GET /v1/quota` (RF-36): finestra fissa di 60 s ancorata da HofJ."""
+    limit_per_minute: int
+    used_in_window: int
+    window_started_at: datetime
+    window_ends_at: datetime
+
+
+@dataclass(frozen=True)
 class PaymentProof:
     payment_intent_id: str
     payment_status: str
@@ -58,9 +75,12 @@ class PaymentProof:
 
 
 class HofJPort(Protocol):
+    """Ogni metodo è una chiamata HofJ e consuma quota (RF-36), `get_quota` compreso."""
     def create_itinerary(self, product: Product, start_date: date, adults: int, rooms: int,
-                         currency: str) -> Itinerary: ...
+                         currency: str) -> str: ...
     def set_customer(self, itinerary_id: str, customer: Customer) -> None: ...
     def get_pax(self, itinerary_id: str) -> List[Pax]: ...
     def set_pax(self, itinerary_id: str, pax: List[Pax]) -> None: ...
+    def get_itinerary(self, itinerary_id: str) -> Itinerary: ...
     def create_booking(self, itinerary_id: str, proof: PaymentProof) -> str: ...
+    def get_quota(self) -> QuotaSnapshot: ...

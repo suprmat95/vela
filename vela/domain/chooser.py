@@ -8,7 +8,7 @@ rispettati la motivazione lo dichiara. Se un filtro azzera i candidati, `NoChoic
 nome di quel filtro (RF-09).
 """
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Iterable, Optional, Set, Tuple, Union
 
 from vela.domain import geo
@@ -166,12 +166,24 @@ def _reason(product: Product, criteria: Criteria, start: date, score: int, withi
     return second if first is None else first + " " + second
 
 
+RECHECK_AFTER = timedelta(hours=24)   # RF-34
+
+
+def bookable(product: Product, now: Optional[datetime]) -> bool:
+    """RF-33, RF-34: un prodotto marcato non prenotabile torna candidato 24 h dopo il controllo;
+    il primo tentativo lo riconferma o lo riabilita. Senza `now` resta escluso."""
+    if product.bookable:
+        return True
+    checked = product.bookable_checked_at
+    return now is not None and checked is not None and now - checked >= RECHECK_AFTER
+
+
 def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
-           today: date) -> Union[Choice, NoChoice]:
+           today: date, now: Optional[datetime] = None) -> Union[Choice, NoChoice]:
     candidates = list(products)
     steps = (
         ("archived", lambda p: not p.archived),
-        ("bookable", lambda p: p.bookable),
+        ("bookable", lambda p: bookable(p, now)),
         ("trip", is_trip),
         ("sport", lambda p: criteria.sport is None or p.sport == criteria.sport),
         ("dates", lambda p: departure(p, criteria.period, today) is not None),

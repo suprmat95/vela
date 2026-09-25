@@ -1,4 +1,4 @@
-# Rotte interne: OAuth, itinerari, booking, trips, payment — NON verificate
+# Rotte interne: OAuth, itinerari, booking, trips, payment — carrello e booking verificati su staging (M5)
 
 Nessuna di queste rotte è stata chiamata: richiedono un `itineraryId` creato da
 `POST /v1/itineraries`, oppure l'header `X-End-User-Authorization` (token Cognito
@@ -10,6 +10,56 @@ Requisiti comuni (DOCS): client con `profile=internal` e `allowedEntities` che i
 scelto a ogni chiamata con `?brand=`; il dominio risolto è sia host upstream sia valore di
 tenant routing (`X-Nezasa-Channel`). Envelope `{data, meta: {now: <epoch ms>}}`. Timeout
 upstream 15 s. `locale` in OAS è enum `it|en|es|fr`.
+
+## Verifica su staging (M5, spec §8)
+
+Eseguita il 2026-09-25 su `https://staging.api.hofj.com`, brand `staging.weebora.com`, client
+`test-dev-2`, 9 chiamate HofJ + 1 Stripe (test). Dettagli e decisioni in `docs/decisions.md`
+("M5: verifiche di spec §8"). Le sezioni sotto restano la trascrizione OAS/DOCS; dove
+differiscono vale questa tabella.
+
+| Chiamata | Esito osservato |
+|---|---|
+| `GET /v1/quota` | 200 `{clientId, limitPerMinute: 120, usedInWindow, remainingInWindow, windowStartedAt, windowEndsAt, backend: "firestore"}` |
+| `POST /v1/itineraries` prodotto 118, `locale=it` | **502** `upstream-error`, `detail`: `Brand "staging.weebora.com" POST /itinerary returned 404: {...NOT_FOUND_ERROR... "queryProps":{"productId":118,"locale":"it"}}`. Il prodotto non esiste nella lingua richiesta |
+| `POST /v1/itineraries` prodotto 118, `locale=en`, `{productId, startDate, adults: 2, rooms: 1, currency: "EUR"}` | 200 `{data: {itineraryId}, meta: {now}}` |
+| `PUT /v1/itineraries/{id}/customer` con `address {street1, postalCode, city, region, countryCode}` (OAS) | 200 `{data: {now}, meta: {}}` |
+| `GET /v1/itineraries/{id}/pax` | 200 `[{refId: "pax-1", firstName, lastName, age: 0, gender: null, nationalityCountryCode}, {refId: "pax-2", ...vuoti}]`. **`pax-1` è precompilato dal customer** |
+| `PUT /v1/itineraries/{id}/pax` (array completo, `refId` invariati) | 200 `{data: {now}, meta: {}}` |
+| `GET /v1/itineraries/{id}` | 200. `checkout {total: {amount: "368"}, openAmount: {amount: "337"}, originalTotal: {amount: "337"}, status: "BookingInitiated", refId}`, `totalPrice {amount: "368.00"}`. `Money.amount` è una stringa, a volte senza decimali |
+| `POST /v1/bookings` `{itineraryId, paymentType: "full", paymentIntentId, paymentStatus: "succeeded"}` | 200 `{data: "<itineraryId>", meta: {now}}`: **nessun codice `R-…`**, il dato è l'`itineraryId` |
+| `GET /v1/itineraries/{id}` dopo il booking | 200, `checkout.status` ancora `BookingInitiated`, `openAmount` ancora 337. I valori di `checkout.status` non sono documentati (OAS: stringa libera), quindi il dato non prova né esclude che il booking sia registrato |
+
+Content-type sempre `application/json; charset=utf-8`, anche sugli errori.
+
+Seconda sonda, flusso documentato (2026-09-25, carrello `iznhotwwgneg`, 6 chiamate HofJ + 2
+Stripe con la chiave ristretta di test fornita da HofJ):
+
+| Passo | Esito |
+|---|---|
+| `POST /v1/itineraries/{id}/payment {paymentType: "full"}` | 200 `{data: "<client_secret>", meta: {now}}` |
+| PaymentIntent del brand (Stripe retrieve) | `amount` 33700 = `openAmount` 337 €, `livemode: false`, `payment_method_types` card/sepa_debit/klarna/paypal, `capture_method: automatic_async`, `metadata {checkoutRefId: <itineraryId>, bnpl_idempotency_root, bnpl_plan_index, bnpl_role}` |
+| Conferma con `pm_card_visa` | `succeeded` |
+| `POST /v1/bookings {itineraryId, paymentType: "full"}` | 200 `{data: "<itineraryId>"}`: **stessa forma della prima sonda**, nessun `R-…` |
+| `GET /v1/itineraries/{id}` | `checkout.status` ancora `BookingInitiated`, importi invariati |
+
+Il PaymentIntent del brand e quello creato da noi nella prima sonda stanno sullo **stesso
+account Stripe** (la chiave in `STRIPE_SECRET_KEY` è di HofJ). Le uniche differenze sono
+l'importo (337 contro 368) e `metadata.checkoutRefId`, che lega il PaymentIntent al carrello.
+
+Cosa dicono OAS e DOCS sul pagamento (riletti il 2026-09-25):
+- Flusso previsto (DOCS "Checkout flow (internal)", diagramma di sequenza): `POST
+  /v1/itineraries/{id}/payment {paymentType}` → il brand site restituisce il
+  `stripe_client_secret` di un PaymentIntent creato **dal brand site sul proprio account
+  Stripe** → il client conferma con Stripe.js (`confirmCardPayment`) → `POST /v1/bookings
+  {itineraryId, paymentType}` → il brand restituisce il `reservationCode`.
+- `paymentType: "full"` = "Charge the entire open amount now": l'importo pagato è
+  `openAmount`, non `total`.
+- OAS oggi include in `CreateBookingRequest` anche `paymentIntentId` e `paymentStatus`,
+  entrambi "Optional; forwarded to the brand site when present". Nessuna validazione
+  documentata. Nel diagramma DOCS il booking non li manda.
+- `BookingStatus` (schema `Booking`, lettura user-scoped): `pending | payment_failed |
+  confirmed | cancelled`. `Checkout.status` non ha enum.
 
 ## POST /v1/oauth/token — non chiamato (POST)
 

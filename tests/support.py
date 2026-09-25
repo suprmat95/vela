@@ -46,50 +46,83 @@ def assert_single_product(testcase, d):
 from decimal import Decimal as _Decimal
 from datetime import timedelta as _timedelta
 
-from vela.ports.hofj import Itinerary, Pax
-from vela.ports.payments import PaymentLink, PaymentsError
+from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
+from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 
 class FakeHofJ:
-    """Porta HofJ finta e ispezionabile: totale configurabile, errori a comando."""
+    """Porta HofJ finta e ispezionabile: importo configurabile, errori a comando.
 
-    def __init__(self, total=None, fail_itinerary=None, fail_booking=None, code="R-000001"):
+    `fail_at={"set_customer": [UpstreamError("x"), None]}`: errori in sequenza per metodo, una
+    voce per chiamata (`None` = la chiamata riesce), poi le chiamate riescono. `fail_itinerary`
+    e `fail_booking` restano per i test di M2: errore a ogni chiamata.
+    """
+
+    def __init__(self, total=None, fail_itinerary=None, fail_booking=None, code="R-000001",
+                 fail_at=None, quota=None):
         self.total = total
         self.fail_itinerary = fail_itinerary
         self.fail_booking = fail_booking
         self.code = code
+        self.fail_at = {k: list(v) for k, v in (fail_at or {}).items()}
+        self.quota = quota
         self.calls = []
         self.customers = {}
         self.pax = {}
+        self.totals = {}
         self.bookings = 0
+
+    def _maybe_fail(self, method):
+        queue = self.fail_at.get(method)
+        if queue:
+            exc = queue.pop(0)
+            if exc is not None:
+                raise exc
 
     def create_itinerary(self, product, start_date, adults, rooms, currency):
         self.calls.append(("create_itinerary", product.id, start_date, adults, rooms, currency))
         if self.fail_itinerary:
             raise self.fail_itinerary
+        self._maybe_fail("create_itinerary")
         iid = "it-%s" % product.id
         self.pax[iid] = [Pax("ref-%d" % i) for i in range(adults)]
         total = self.total if self.total is not None else product.price * adults
-        return Itinerary(iid, _Decimal(total), currency)
+        self.totals[iid] = (_Decimal(total), currency)
+        return iid
 
     def set_customer(self, itinerary_id, customer):
         self.calls.append(("set_customer", itinerary_id, customer))
+        self._maybe_fail("set_customer")
         self.customers[itinerary_id] = customer
 
     def get_pax(self, itinerary_id):
         self.calls.append(("get_pax", itinerary_id))
+        self._maybe_fail("get_pax")
         return list(self.pax[itinerary_id])
 
     def set_pax(self, itinerary_id, pax):
         self.calls.append(("set_pax", itinerary_id, pax))
+        self._maybe_fail("set_pax")
         self.pax[itinerary_id] = list(pax)
+
+    def get_itinerary(self, itinerary_id):
+        self.calls.append(("get_itinerary", itinerary_id))
+        self._maybe_fail("get_itinerary")
+        total, currency = self.totals[itinerary_id]
+        return Itinerary(itinerary_id, total, currency)
 
     def create_booking(self, itinerary_id, proof):
         self.calls.append(("create_booking", itinerary_id, proof))
         if self.fail_booking:
             raise self.fail_booking
+        self._maybe_fail("create_booking")
         self.bookings += 1
         return self.code
+
+    def get_quota(self):
+        self.calls.append(("get_quota",))
+        self._maybe_fail("get_quota")
+        return self.quota or QuotaSnapshot(120, 1, NOW, NOW + _timedelta(seconds=60))
 
 
 class StubPayments:
@@ -104,6 +137,9 @@ class StubPayments:
                            "pi_%s" % order.id)
         self.links.append(link)
         return link
+
+    def link_status(self, reference):
+        return LinkStatus("open", None, None, None)
 
 
 class FlakyPayments(StubPayments):
@@ -137,3 +173,10 @@ def assert_problem(testcase, response, status, slug):
         testcase.assertTrue(body.get(key), "campo 7807 mancante: %s" % key)
     testcase.assertNotIn("http", body["say"])
     return body
+
+
+def inline_worker(vela, **settings):
+    """Worker senza thread per le app di test: la coda avanza solo con `drain()`."""
+    from vela.app import build_worker
+    from vela.config import Settings
+    return build_worker(vela, Settings(worker_concurrency=0, **settings))

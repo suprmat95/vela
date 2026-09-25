@@ -1,12 +1,12 @@
 import random
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW
-from vela.adapters.background import InlineRunner
+from support import NOW, inline_worker
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -35,14 +35,17 @@ def make_app(preload=False):
         repos.products.upsert_many(hofj.load_catalog())
     vela = Vela(repos, hofj, FakePayments("http://test"), DEFAULT_TRAVELER, now=Clock())
     app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
-                     vela=vela, runner=InlineRunner(vela.orders), catalog_loader=hofj.load_catalog)
+                     vela=vela, worker=inline_worker(vela), catalog_loader=hofj.load_catalog)
     return app, vela
 
 
-def paid_order(vela):
+def ready_order(app, vela):
+    """Ordine accettato e passato dal job d'acquisto: lo stato ha il link di pagamento."""
     iid = vela.create_intent(INTENT, FULL).intent_id
     proposal = vela.get_proposal(iid)
-    return vela.accept_proposal(proposal.proposal.id)
+    oid = vela.accept_proposal(proposal.proposal.id).order_id
+    app.state.worker.drain()
+    return vela.get_order_status(oid)
 
 
 class BootstrapTest(unittest.TestCase):
@@ -59,19 +62,29 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual(vela.repos.products.count(), 110)
 
     def test_resumes_pending_bookings(self):
+        """RF-27: un ordine pagato senza job di prenotazione (processo morto prima di accodarlo)."""
         app, vela = make_app(preload=True)
-        oid = paid_order(vela).order_id
-        vela.orders.mark_paid(oid, "pi")
+        oid = ready_order(app, vela).order_id
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi"))
         with TestClient(app):
             self.assertEqual(app.state.bootstrap["resumed"], [oid])
+            app.state.worker.drain()
             self.assertEqual(vela.get_order_status(oid).status, OrderStatus.CONFIRMED)
+
+    def test_bootstrap_reads_the_quota_once(self):
+        app, vela = make_app(preload=True)
+        with TestClient(app):
+            self.assertTrue(app.state.bootstrap["quota_synced"])
+            snap = vela.repos.quota.snapshot(vela.now())
+            self.assertEqual((snap["limit_per_minute"], snap["needs_refresh"]), (120, False))
 
 
 class CheckoutTest(unittest.TestCase):
     def test_checkout_marks_paid_and_books(self):
         app, vela = make_app(preload=True)
         with TestClient(app) as c:
-            accepted = paid_order(vela)
+            accepted = ready_order(app, vela)
             self.assertTrue(accepted.payment_url.startswith("http://test/replay/checkout/"))
             r = c.get(urlparse(accepted.payment_url).path)
             self.assertEqual(r.status_code, 200)
@@ -79,6 +92,7 @@ class CheckoutTest(unittest.TestCase):
             self.assertEqual(body["order_id"], accepted.order_id)
             self.assertEqual(body["status"], "paid_pending_booking")
             self.assertIn("Pagamento", body["say"])
+            app.state.worker.drain()                               # il job di prenotazione
             status = vela.get_order_status(accepted.order_id)
             self.assertEqual(status.status, OrderStatus.CONFIRMED)
             self.assertRegex(status.booking_code, r"^R-\d{6}$")
@@ -86,9 +100,10 @@ class CheckoutTest(unittest.TestCase):
     def test_second_visit_has_no_effect(self):
         app, vela = make_app(preload=True)
         with TestClient(app) as c:
-            accepted = paid_order(vela)
+            accepted = ready_order(app, vela)
             path = urlparse(accepted.payment_url).path
             c.get(path)
+            app.state.worker.drain()
             code = vela.get_order_status(accepted.order_id).booking_code
             r = c.get(path)
             self.assertEqual(r.status_code, 200)
@@ -113,10 +128,35 @@ class ModeTest(unittest.TestCase):
         app = create_app(Settings(vela_upstream_mode="live"))
         self.assertNotIn("/replay/checkout/{order_id}", [getattr(r, "path", None) for r in app.routes])
 
-    def test_live_with_database_is_refused(self):
+    LIVE = dict(database_url="sqlite://", vela_upstream_mode="live",
+                hofj_api_key="hofj-segreta", hofj_base_url="https://staging.api.hofj.com",
+                hofj_brand="staging.weebora.com", stripe_secret_key="rk_test_segreta",
+                vela_public_url="https://vela.test")
+
+    def test_live_builds_http_adapter_and_m6_payments(self):
+        from vela.adapters.hofj_http import HofJHttp
+        from vela.adapters.stripe_links import StripePayments
+        app = create_app(Settings(**self.LIVE))
+        hofj = app.state.vela.hofj
+        self.assertIsInstance(hofj, HofJHttp)
+        self.assertEqual((str(hofj.client.base_url), hofj.brand, hofj.locale),
+                         ("https://staging.api.hofj.com", "staging.weebora.com", "it"))
+        self.assertIsInstance(app.state.vela.payments, StripePayments)
+        self.assertEqual(len(app.state.catalog_loader()), 110)      # fixture finché non c'è M10
+
+    def test_live_requires_hofj_settings(self):
+        for missing in ("hofj_api_key", "hofj_base_url", "hofj_brand"):
+            settings = dict(self.LIVE, **{missing: None})
+            with self.subTest(missing), self.assertRaises(RuntimeError) as ctx:
+                create_app(Settings(**settings))
+            self.assertIn(missing.upper(), str(ctx.exception))
+            for secret in ("hofj-segreta", "rk_test_segreta"):
+                self.assertNotIn(secret, str(ctx.exception))
+
+    def test_live_requires_real_payments(self):
         with self.assertRaises(RuntimeError) as ctx:
-            create_app(Settings(database_url="sqlite://", vela_upstream_mode="live"))
-        self.assertIn("M5", str(ctx.exception))
+            create_app(Settings(**dict(self.LIVE, stripe_secret_key=None)))
+        self.assertIn("STRIPE_SECRET_KEY", str(ctx.exception))
 
     def test_replay_without_database_has_no_domain(self):
         app = create_app(Settings())
@@ -160,5 +200,5 @@ class ModeTest(unittest.TestCase):
     def test_replay_with_database_builds_domain(self):
         app = create_app(Settings(database_url="sqlite://"))
         self.assertIsNotNone(app.state.vela)
-        self.assertIsNotNone(app.state.runner)
+        self.assertIsNotNone(app.state.worker)
         self.assertTrue(callable(app.state.catalog_loader))

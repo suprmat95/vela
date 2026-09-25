@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import stripe
 
 from vela.domain.models import Order
-from vela.ports.payments import PaymentLink, PaymentsError, to_cents
+from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError, to_cents
 
 LINK_TTL = timedelta(hours=24) - timedelta(minutes=1)   # RF-21
 TIMEOUT_SECONDS = 15
@@ -60,3 +60,21 @@ class StripePayments:
             raise PaymentsError("Stripe: %s" % type(exc).__name__) from exc
         return PaymentLink(session.url, datetime.fromtimestamp(params["expires_at"], timezone.utc),
                            session.id)
+
+    def link_status(self, reference: str) -> LinkStatus:
+        """RF-20: stato della Checkout Session; `paid` solo se completata e pagata."""
+        try:
+            session = self.client.v1.checkout.sessions.retrieve(reference)
+        except stripe.StripeError as exc:
+            raise PaymentsError("Stripe: %s" % type(exc).__name__) from exc
+        intent = session.payment_intent
+        payment_ref = getattr(intent, "id", intent)
+        currency = (session.currency or "").upper() or None
+        if session.status == "complete" and session.payment_status == "paid":
+            state = "paid"
+        elif session.status == "expired":
+            state = "expired"
+        else:
+            state = "open"
+        return LinkStatus(state, session.amount_total, currency, payment_ref)
+

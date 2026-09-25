@@ -5,7 +5,8 @@ lifespan.
 
 ``create_app`` è la factory usata dai test; ``app`` è l'istanza per ``uvicorn vela.app:app``.
 In replay il dominio è costruito su Postgres con gli adapter finti; il lifespan carica il
-catalogo dalla fixture se la tabella è vuota e riprende le prenotazioni pendenti (RF-27).
+catalogo dalla fixture se la tabella è vuota, legge la quota HofJ, riaccoda le prenotazioni
+pendenti (RF-27) e avvia il worker (RF-50).
 La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RFC 7807.
 Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ e Vela lo scopre
 interrogando la Checkout Session (job di M5).
@@ -17,14 +18,19 @@ from typing import Callable, List, Optional, Tuple
 from fastapi import FastAPI
 from sqlalchemy.engine import Engine
 
-from vela.adapters.background import BookingRunner
 from vela.adapters.db import make_engine
+from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
+from vela.adapters.worker import Worker
 from vela.config import DEFAULT_TRAVELER, Settings
-from vela.domain.models import Product
+from vela.domain.booking import BookingJob
+from vela.domain.jobs import JobProcessor
+from vela.domain.models import JobKind, Product
+from vela.domain.payment_check import PaymentCheckJob
+from vela.domain.purchase import PurchaseJob
 from vela.domain.usecases import Vela
 from vela.ports.payments import PaymentsPort
 from vela.surfaces.checkout_pages import router as checkout_router
@@ -35,6 +41,7 @@ from vela.surfaces.replay import router as replay_router
 from vela.surfaces.rest import router as rest_router
 
 REPLAY = "replay"
+LIVE = "live"
 CatalogLoader = Callable[[], List[Product]]
 
 
@@ -49,50 +56,90 @@ def build_payments(settings: Settings) -> PaymentsPort:
     return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
 
 
-def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, BookingRunner, CatalogLoader]:
-    if settings.vela_upstream_mode != REPLAY:
-        raise RuntimeError("VELA_UPSTREAM_MODE=%s non disponibile prima di M5: usare replay"
+def build_hofj(settings: Settings):
+    """Replay (RNF-08) oppure HofJ vero con `VELA_UPSTREAM_MODE=live` (M5). In live servono le
+    tre variabili HofJ e un pagamento vero: il checkout finto non è montato in live."""
+    if settings.vela_upstream_mode == REPLAY:
+        return ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
+    if settings.vela_upstream_mode != LIVE:
+        raise RuntimeError("VELA_UPSTREAM_MODE=%s sconosciuto: usare replay o live"
                            % settings.vela_upstream_mode)
-    hofj = ReplayHofJ()
+    missing = [name for name, value in (("HOFJ_API_KEY", settings.hofj_api_key),
+                                        ("HOFJ_BASE_URL", settings.hofj_base_url),
+                                        ("HOFJ_BRAND", settings.hofj_brand)) if not value]
+    if missing:
+        raise RuntimeError("VELA_UPSTREAM_MODE=live richiede %s" % ", ".join(missing))
+    if not settings.stripe_secret_key:
+        raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
+                           "non esiste contro HofJ vero")
+    return HofJHttp(settings.hofj_base_url, settings.hofj_api_key, settings.hofj_brand)
+
+
+def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:
+    hofj = build_hofj(settings)
+    catalog_loader = hofj.load_catalog if isinstance(hofj, ReplayHofJ) else ReplayHofJ().load_catalog
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
         from vela.adapters.haiku import HaikuExtractor
         extractor = HaikuExtractor.from_api_key(settings.anthropic_api_key)
-    vela = Vela(PostgresRepositories(engine), hofj, build_payments(settings), DEFAULT_TRAVELER,
-                extractor=extractor)
-    return vela, BookingRunner(vela.orders), hofj.load_catalog
+    repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
+                                 booking_reserve=settings.booking_reserve)
+    vela = Vela(repos, hofj, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
+    return vela, catalog_loader   # in live: la fixture di M1 finché non c'è il sync (M10)
 
 
-def bootstrap(vela: Vela, runner, catalog_loader: Optional[CatalogLoader]) -> dict:
+def build_worker(vela: Vela, settings: Settings) -> Worker:
+    """Job d'acquisto, prenotazione e verifica del pagamento sotto un solo processore (RF-50)."""
+    purchase = PurchaseJob(vela.repos, vela.hofj, vela.payments, vela._propose, vela.defaults,
+                           now=vela.now, max_attempts=settings.purchase_max_attempts,
+                           new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
+    booking = BookingJob(vela.repos, vela.hofj, now=vela.now,
+                         max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff)
+    check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
+                            poll_seconds=settings.payment_poll_seconds)
+    processor = JobProcessor(vela.repos, vela.hofj, {JobKind.PURCHASE: purchase,
+                                                     JobKind.BOOKING: booking,
+                                                     JobKind.PAYMENT_CHECK: check},
+                             now=vela.now, lease_seconds=settings.job_lease_seconds)
+    return Worker(processor, settings.worker_concurrency)
+
+
+def bootstrap(vela: Vela, worker: Worker, catalog_loader: Optional[CatalogLoader]) -> dict:
     loaded = 0
     if catalog_loader is not None and vela.repos.products.count() == 0:
         products = catalog_loader()
         vela.repos.products.upsert_many(products)
         loaded = len(products)
-    return {"catalog_loaded": loaded, "resumed": runner.resume()}
+    synced = worker.processor.refresh_quota()          # RF-36: al boot
+    resumed = vela.orders.resume_bookings()            # RF-27
+    worker.start()
+    return {"catalog_loaded": loaded, "quota_synced": synced, "resumed": resumed}
 
 
-def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None, runner=None,
+def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
+               worker: Optional[Worker] = None,
                catalog_loader: Optional[CatalogLoader] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     engine = make_engine(settings.database_url) if settings.database_url else None
     if vela is None and engine is not None:
-        vela, runner, catalog_loader = build_vela(settings, engine)
+        vela, catalog_loader = build_vela(settings, engine)
+    if vela is not None and worker is None:
+        worker = build_worker(vela, settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with app.state.mcp.session_manager.run():
             if app.state.vela is not None:
-                app.state.bootstrap = bootstrap(app.state.vela, app.state.runner, app.state.catalog_loader)
+                app.state.bootstrap = bootstrap(app.state.vela, app.state.worker, app.state.catalog_loader)
             yield
-            if app.state.runner is not None:
-                app.state.runner.shutdown(wait=False)
+            if app.state.worker is not None:
+                app.state.worker.stop(wait=False)
 
     app = FastAPI(title="Vela", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.engine = engine
     app.state.vela = vela
-    app.state.runner = runner
+    app.state.worker = worker
     app.state.catalog_loader = catalog_loader
     app.state.bootstrap = None
     app.state.mcp = build_mcp(lambda: app.state.vela)

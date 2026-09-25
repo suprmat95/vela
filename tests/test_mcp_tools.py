@@ -5,14 +5,13 @@ from datetime import timedelta
 
 from mcp import Client
 
-from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
+from support import (NOW, FakeHofJ, StubPayments, assert_single_product, inline_worker,
                      make_product)
-from vela.adapters.background import InlineRunner
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.usecases import Vela
-from vela.surfaces.mcp import DESCRIPTIONS, TOOL_NAMES, build_mcp
+from vela.surfaces.mcp import DESCRIPTIONS, INSTRUCTIONS, TOOL_NAMES, build_mcp
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 TRAVELER = {"first_name": "Anna", "last_name": "Rossi", "email": "anna@x.it", "phone": "+390000",
@@ -104,13 +103,18 @@ class FlowTest(McpCase):
         self.assertIsNone(self.vela.repos.orders.get_by_proposal(second["proposal_id"]))
 
         accepted = await self.ok("accept_proposal", proposal_id=second["proposal_id"], **TRAVELER)
-        self.assertEqual(accepted["status"], "awaiting_payment")
-        self.assertTrue(accepted["payment_url"].startswith("http://pay.test/"))
+        self.assertEqual((accepted["status"], accepted["position"]), ("queued", 1))
+        self.assertNotIn("payment_url", accepted)
         again = await self.ok("accept_proposal", proposal_id=second["proposal_id"], **TRAVELER)
         self.assertEqual(again["order_id"], accepted["order_id"])
 
+        worker = inline_worker(self.vela)
+        worker.drain()                                   # job d'acquisto
+        awaiting = await self.ok("get_order_status", order_id=accepted["order_id"])
+        self.assertEqual(awaiting["status"], "awaiting_payment")
+        self.assertTrue(awaiting["payment_url"].startswith("http://pay.test/"))
         self.vela.orders.mark_paid(accepted["order_id"], "pi_test")
-        InlineRunner(self.vela.orders).submit(accepted["order_id"])
+        worker.drain()                                   # job di prenotazione
         status = await self.ok("get_order_status", order_id=accepted["order_id"])
         self.assertEqual(status["status"], "confirmed")
         self.assertEqual(status["booking_code"], "R-000001")
@@ -144,6 +148,25 @@ class FlowTest(McpCase):
         self.assertEqual(json.loads(r.content[0].text), r.structured_content)
 
 
+class DescriptionsM5Test(unittest.TestCase):
+    """RF-41: l'accettazione è un'attesa, il link si legge con get_order_status."""
+
+    def test_accept_description_says_wait_not_link(self):
+        text = DESCRIPTIONS["accept_proposal"]
+        self.assertIn("a wait, not a link", text)
+        self.assertIn("get_order_status", text)
+        self.assertNotIn("show `payment_url`", text)
+
+    def test_status_description_lists_new_states(self):
+        text = DESCRIPTIONS["get_order_status"]
+        for state in ("queued", "awaiting_payment", "paid_pending_booking", "confirmed", "replaced",
+                      "cancelled", "failed", "booking_failed", "expired", "proposal_changed"):
+            self.assertIn(state, text)
+
+    def test_instructions_mention_the_queue(self):
+        self.assertIn("queue", INSTRUCTIONS)
+
+
 class ErrorsTest(McpCase):
     async def test_unknown_ids_read_a_sentence(self):
         cases = [("get_proposal", {"intent_id": "nope"}, "intent"),
@@ -155,26 +178,24 @@ class ErrorsTest(McpCase):
                 self.assertEqual(await self.error_text(name, **args), say.say_not_found(kind))
 
     async def test_unexpected_error_is_generic_and_logged(self):
-        self.vela = make_vela(hofj=FakeHofJ(fail_itinerary=RuntimeError("segreto interno")))
         intent = await self.ok("create_intent", text=INTENT)
         proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("segreto interno")
+        self.vela.accept_proposal = boom
         with self.assertLogs("vela.mcp", "ERROR") as logs:
             text = await self.error_text("accept_proposal", proposal_id=proposal["proposal_id"], **TRAVELER)
         self.assertEqual(text, say.say_error())
         self.assertNotIn("segreto", text)
         self.assertIn("accept_proposal", logs.output[0])
 
-    async def test_payments_error_reads_a_sentence_and_retry_works(self):
-        self.vela.payments = FlakyPayments(failures=1)
+    async def test_accept_returns_queued_shape(self):
         intent = await self.ok("create_intent", text=INTENT)
         proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
-        with self.assertLogs("vela.mcp", "WARNING"):
-            text = await self.error_text("accept_proposal", proposal_id=proposal["proposal_id"], **TRAVELER)
-        self.assertEqual(text, say.say_payments_unavailable())
-        order = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"])
-        self.assertTrue(order["payment_url"].startswith("http://pay.test/"))
-        status = await self.ok("get_order_status", order_id=order["order_id"])
-        self.assertEqual((status["payment_url"], status["total"]), (order["payment_url"], order["total"]))
+        d = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"], **TRAVELER)
+        self.assertEqual(set(d), {"order_id", "status", "position", "wait_seconds", "say"})
+        self.assertEqual(self.vela.hofj.calls, [])
 
     async def test_domain_unavailable(self):
         self.server = build_mcp(lambda: None)
