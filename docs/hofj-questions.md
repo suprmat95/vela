@@ -1,6 +1,7 @@
 # Domande per HofJ: pagamento e prenotazione
 
-Stato: da inviare. Nato dalle verifiche di spec §8 in M5 (`docs/decisions.md`, sezioni "M5:
+Stato: da inviare. Aggiornato il 2026-09-25 dopo l'indicazione di HofJ "pagamento chiuso con
+l'API bookings, senza webhook": le domande 1 e 3 sono chiuse, restano 2, 4, 5, 6, 7. Nato dalle verifiche di spec §8 in M5 (`docs/decisions.md`, sezioni "M5:
 verifiche di spec §8" e "M5: seconda sonda sul pagamento"). Le risposte decidono come M6
 incassa e come Vela conferma la prenotazione.
 
@@ -29,7 +30,8 @@ non pagato.
 
 ## Domande
 
-1. **Riconciliazione del pagamento.** Se creiamo noi il pagamento (Checkout Session con la vostra
+1. ~~**Riconciliazione del pagamento.**~~ *Chiusa: il pagamento si chiude con `POST /v1/bookings`
+   inoltrando `paymentIntentId` e `paymentStatus`.* Testo originale: Se creiamo noi il pagamento (Checkout Session con la vostra
    chiave) invece di usare `POST /v1/itineraries/{id}/payment`, il vostro sistema lo riconosce come
    pagamento del carrello? Basta impostare sul PaymentIntent `metadata.checkoutRefId = itineraryId`
    e importo = `checkout.openAmount`? Oppure serve passare `paymentIntentId` e `paymentStatus` a
@@ -42,7 +44,8 @@ non pagato.
    non è stata confermata? Come possiamo verificare dall'API interna che una prenotazione è
    confermata e pagata, senza il token dell'utente finale richiesto da `GET /v1/bookings/{id}`?
 
-3. **Notifica del pagamento a Vela.** Per sapere quando il viaggiatore ha pagato abbiamo due
+3. ~~**Notifica del pagamento a Vela.**~~ *Chiusa: niente webhook; Vela legge lo stato delle
+   Checkout Session con la vostra chiave.* Testo originale: Per sapere quando il viaggiatore ha pagato abbiamo due
    possibilità:
    - (a) un webhook Stripe (`checkout.session.completed`, `checkout.session.expired`) registrato
      sul vostro account verso un nostro URL. Potete registrarlo voi e darci il signing secret,
@@ -54,7 +57,8 @@ non pagato.
    Quale preferite?
 
 4. **Permessi della chiave `rk_test_…`.** Include la creazione e la lettura delle Checkout Session
-   (`checkout_sessions` in scrittura e lettura) e la lettura dei PaymentIntent? Ci sarà una chiave
+   (`checkout_sessions` in scrittura e lettura: la lettura serve a sapere quando il viaggiatore ha
+   pagato, senza webhook) e la lettura dei PaymentIntent? Ci sarà una chiave
    equivalente per la produzione?
 
 5. **Importi.** Su un carrello `checkout.total` vale 368 e `openAmount`/`originalTotal` 337

@@ -106,51 +106,61 @@ regole sotto valgono sul codice dopo il rebase e prevalgono sul resto del piano.
   consumare quota HofJ.
 - **Accept**: `_ensure_link` di M6 sparisce: il link lo crea solo il job. La 503
   `payments-unavailable` di REST e la frase MCP di M6 non si applicano più all'accept.
-- **Webhook**: `checkout.session.completed` fa `mark_paid` e **accoda un job `booking`** al posto
-  di `runner.submit` (punto di aggancio già segnato da M6 in `vela/surfaces/webhooks.py`).
-  La logica "pagamento arrivato" (controlli di stato, valuta, importo, `mark_paid`, accodamento)
-  si sposta in `OrderService.settle_payment(order_id, status, amount_cents, currency,
-  payment_ref)`, usata dal webhook e dal polling.
-- **Eventi di HofJ**: l'account Stripe è condiviso con HofJ; un evento senza `metadata.order_id`
-  è registrato a livello `debug`, non `warning`.
+- **Niente webhook** (decisione del 2026-09-25 con l'utente, indicazione di HofJ): il pagamento
+  si chiude con `POST /v1/bookings` (`paymentIntentId`, `paymentStatus`) e Vela scopre che il
+  viaggiatore ha pagato leggendo lo stato della Checkout Session (Task 13b). Il webhook, la
+  tabella `stripe_events` e l'obbligo di `STRIPE_WEBHOOK_SECRET` escono da M6 (modifica da
+  concordare su `task/m6`). Se al momento del rebase il webhook è ancora nel codice, il Task 13b
+  lo rimuove. La logica "pagamento arrivato" (stato, valuta, importo, `mark_paid`, accodamento del
+  `booking`) sta in `OrderService.settle_payment(order_id, status, amount_cents, currency,
+  payment_ref)`.
+- **Migrazione con o senza `stripe_events`**: se M6 toglie la `0003_stripe_events`, la migrazione
+  di M5 torna `0003_jobs_quota`; altrimenti `0004`. Si decide al rebase.
 - **Modo live**: la scelta dei pagamenti è di M6 (`STRIPE_SECRET_KEY` → `StripePayments`). Il
   `RuntimeError` "live in attesa di M6" del Task 16 non si fa: `live` costruisce `HofJHttp` e i
   pagamenti di M6.
 - **Stato dell'ordine**: M6 ha già `total`, `currency`, `payment_url` in `OrderStatusResponse`; M5
   aggiunge solo gli altri campi del contratto.
 
-### Task 13b: polling dei pagamenti (riserva del webhook)
+### Task 13b: verifica del pagamento per interrogazione (RF-20, sostituisce il webhook)
 
-Il webhook va registrato sull'account Stripe di HofJ (domanda 3 di `docs/hofj-questions.md`).
-Finché non c'è, e dopo come recupero di eventi persi, un job controlla lo stato delle sessioni.
+Nessun webhook: un job controlla lo stato delle Checkout Session degli ordini `awaiting_payment`.
 
 **Files:** Modify `vela/ports/payments.py`, `vela/adapters/stripe_links.py`,
 `vela/adapters/stripe_fake.py`, `vela/domain/orders.py`, `vela/domain/jobs.py`,
-`vela/domain/purchase.py`, `vela/surfaces/webhooks.py`, `vela/config.py`; Test
-`tests/test_payment_poll.py`, `tests/test_stripe_links.py`, `tests/test_webhooks.py`.
+`vela/domain/purchase.py`, `vela/domain/usecases.py`, `vela/config.py`; Remove (se ancora
+presenti dopo il rebase) `vela/surfaces/webhooks.py` e i suoi test; Test `tests/test_payment_check.py`,
+`tests/test_stripe_links.py`, `tests/test_usecases.py`.
 
 **Produces:**
 - `PaymentsPort.link_status(reference) -> LinkStatus(state: "open"|"paid"|"expired",
-  amount_cents, currency, payment_ref)`; `StripePayments` usa `checkout.sessions.retrieve`
-  (errori → `PaymentsError`); `FakePayments` legge lo stato dal checkout di replay.
+  amount_cents, currency, payment_ref)`. `StripePayments` usa `checkout.sessions.retrieve`
+  (`status == "complete"` e `payment_status == "paid"` → `paid`, `payment_ref` = id del
+  PaymentIntent; `status == "expired"` → `expired`; errori → `PaymentsError`). `FakePayments`
+  legge lo stato dal checkout di replay (`/replay/checkout/{order_id}` segna la sessione pagata
+  invece di chiamare `mark_paid`).
 - `JobKind.PAYMENT_CHECK`: accodato dal passo 5 del job d'acquisto con `run_after = now +
   payment_poll_seconds` (nuovo campo di `Settings`, default 60). Nessuna quota HofJ.
-- Esito: `paid` → `settle_payment` (che accoda il `booking`); `expired` → `expire`; `open` →
-  ripianificato; ordine non più `awaiting_payment` (già pagato dal webhook, annullato, scaduto) →
-  job chiuso senza effetti. `PaymentsError` → ripianificato.
+- `get_order_status` su un ordine `awaiting_payment` anticipa `run_after` del job a `now`
+  (nessuna chiamata esterna nel caso d'uso).
+- Esito: `paid` → `settle_payment` (accoda il `booking`); `expired` → `expire`; `open` →
+  ripianificato; ordine non più `awaiting_payment` → job chiuso senza effetti; `PaymentsError`
+  → ripianificato.
+- Il booking inoltra `paymentIntentId` e `paymentStatus` (`PaymentProof`).
 
 **Test:**
-- `test_poll_paid_session_settles_and_enqueues_booking_once`
-- `test_poll_open_session_reschedules`
-- `test_poll_expired_session_expires_order`
-- `test_poll_after_webhook_is_noop` (nessun secondo booking)
-- `test_webhook_after_poll_is_noop`
-- `test_poll_amount_mismatch_does_not_settle`
-- `test_poll_uses_no_hofj_quota`
-- `test_stripe_link_status_maps_session` (client finto: `complete`/`paid` → paid, `expired`, `open`)
-- `test_webhook_event_without_order_id_logs_debug`
+- `test_check_paid_session_settles_and_enqueues_booking_once`
+- `test_check_open_session_reschedules`
+- `test_check_expired_session_expires_order`
+- `test_check_twice_after_paid_is_noop` (un solo booking)
+- `test_check_amount_mismatch_does_not_settle`
+- `test_check_uses_no_hofj_quota`
+- `test_check_payments_error_reschedules`
+- `test_status_request_brings_check_forward`
+- `test_stripe_link_status_maps_session` (client finto: complete/paid → paid con id del PaymentIntent, expired, open)
+- `test_replay_checkout_marks_session_paid_and_check_books` (flusso replay completo con `drain`)
 
-- [ ] TDD, poi commit «Poll Stripe sessions as a fallback for the payment webhook».
+- [ ] TDD, poi commit «Check Stripe sessions for payment instead of a webhook».
 
 ## Global Constraints
 
@@ -554,7 +564,7 @@ purchase_waiting(now) -> bool
 - `test_worker_survives_exception`
 - `test_drain_runs_until_idle`
 - `test_bootstrap_refreshes_quota_and_resumes_bookings`
-- `test_replay_checkout_enqueues_booking_and_drain_confirms`
+- `test_replay_checkout_then_check_and_booking_confirm` (checkout replay → job di verifica → booking)
 - `test_health_reports_quota_snapshot`
 
 - [ ] TDD, poi commit «Run jobs in worker threads and wire the queue into the app».

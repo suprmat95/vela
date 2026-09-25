@@ -411,10 +411,24 @@ Dettagli nella sezione "Integrazione con M6 e M9" del piano M5.
 |---|---|---|
 | Pagamento: scelta | Si resta sulla Checkout Session di M6 (account Stripe di HofJ), con `metadata.checkoutRefId = itineraryId` sul PaymentIntent (fatto su `task/m6`, commit `6aecb03`) e importo = `openAmount` (scritto dal job d'acquisto di M5). Conferma attesa da HofJ (`docs/hofj-questions.md`, domanda 1) | Compatibile con quanto osservato; il flusso con Stripe.js cambierebbe molto M6 e richiede la `pk_test` |
 | `paymentIntentId` nel booking | Inoltrato con `paymentStatus` (inverte la regola del piano dopo il Task 1) | OAS lo inoltra al brand site: secondo modo con cui HofJ può riconoscere il pagamento |
-| Notifica del pagamento a Vela | Webhook di M6 come strada principale; polling delle sessioni con un job `payment_check` nel worker come riserva (Task 13b) | Il webhook va registrato sull'account di HofJ (domanda 3); il polling non richiede nulla da HofJ e recupera eventi persi |
-| Logica del pagamento | `OrderService.settle_payment` condivisa da webhook e polling; il webhook accoda un job `booking` | Una sola regola per importo, valuta e transizione |
-| Eventi Stripe senza `order_id` | Log `debug`, non `warning` | L'account è condiviso con HofJ: i loro pagamenti arrivano anche al nostro webhook |
+| Notifica del pagamento a Vela | ~~Webhook principale, polling di riserva~~ Superata: vedi "M5: pagamento senza webhook" | — |
+| Logica del pagamento | `OrderService.settle_payment`, usata dal job di verifica (Task 13b) | Una sola regola per importo, valuta e transizione |
+| Eventi Stripe senza `order_id` | ~~Log `debug`~~ Superata: nessun webhook | — |
 | Migrazione | `0004_jobs_quota` dopo `0003_stripe_events` di M6 | Numerazione lineare dopo il merge di M6 |
 | Frasi | Ogni frase nuova in italiano e inglese | M9 ha reso le frasi bilingui |
 | Modo live | Nessun rifiuto all'avvio: `live` usa `HofJHttp` e i pagamenti scelti da M6 | M6 esiste; la decisione "live in attesa di M6" dell'intervista è superata |
+
+## 2026-09-25 — M5: pagamento senza webhook
+
+Origine: indicazione di HofJ riportata dall'utente ("chiudere il pagamento sfruttando unicamente
+le API di HofJ, senza webhook"; la chiave Stripe fornita permette di pagare passando dall'API
+bookings), interpretazione confermata dall'utente.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiusura del pagamento | Il pagamento (Checkout Session creata con la chiave di HofJ) si chiude con `POST /v1/bookings` che inoltra `paymentIntentId` e `paymentStatus` | Indicazione di HofJ |
+| Come Vela sa che il viaggiatore ha pagato | Job `payment_check` nel worker: legge la Checkout Session ogni 60 s e subito quando il viaggiatore chiede lo stato; `paid` → `settle_payment` → job `booking` | Nessun webhook; il booking non va chiamato alla cieca perché su staging risponde 200 anche senza pagamento |
+| Spec | RF-20 riscritta (verifica per interrogazione), RF-51 e la voce Stripe di §2 adeguate | La spec descriveva il webhook |
+| M6 | Da togliere: webhook `POST /webhooks/stripe`, tabella `stripe_events` (migrazione `0003`), obbligo di `STRIPE_WEBHOOK_SECRET`. Resta: Checkout Session, `checkoutRefId`, pagine di ritorno, scadenza. Modifica da concordare su `task/m6`, oppure rimozione nel Task 13b di M5 dopo il rebase | Coerenza con la nuova RF-20 |
+| Domande a HofJ | Domanda 3 (webhook) chiusa; domanda 1 chiusa per la parte "come si chiude" (booking con `paymentIntentId`) | Risposta arrivata tramite l'utente |
 

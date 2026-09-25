@@ -2029,3 +2029,69 @@ I test falliscono per il motivo atteso: `checkoutRefId` non c'è ancora. Impleme
 - 🔧 Bash: Read booking rule lines
 
 - 🔧 Bash: Update M5 plan and decisions for M6/M9 integration
+
+Ho fatto tutte e due le cose che mi hai autorizzato. Resta da decidere l'ordine dei merge e il rebase, prima del Task 2.
+
+**Su `task/m6`** (commit `6aecb03`):
+- Il PaymentIntent del link Stripe ora porta `checkoutRefId` = itinerario. I `metadata` della sessione restano quelli di prima.
+- Test aggiunto, visto fallire e poi passare. La suite di M6 è verde: 535 test, 14 saltati.
+- La decisione è annotata anche nel `docs/decisions.md` di M6.
+
+**Su `task/m5`** (commit `462acfa`):
+- Nel piano c'è una nuova sezione, «Integrazione con M6 e M9»:
+  - migrazione `0004`;
+  - frasi nuove in italiano e inglese;
+  - `create_payment_link(order, description)`;
+  - `PaymentsError` ripetuto dal job d'acquisto;
+  - il link lo crea solo il job, non più l'accettazione;
+  - il webhook accoda un job `booking`;
+  - log `debug` per gli eventi Stripe di HofJ;
+  - il modo `live` non viene più rifiutato all'avvio.
+- Il booking inoltra `paymentIntentId` e `paymentStatus`: ho invertito la regola scritta dopo il Task 1.
+- **Nuovo Task 13b, polling dei pagamenti:** un job `payment_check` controlla ogni 60 secondi le sessioni in attesa di pagamento, come riserva del webhook. La logica del pagamento passa in `OrderService.settle_payment`, condivisa da webhook e polling, così un ordine pagato dà una sola prenotazione anche se arrivano entrambi.
+- In `docs/decisions.md`:
+  - una sezione nuova con queste scelte;
+  - la riga «pagamento sul PaymentIntent di HofJ» segnata come superata.
+
+**Serve la tua decisione prima del Task 2:**
+1. **Merge di M6 su `master`:** lo fai tu, o lo faccio io quando me lo dici?
+2. **Rebase di `task/m5` sul nuovo `master`:** riscrive la storia di `task/m5`. Ci sono solo commit di documentazione e nessun push, ma `CLAUDE.md` chiede di chiedere. In alternativa si può fare un merge di `master` dentro `task/m5`, come è stato fatto per M6.
+
+## Utente 19:48
+
+Mi è stato detto che dobbiamo chiudere il pagamento sfruttando unicamente le api di Hofj, senza utilizzare webhook
+
+## Agente 19:49
+
+Questo cambia la parte del pagamento, soprattutto M6. Prima di toccare qualcosa voglio essere sicuro di cosa significa, perché «solo API di HofJ» si può intendere in due modi.
+
+**Il problema pratico.** Il viaggiatore deve comunque inserire la carta da qualche parte. Le API di HofJ non hanno una pagina di pagamento: `POST …/payment` restituisce solo un `client_secret`. Le strade compatibili con il vincolo sono due.
+
+**A. Pagamento con il PaymentIntent di HofJ, pagina minima nostra.** È il flusso documentato da HofJ.
+1. Il job d'acquisto chiama `POST /v1/itineraries/{id}/payment` e ottiene il `client_secret`.
+2. Il link che diamo al viaggiatore apre una **nostra pagina minima** con Stripe.js, che conferma quel PaymentIntent nel browser.
+3. A conferma riuscita, la pagina avvisa Vela, che chiama `POST /v1/bookings`: niente webhook.
+4. Lato server usiamo solo le API di HofJ. Stripe gira solo nel browser del viaggiatore, sul loro PaymentIntent.
+5. Serve la `pk_test` di HofJ.
+6. **Rischio:** se il viaggiatore chiude la pagina subito dopo aver pagato, Vela non viene avvisata. Si può richiamare il booking quando il viaggiatore chiede lo stato, visto che è un upsert idempotente, ma non possiamo verificare il pagamento con le API di HofJ: come abbiamo visto, il carrello non cambia.
+
+**B. Checkout del sito del brand («Agnostic cart»).**
+1. Creiamo il carrello e mandiamo il viaggiatore alla **pagina di checkout di Weebora**.
+2. Pagamento e prenotazione li chiude HofJ, e noi non tocchiamo Stripe in nessun modo.
+3. **Però Vela non prenota più** e non riceve il codice di prenotazione: non sappiamo se e quando la prenotazione è confermata, salvo che `GET /v1/itineraries/{id}` lo mostri. Questo cambia la spec (RF-18..24) e la conferma vocale finale.
+
+**Cosa cambia comunque, in entrambi i casi:**
+- **M6 va in gran parte rifatta:** via Checkout Session, webhook, `stripe_events` e il `checkoutRefId` che ho appena aggiunto. Anche il Task 13b (polling di Stripe) che ho aggiunto al piano M5 va tolto.
+- **In M5, con la strada A, il pagamento diventa una chiamata HofJ in più**: 6 chiamate per acquisto invece di 5. La formula dell'attesa (RF-47, RF-48) va aggiornata: (108 − 21) ÷ 6 = 14,5 acquisti al minuto invece di 17,4. Coda, quota, worker e adapter non cambiano.
+
+- 🔧 AskUserQuestion
+
+- 🔧 AskUserQuestion
+
+- 🔧 Bash: Read spec payment requirements mentioning webhook
+
+- 🔧 Bash: Read RF-18..22 and RF-51 text
+
+Aggiorno spec, piano, decisioni e domande a HofJ. M6 per ora non la tocco: a fine lavoro ti propongo le modifiche.
+
+- 🔧 Bash: Update spec, plan, decisions and HofJ questions for no-webhook payment
