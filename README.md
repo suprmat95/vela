@@ -69,7 +69,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `STRIPE_WEBHOOK_SECRET` | in `live` | Segreto per verificare la firma dei webhook Stripe. |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
 | `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. |
-| `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku per gli intenti non capiti dal parser. |
+| `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) quando il parser non trova né sport né periodo; timeout 5 s, 1 retry. Prova manuale (una chiamata): `uv run python scripts/try_haiku.py "testo"`. |
 
 ## Docker
 
