@@ -190,3 +190,20 @@ class AllowedHostsTest(unittest.TestCase):
         self.assertIn("https://vela-n506.onrender.com", origins)
         self.assertEqual(allowed_origins(None), ["https://claude.ai", "http://localhost:*",
                                                  "http://127.0.0.1:*"])
+
+
+class RootLoggingTest(unittest.TestCase):
+    """`MCPServer()` chiama `logging.basicConfig`: non deve portare il root logger a INFO."""
+
+    def test_build_mcp_keeps_root_logger_at_warning(self):
+        import logging
+        root = logging.getLogger()
+        saved_level, saved_handlers = root.level, root.handlers[:]
+        root.handlers[:] = []
+        root.setLevel(logging.WARNING)
+        try:
+            build_mcp(lambda: None)
+            self.assertGreaterEqual(root.level, logging.WARNING)
+        finally:
+            root.handlers[:] = saved_handlers
+            root.setLevel(saved_level)

@@ -205,3 +205,10 @@ Origine: intervista sulla macro task M3, piano in `docs/plans/2026-09-25-m3-supe
 | Dominio assente | `/mcp` sempre montato; senza `DATABASE_URL` ogni tool risponde `isError` con `say_unavailable()` | `/mcp` non va mai in crash; stesso comportamento di `/replay/checkout` (503) |
 | Deploy e prova | Merge su `master` fatto dall'utente → autodeploy Render; smoke test automatico con `scripts/mcp_smoke.py` contro l'URL live (solo replay, nessun costo); conversazione in claude.ai fatta dall'utente; esiti in `docs/acceptance.md` | Il connector di claude.ai si configura solo dall'account dell'utente |
 | "Troppo caro" | Resta a M9: in M3 il rifiuto produce una proposta diversa, non necessariamente più economica; criterio 1 in replay registrato come parziale | M3 resta solo superficie; nessun conflitto con il worktree di M9 su `intent.py`/`usecases.py` |
+
+## 2026-09-25 — M3: decisioni prese durante l'esecuzione
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Log dell'SDK MCP | `MCPServer(..., log_level="WARNING")` | Il costruttore chiama `logging.basicConfig` sul root logger (INFO con `RichHandler` di default): l'app avrebbe stampato i log INFO di tutte le librerie. Con WARNING resta visibile ciò che si vedeva prima di M3; M14 riconfigura i log in JSON. Test: `RootLoggingTest` |
+| Log attesi nei test | I test che provocano rifiuti dell'SDK (argomenti non validi, Host/Origin non ammessi) li catturano con `assertLogs` e li verificano | Output dei test pulito, e il rifiuto è verificato anche dal log |

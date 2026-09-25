@@ -108,7 +108,9 @@ def fail(sentence: str) -> CallToolResult:
 
 def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
     """Server MCP con i cinque tool. ``get_vela`` è letto a ogni chiamata: l'app lo imposta dopo."""
-    server = MCPServer("vela", title="Vela", instructions=INSTRUCTIONS, version="0.1.0")
+    # MCPServer() chiama logging.basicConfig: WARNING evita di portare a INFO il root dell'app.
+    server = MCPServer("vela", title="Vela", instructions=INSTRUCTIONS, version="0.1.0",
+                       log_level="WARNING")
 
     def run(name: str, use_case: Callable[[Vela], object]) -> CallToolResult:
         vela = get_vela()

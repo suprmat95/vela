@@ -392,6 +392,23 @@ class ErrorsTest(McpCase):
         self.assertIn("rejected arguments", "\n".join(logs.output))
 
 
+class RootLoggingTest(unittest.TestCase):
+    """`MCPServer()` chiama `logging.basicConfig`: non deve portare il root logger a INFO."""
+
+    def test_build_mcp_keeps_root_logger_at_warning(self):
+        import logging
+        root = logging.getLogger()
+        saved_level, saved_handlers = root.level, root.handlers[:]
+        root.handlers[:] = []
+        root.setLevel(logging.WARNING)
+        try:
+            build_mcp(lambda: None)
+            self.assertGreaterEqual(root.level, logging.WARNING)
+        finally:
+            root.handlers[:] = saved_handlers
+            root.setLevel(saved_level)
+
+
 class AllowedHostsTest(unittest.TestCase):
     def test_allowed_hosts_from_public_url(self):
         from vela.surfaces.mcp import allowed_hosts
@@ -528,7 +545,9 @@ def fail(sentence: str) -> CallToolResult:
 
 def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
     """Server MCP con i cinque tool. ``get_vela`` è letto a ogni chiamata: l'app lo imposta dopo."""
-    server = MCPServer("vela", title="Vela", instructions=INSTRUCTIONS, version="0.1.0")
+    # MCPServer() chiama logging.basicConfig: WARNING evita di portare a INFO il root dell'app.
+    server = MCPServer("vela", title="Vela", instructions=INSTRUCTIONS, version="0.1.0",
+                       log_level="WARNING")
 
     def run(name: str, use_case: Callable[[Vela], object]) -> CallToolResult:
         vela = get_vela()
@@ -605,7 +624,7 @@ def mcp_routes(server: MCPServer, public_url: Optional[str]) -> list:
 - [ ] **Step 4: Eseguire e verificare che passi**
 
 Run: `uv run python -m unittest discover -s tests -p test_mcp_tools.py -v`
-Expected: PASS (15 test). Se `test_traveler_arguments_are_flat` fallisce solo per la forma di `participants` nello schema (per esempio `$ref` al posto di `anyOf`), stampare lo schema, adeguare l'asserzione alla forma reale mantenendo il controllo "array di oggetti", e annotarlo nel riepilogo del task.
+Expected: PASS (16 test). Se `test_traveler_arguments_are_flat` fallisce solo per la forma di `participants` nello schema (per esempio `$ref` al posto di `anyOf`), stampare lo schema, adeguare l'asserzione alla forma reale mantenendo il controllo "array di oggetti", e annotarlo nel riepilogo del task.
 
 - [ ] **Step 5: Commit**
 
@@ -818,6 +837,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```python
 """Smoke test MCP (scripts/mcp_smoke.py) contro l'app replay in-process, catalogo della fixture."""
+import contextlib
+import io
 import os
 import random
 import sys
@@ -902,7 +923,10 @@ class SmokeFlowTest(unittest.IsolatedAsyncioTestCase):
 
 class SmokeCliTest(unittest.TestCase):
     def test_usage(self):
-        self.assertEqual(mcp_smoke.main([]), 2)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(mcp_smoke.main([]), 2)
+        self.assertIn("uso:", err.getvalue())
 
     def test_base_of(self):
         self.assertEqual(mcp_smoke.base_of("https://vela-n506.onrender.com/mcp"),
