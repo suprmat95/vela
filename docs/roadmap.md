@@ -6,6 +6,8 @@ Data: 2026-09-25. Origine: `docs/spec.md` e intervista del 2026-09-25 (decisioni
 scheduler della quota e accettazione asincrona entrano in M5, lo scenario di carico in M13.
 Aggiornata il 2026-09-26 con M17 (contratto agente-tool, spec §4.11): M9 e M11 erano già
 concluse, quindi il lavoro su parser e contratto dei tool è una task nuova in ondata 5.
+Aggiornata il 2026-09-26 per il multi-brand: M10 diventa "Sync multi-brand del catalogo"
+(padel = Weebora, tennis = Terrarossa), taglia L, casi d'uso in `docs/usecases/multi-brand.md`.
 
 ## Come usare questo file
 
@@ -49,7 +51,7 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M7 | Prima prenotazione reale end-to-end | S | M3, M4, M5, M6 | 4 / — |
 | M8 | OAuth 2.1 sulla superficie MCP | M | M3 | 3 / M5, M6 |
 | M9 | Parser completo, rifiuto con motivo, fallback Haiku | M | M2 | 2+ / tutte |
-| M10 | Sync incrementale del catalogo da HofJ | M | M5 | 5 / M12, M13, M14 |
+| M10 | Sync multi-brand del catalogo da HofJ | L | M5 | 5 / M12, M13, M14 |
 | M11 | Raffinamento della scelta (chooser v2) | M | M2 | 2+ / tutte |
 | M12 | Agente vocale ElevenLabs | S | M7, M8 | 5 / M10, M13, M14 |
 | M13 | Load test e numeri | S | M4, M7 | 5 / M10, M12, M14 |
@@ -60,7 +62,7 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
-`vela/domain/chooser.py` (M10, M17: `sport=any`): chi arriva secondo fa rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
+`vela/domain/usecases.py` (M10 per il router del carrello, M17 per i campi strutturati): chi arriva secondo fa rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
 
 ---
 
@@ -405,30 +407,83 @@ motivi di rifiuto che modificano i criteri, fallback Claude Haiku 4.5 solo con c
 
 ---
 
-## M10 — Sync incrementale del catalogo da HofJ
+## M10 — Sync multi-brand del catalogo da HofJ
 
-**Risultato.** Il catalogo in Postgres si aggiorna da solo (al boot se vuoto o vecchio, poi ogni
-6 h), con advisory lock, per lotti, ritmato dal guardiano; `python -m vela.sync` lo forza;
-`fixtures/catalog.json` si rigenera dallo stesso codice.
+**Risultato.** Il catalogo in Postgres contiene tutti i brand configurati (padel = Weebora,
+tennis = Terrarossa; su staging `staging.weebora.com` e `staging.tennis.weebora.com`) e si
+aggiorna da solo: al boot se vuoto o vecchio, poi ogni 6 h, con advisory lock, per lotti,
+ritmato dal guardiano; `python -m vela.sync` lo forza. Se l'utente chiede tennis Vela cerca in
+Terrarossa, se chiede padel in Weebora, con `sport=any` in entrambi. Ogni chiamata del carrello
+e della prenotazione usa il brand del prodotto dell'ordine, anche dopo un riavvio o un retry del
+job. Le fixture, una per (host, brand), si rigenerano dallo stesso codice e servono solo a
+replay e test. Casi d'uso in `docs/usecases/multi-brand.md` (MB1-MB8).
 
 **Scope.**
-- `vela/sync.py`: lista paginata `limit=100`, dettaglio solo per nuovi o `updatedAt` cambiato,
-  filtro padel/tennis non archiviati, scrittura per lotti, advisory lock, scheduler in
-  background, comando manuale, comando di rigenerazione fixture (sostituisce lo script di M1
-  o lo riusa).
+- Config: `HOFJ_BRANDS="padel=weebora.com,tennis=terrarossa.com"` (sport → brand) al posto di
+  `HOFJ_BRAND`. Sport ammessi `padel` e `tennis`, brand distinti, almeno una voce; errori →
+  l'app non parte con un messaggio esplicito. `HOFJ_BRAND` impostata senza `HOFJ_BRANDS` →
+  l'app non parte e dice di migrare. Una sola voce è valida: l'altro sport dà il `no_match`
+  esistente. `render.yaml`, `vela/config.py`, `docs/fixtures.md` aggiornati.
+- `vela/sync.py`: per ogni brand della mappa, lista paginata `limit=100` con `?brand=`,
+  dettaglio solo per nuovi o `updatedAt` cambiato, filtro non archiviati, scrittura per lotti
+  nella stessa tabella `products`, advisory lock unico per tutti i brand, scheduler in
+  background, comando manuale. Archiviazione **per brand**: un prodotto sparito dalla lista di
+  un brand è archiviato solo tra i prodotti di quel brand, e un brand il cui sync fallisce non
+  archivia nulla. Un id già presente con un altro brand ferma il sync di quel brand con un
+  errore esplicito (decisione M10 sulla chiave degli id).
+- `products.brand` (migrazione Alembic `0006`, colonna nullable, nessun'altra tabella cambia):
+  il sync la scrive; lo sport si ricava dal brand tramite la mappa della config; `detect_sport`
+  resta solo come fallback (fixture senza brand, brand non in mappa). Le righe già su Render
+  hanno `brand` NULL finché il primo sync non le riscrive.
+- Carrello: un `HofJHttp` per brand, stessa chiave e stesso host. Nuova porta `HofJRouter`
+  (`client(brand) -> HofJPort`, `get_quota()`); `HofJPort` invariata. `PurchaseJob` e
+  `BookingJob` ricavano il brand da ordine → `product_id` → `products.brand` a ogni esecuzione e
+  usano quel client per tutte le chiamate; con `brand` NULL usano il brand dello sport del
+  prodotto. La quota è per chiave API: una sola, letta da un client qualsiasi. In replay tutti i
+  brand puntano allo stesso `ReplayHofJ`.
+- Live: il sync sostituisce `realign_catalog` e la fixture al boot (decisione M7 superata per il
+  live). Replay e test: una fixture per (host, brand), `select_fixture` diventa la selezione di
+  tutte le fixture dell'host, il replay carica tutti i brand dell'host. Il comando di
+  rigenerazione usa lo stesso codice del sync (sostituisce `scripts/record_catalog.py` o lo
+  riusa). Da registrare: Terrarossa in produzione e `staging.tennis.weebora.com` su staging,
+  chiamate dichiarate prima.
+- `is_trip`: esclude la gift card di qualunque brand, non solo "Weebora".
+- Chooser, MCP e REST non cambiano: il filtro sport basta (`sport=any` = nessun filtro, M17).
 - Tabella `products` completa di RF-28.
 
 **Test di completamento.**
-- Sync con porta finta: nuovi/cambiati/invariati, lotti, interruzione a metà → catalogo
-  coerente; lock (test saltato senza DB); scheduler con orologio finto.
-- Manuale: un sync su Render con chiamate contate; `/health` mostra l'età aggiornata.
+- Sync con porta finta e due brand finti: prodotti di entrambi scritti con il loro `brand` e lo
+  sport ricavato dal brand; nuovi/cambiati/invariati; lotti; interruzione a metà → catalogo
+  coerente; un brand che fallisce non archivia nulla e non tocca l'altro; id duplicato fra
+  brand → errore esplicito; lock (test saltato senza DB); scheduler con orologio finto.
+- Un ordine tennis usa il client Terrarossa in tutte le chiamate del carrello (client finti per
+  brand che registrano le chiamate).
+- Una ricerca con `sport=any` restituisce candidati di entrambi i brand.
+- Un retry del job di booking dopo un riavvio (nuovo processore, stesso DB) usa ancora il brand
+  giusto.
+- Config: formato valido, sport sconosciuto, brand duplicato, `HOFJ_BRAND` senza
+  `HOFJ_BRANDS` → errore all'avvio.
+- Migrazione `0006` applicata anche su SQLite (`tests/test_migrations.py`).
+- MB1-MB8 di `docs/usecases/multi-brand.md` come test dei casi d'uso con repository in memoria.
+- Manuale: un sync su Render con chiamate contate; `/health` mostra l'età aggiornata; da
+  claude.ai una richiesta di tennis riceve una proposta Terrarossa (in `docs/acceptance.md`).
 
-**Copre.** RF-28..31, RF-32 (rigenerazione).
+**Copre.** RF-28..31, RF-32 (una fixture per host e brand), RF-56.
+
+**Taglia.** L (> 4 h): al sync incrementale si aggiungono config, migrazione, router del
+carrello e fixture per brand. **Dipende da** M5 (su `master`). **Ondata** 5, in parallelo con
+M12, M13, M14 e M17 (M10 non tocca `chooser.py`: `sport=any` resta di M17; file comune
+possibile `usecases.py`).
 
 **Prompt.**
-> Leggi docs/spec.md (§4.6, §4.8) e docs/roadmap.md M10. Obiettivo: job di sync
-> incrementale con advisory lock e scheduler, comando manuale, rigenerazione fixture.
-> Dichiara le chiamate prima del sync reale. Test: M10.
+> Leggi docs/spec.md (§4.6, §4.8, RF-56, §6), docs/usecases/multi-brand.md, docs/decisions.md
+> (M7 e 2026-09-26 M10 multi-brand), vela/app.py (build_hofj, realign_catalog),
+> vela/domain/catalog.py, vela/adapters/hofj_http.py, vela/adapters/schema.py,
+> vela/domain/purchase.py, vela/domain/booking.py e docs/roadmap.md M10. Obiettivo: config
+> `HOFJ_BRANDS`, job di sync incrementale multi-brand con advisory lock e scheduler, colonna
+> `products.brand` (migrazione 0006), router del carrello per brand, una fixture per (host,
+> brand) rigenerata dallo stesso codice. Dichiara le chiamate prima di ogni sync o
+> registrazione reale. Test: M10.
 
 ---
 
@@ -540,7 +595,7 @@ personali, verifica che nessun segreto sia nel repo né negli agent-log.
 **Scope.**
 - `ARCHITECTURE.md`: decisioni e compromessi (da `docs/decisions.md`), vincoli del prototipo
   (RF-13), prossimi passi: adapter A2A (agent card, mapping dei task sui 5 casi d'uso, RF-44),
-  email del codice (RF-26), OAuth per REST, multi-brand.
+  email del codice (RF-26), OAuth per REST.
 - `README.md`: variabili, avvio, test, deploy, load test, come collegare Claude ed ElevenLabs.
 - Video 3-5 min: acquisto reale con Claude e con ElevenLabs.
 - Checklist finale dei 7 criteri di §10 in `docs/acceptance.md`.
@@ -633,7 +688,7 @@ sullo sport. Casi d'uso in `docs/usecases/agente-tool.md` (UC1-UC9).
 (contratto aggiornato), RF-52..55.
 
 **Taglia.** M (3-4 h). **Dipende da** M3, M4, M9, M11 (tutte su `master`). **Ondata** 5, in
-parallelo con M10 (unico file comune `chooser.py` per `sport=any`), M12 (se M12 parte prima,
+parallelo con M10 (file comune possibile `usecases.py`; `chooser.py` è solo di M17), M12 (se M12 parte prima,
 il prompt ElevenLabs va riletto dopo il merge di M17: le descrizioni dei tool cambiano), M13,
 M14.
 
@@ -677,7 +732,7 @@ M14.
 | RF-25, RF-26 | M2 (RF-26 prossimi passi: M15) |
 | RF-27 | M2, M5 |
 | RF-28..RF-31 | M10 |
-| RF-32 | M1, M10 |
+| RF-32 | M1, M10 (una fixture per host e brand) |
 | RF-33..RF-35 | M5 |
 | RF-36..RF-38 | M5 |
 | RF-39 | M2, M17 |
@@ -688,6 +743,7 @@ M14.
 | RF-44 | M15 (documentazione), M16 (opzionale) |
 | RF-45..RF-51 | M5 |
 | RF-52..RF-55 | M17 |
+| RF-56 | M10 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5 |
 | RNF-05 | M13 |
@@ -707,5 +763,5 @@ M14.
 | §10.5 | M13 |
 | §10.6 | M2, M3, M4 |
 
-Tutti i 55 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
+Tutti i 56 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
 di §10 hanno almeno una macro task.

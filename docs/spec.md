@@ -4,7 +4,8 @@ Data: 2026-09-25. Stato: bozza da rivedere; RF-43 e RNF-09 aggiornati il 2026-09
 roadmap (`docs/roadmap.md`); §4.10, RF-14, RF-16, RF-17, RF-19, RF-25, RF-27, RF-37, RF-39,
 RF-41, RNF-04, RNF-05, RNF-10, RNF-12, RNF-13 e §10.1 aggiornati il 2026-09-25 per il twist
 (50.000 viaggiatori in dieci minuti). RF-01..04, RF-08, RF-09, RF-39..42 e §4.11 (RF-52..55)
-aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). Origine: `docs/brief.md` e
+aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). RF-28..32, §6, §7 e RF-56
+aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -174,21 +175,35 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 ### 4.6 Catalogo e sincronizzazione
 
 - **RF-28** Vela mantiene in Postgres una copia del catalogo HofJ limitata ai prodotti di
-  padel e tennis non archiviati, con: id, titolo, slug, descrizione breve, categoria,
+  padel e tennis non archiviati, con: id, brand, titolo, slug, descrizione breve, categoria,
   destinazione, venue, hotel di default, prezzo e valuta, `minPax`/`maxPax`,
   `minDate`/`maxDate`, disponibilità, durata, `updatedAt` di HofJ, JSON grezzo del dettaglio,
-  `fetched_at`, `bookable` e `bookable_checked_at`.
+  `fetched_at`, `bookable` e `bookable_checked_at`. Su HofJ ogni brand ha un catalogo separato:
+  la configurazione `HOFJ_BRANDS` associa a ogni sport il suo brand (padel = Weebora, tennis =
+  Terrarossa; su staging `staging.weebora.com` e `staging.tennis.weebora.com`), e tutti i brand
+  finiscono nella stessa tabella. Lo sport di un prodotto si ricava dal suo brand; la ricerca
+  di `padel`/`tennis` nei testi del prodotto resta solo come riserva per un brand fuori dalla
+  mappa. L'id HofJ resta la chiave del prodotto: se lo stesso id arrivasse da due brand, il
+  sync si ferma con un errore esplicito.
 - **RF-29** Solo il job di sincronizzazione chiama `GET /v1/products` e
-  `GET /v1/products/{id}` (locale `it`, brand da configurazione). Il job scorre la lista con
-  `limit=100` e `cursor`, poi richiede il dettaglio solo dei prodotti nuovi o con `updatedAt`
-  cambiato.
+  `GET /v1/products/{id}` (locale `it`), una volta per ogni brand di `HOFJ_BRANDS` con
+  `?brand=<brand>`. Per ogni brand il job scorre la lista con `limit=100` e `cursor`, poi
+  richiede il dettaglio solo dei prodotti nuovi o con `updatedAt` cambiato.
 - **RF-30** Il job gira all'avvio se il catalogo è vuoto o più vecchio di 6 ore, poi ogni
   6 ore. Con più istanze, un advisory lock Postgres garantisce un solo sync alla volta. Un
   comando `python -m vela.sync` lo forza a mano.
 - **RF-31** Il job scrive per lotti: un'interruzione lascia un catalogo parziale ma coerente.
-- **RF-32** Il repo contiene `fixtures/catalog.json`, snapshot delle risposte di catalogo
-  registrate dall'API reale, senza credenziali. Serve alla modalità replay, all'avvio a
-  freddo senza consumare quota e alla demo se la quota è esaurita. Un comando lo rigenera.
+  Un prodotto sparito dalla lista di un brand viene archiviato (mai cancellato) solo tra i
+  prodotti di quel brand; un brand il cui sync fallisce non archivia nulla e non tocca gli
+  altri.
+- **RF-32** Il repo contiene una fixture per ogni coppia (host, brand) (`fixtures/catalog*.json`),
+  snapshot delle risposte di catalogo registrate dall'API reale, senza credenziali. Servono
+  alla modalità replay (che carica tutti i brand dell'host) e ai test; in live il catalogo
+  viene dal sync. Un comando le rigenera con lo stesso codice del sync.
+- **RF-56** Ogni chiamata del carrello (RF-14) e della prenotazione (RF-23) di un ordine parte
+  con il brand del prodotto dell'ordine, ricavato da ordine → prodotto → `brand` a ogni
+  esecuzione del job, così il brand sopravvive a riavvii (RF-27) e retry (RF-24). Un prodotto
+  senza brand registrato usa il brand del suo sport in `HOFJ_BRANDS`.
 
 ### 4.7 Prodotti non prenotabili
 
@@ -391,7 +406,8 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
   mostrano dati dell'ordine.
 - Lingue degli intenti: italiano e inglese. Catalogo HofJ in locale `it`.
 - Dati personali: solo quelli di RF-12.
-- Variabili d'ambiente: `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRAND`, `DATABASE_URL`,
+- Variabili d'ambiente: `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRANDS` (sport → brand,
+  es. `padel=weebora.com,tennis=terrarossa.com`), `DATABASE_URL`,
   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `VELA_API_TOKEN`, `VELA_UPSTREAM_MODE`,
   `ANTHROPIC_API_KEY` (opzionale), `VELA_PUBLIC_URL`.
 - Chiamate esterne a pagamento o con limiti (HofJ, Stripe, Anthropic) vanno dichiarate prima
@@ -402,7 +418,8 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 Voli, transfer, noleggio auto; interfaccia web o app propria; scelta di hotel alternativi o
 attività aggiuntive nell'itinerario; pagamento a rate, promo code, valute diverse da EUR;
 autenticazione dell'utente finale HofJ (`X-End-User-Authorization`) e quindi `GET /v1/trips`;
-cancellazioni e modifiche dopo la prenotazione; multi-tenant o più brand; A2A entro le 24 ore
+cancellazioni e modifiche dopo la prenotazione; multi-tenant (i brand HofJ di padel e tennis
+sono invece in scope, RF-28); A2A entro le 24 ore
 (RF-44).
 
 ## 8. Rischi e verifiche della prima ora
