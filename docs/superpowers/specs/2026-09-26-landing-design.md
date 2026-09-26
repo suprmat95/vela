@@ -45,20 +45,29 @@ landing/
 
 ### Contenuto di `index.html`
 
-1. **Hero**: Vela in una frase ("Dì cosa vuoi: Vela prenota il tuo viaggio di padel o tennis con
-   hotel") e un esempio di intento a parole ("Un weekend di padel a ottobre, in due, al caldo,
-   sotto i 600 euro").
-2. **Come funziona**: tre passi. Esprimi l'intento, Vela propone un solo viaggio, accetti e
-   paghi, ricevi il codice di prenotazione. Sono passi del flusso, non una lista di prodotti.
-3. **Con Claude**: Settings → Connectors → Add custom connector, nome `Vela`, URL MCP con un
-   pulsante "Copia" e una frase d'esempio da scrivere a Claude.
-4. **A voce**: contenitore del widget ElevenLabs. Se non c'è l'agent id, mostra un blocco
-   "In arrivo".
-5. **Al telefono**: numero come link `tel:`. Se non c'è il numero, mostra un blocco "In arrivo".
-6. **Footer**: link al repository pubblico.
+Aspetto e struttura seguono il design fornito dall'utente il 2026-09-26 (file `index_1.html`, non
+versionato). Stile chiaro stile Apple, solo tema chiaro, CSS in `styles.css`.
 
-Nel markup statico l'URL MCP è scritto per esteso e le sezioni voce e telefono sono nello stato
-"In arrivo". Senza JavaScript la pagina resta completa e leggibile.
+1. **Barra di navigazione** fissa: link alle sezioni e pulsante "Inizia" verso "Con Claude".
+2. **Hero**: "Dì cosa vuoi. Vela fa il resto." e una chat d'esempio (intento e proposta).
+3. **Come funziona**: tre card. Esprimi l'intento, Vela propone un solo viaggio, accetti e paghi,
+   ricevi il codice di prenotazione. Sono passi del flusso, non una lista di prodotti.
+4. **Esempi**: quattro conversazioni (coppia, cambio di rotta, gruppo, calendario). Ogni
+   conversazione mostra una proposta alla volta; non è un elenco tra cui scegliere.
+   - Le frasi del viaggiatore sono quelle che il parser di Vela capisce oggi.
+   - Le risposte sono i `say` reali di Vela, accorciati, ottenuti in memoria sulle fixture del
+     2026-09-25 (prodotti 688, 695, 369, 1023, 1044). Prezzi e date possono cambiare.
+   - L'esempio del calendario attribuisce a Claude (con un suo connettore) la lettura e la
+     scrittura del calendario; Vela propone solo il viaggio.
+5. **Con Claude**: Settings → Connectors → Add custom connector, nome
+   `Pacchetti Viaggio di Padel Tennis`, URL MCP in un campo di sola lettura con un pulsante
+   "Copia", e una frase d'esempio da scrivere a Claude.
+6. **A voce** e **Al telefono**: due card. Voce: contenitore del widget ElevenLabs. Telefono:
+   numero come link `tel:`. Senza agent id o numero, la card mostra "In arrivo".
+7. **Codice aperto**: link al repository pubblico. Footer con il copyright.
+
+Nel markup statico l'URL MCP è scritto per esteso, "Copia" è nascosto e le card voce e telefono
+sono nello stato "In arrivo". Senza JavaScript la pagina resta completa e leggibile.
 
 ### `config.js`
 
@@ -75,8 +84,8 @@ valorizzare `elevenLabsAgentId` e `phoneNumber`.
 
 ### `main.js`
 
-- Scrive `mcpUrl` nel testo dell'URL MCP e lo usa per il pulsante "Copia"
-  (`navigator.clipboard.writeText`; se non è disponibile, il pulsante seleziona il testo).
+- Scrive `mcpUrl` nel campo dell'URL MCP e lo usa per il pulsante "Copia"
+  (`navigator.clipboard.writeText`; se non è disponibile, il pulsante seleziona il campo).
 - Se `elevenLabsAgentId` non è vuoto: nasconde "In arrivo", inserisce
   `<elevenlabs-convai agent-id="…">` e aggiunge lo script ufficiale del widget dal CDN di
   ElevenLabs. Se è vuoto, non fa nessuna richiesta esterna.
@@ -119,6 +128,9 @@ custom.
   `staticPublishPath: ./landing` e `landing/**` nel `buildFilter`; il servizio `vela` ignora
   `landing/**`.
 - `.dockerignore` contiene `landing`.
+- Nessun segnaposto del design (`[MAIUSCOLE]`) resta in `index.html`.
+- Il nome del connettore è lo stesso in `index.html` e nel README.
+- I viaggi citati negli esempi esistono nelle fixture con quel nome (id → nome nel test).
 - Guardia "no homepage": `index.html` non contiene `<table>` e `main.js` non contiene `fetch(`
   né `XMLHttpRequest`.
 

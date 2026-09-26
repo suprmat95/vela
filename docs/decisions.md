@@ -646,3 +646,16 @@ Origine: brainstorming di `task/landingpage`. Design in
 | Agent id e numero | Placeholder vuoti in `landing/config.js`; finché sono vuoti le sezioni mostrano "In arrivo" e lo script ElevenLabs non viene caricato. La creazione resta in M12 | M12 non è fatta; attivarli poi costa una riga |
 | Lingua | Solo italiano | Scelta dell'utente |
 | Comandi del servizio statico | `buildCommand: echo "Landing statica, nessun build"` e `staticPublishPath: ./landing` | Non è certo che il Blueprint accetti un `buildCommand` vuoto; `./` segue gli esempi della documentazione Render |
+
+## 2026-09-26 — Landing: design grafico
+
+Origine: design fornito dall'utente (`index_1.html`, non versionato). Spec aggiornata in
+`docs/superpowers/specs/2026-09-26-landing-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Aspetto | Il design dell'utente, portato in `styles.css` e `index.html`; `config.js` e `main.js` restano. Solo tema chiaro, come il design | Scelta dell'utente; la struttura a file resta quella testata |
+| Dati negli esempi | I segnaposto del design ([DESTINAZIONE], [DATE], [PREZZO]) diventano i `say` reali di Vela, accorciati, ottenuti in memoria sulle fixture del 2026-09-25 (prodotti 688, 695, 369, 1023, 1044), senza chiamate esterne. Scartati: dati inventati, testo generico | Scelta dell'utente: tutto ciò che si mostra viene da HofJ. Prezzi e date possono cambiare con il catalogo |
+| Frasi degli esempi | Cambiate il minimo perché il parser di oggi le capisca: "siamo in due" invece di "in due", "novembre" invece di "Pasqua", "Preferisco in Italia/Spagna" invece di "più fresco" e "spostare di una settimana", "per 2 persone" nella frase del connettore; tolto "al caldo" | Con le frasi originali Vela chiedeva il numero di persone, leggeva "più fresco" come Malaga o ignorava il periodo. I limiti del parser restano da trattare in un task a parte |
+| Esempio del calendario | Riscritto: è Claude, con un suo connettore, a leggere e scrivere il calendario; Vela propone il viaggio | Vela non ha una funzione calendario; scelta dell'utente |
+| Nome del connettore | `Pacchetti Viaggio di Padel Tennis` sulla landing e nel README | Scelta dell'utente |
