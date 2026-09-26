@@ -159,3 +159,177 @@ Suite completa: 1 fallimento e 41 errori. Controllo se esistevano già prima del
 Il python di sistema è 3.7. La suite va lanciata nel venv di uv, come dice il README. Il venv si crea dal lockfile esistente, senza dipendenze nuove.
 
 - 🔧 Bash: Create uv venv and run full suite
+
+925 test, tutti OK. Committo e registro l'esito.
+
+- 🔧 Bash: Commit task 1 and record completion
+
+Task 2: script della pagina. Parto dal brief e dal test.
+
+- 🔧 Bash: Start task 2, add failing script tests
+
+I due test falliscono come previsto. Scrivo `main.js` e collego gli script alla pagina.
+
+- 🔧 Bash: Write main.js, add script tags, run tests
+
+I test passano. Ora il controllo manuale nel browser: avvio un server locale sulla cartella della landing.
+
+- 🔧 Bash: Serve the landing locally on port 8080
+
+- 🔧 Skill claude-in-chrome
+
+- 🔧 ToolSearch
+
+- 🔧 mcp__claude-in-chrome__tabs_context_mcp
+
+- 🔧 mcp__claude-in-chrome__tabs_create_mcp
+
+- 🔧 mcp__claude-in-chrome__tabs_context_mcp
+
+- 🔧 Bash: Check headless Chrome and node availability
+
+Faccio i controlli nel browser del Task 2 con Chrome headless, perché l'estensione Chrome non ha risposto.
+
+- 🔧 Bash: Dump DOM of three config variants with headless Chrome
+
+- 🔧 AskUserQuestion
+
+- 🔧 mcp__claude-in-chrome__tabs_context_mcp
+
+- 🔧 ToolSearch
+
+- 🔧 mcp__claude-in-chrome__list_connected_browsers
+
+- 🔧 mcp__claude-in-chrome__navigate
+
+Ho riprovato altre tre volte e non va. Il browser risulta connesso ("Browser 1", macOS, in uso), ma ogni chiamata fallisce con `Tab not found for session ID`: l'estensione non riesce a creare il gruppo di schede di questa sessione.
+
+Non insisto oltre. Il Task 2 è fermo prima del commit: `main.js` è scritto, gli script sono collegati alla pagina e i test passano (11 OK). Il server locale è ancora attivo su http://127.0.0.1:8080.
+
+Come vuoi procedere?
+- **Chiudi e riapri Chrome** oppure la finestra del gruppo Claude, poi dimmi "riprova".
+- **Fai tu il controllo a mano** seguendo lo Step 6 del piano. Io intanto committo il Task 2 e vado avanti con i Task 3 e 4.
+- **Autorizzi Chrome headless** con comandi semplici, un file di config per volta, sempre su copie nello scratchpad.
+- **Salti il controllo.** Lo registro come non fatto e diventa un punto aperto per la revisione finale.
+
+## Utente 16:11
+
+cosa devo controllare?
+
+## Agente 16:11
+
+Sono cinque controlli, circa 5 minuti in tutto. Il server è già attivo: apri **http://127.0.0.1:8080** in Chrome, con DevTools aperti (Cmd+Opt+I) sulla scheda **Network**, e ricarica la pagina.
+
+**1. Stato attuale (config vuota)**
+- Nelle sezioni "A voce" e "Al telefono" vedi il riquadro tratteggiato "In arrivo".
+- In Network non c'è nessuna richiesta a `unpkg.com`: filtra per `unpkg`, deve restare vuoto.
+- Clicchi "Copia": il pulsante diventa "Copiato" per 2 secondi e negli appunti trovi `https://vela-n506.onrender.com/mcp`.
+
+**2. Schermo stretto**
+- In DevTools apri la modalità dispositivo (Cmd+Shift+M) e imposta la larghezza a **320**.
+- Non c'è scroll orizzontale e l'URL MCP va a capo dentro il suo riquadro.
+
+**3. Numero con spazi, agent id di soli spazi.** Non serve modificare `config.js`: incolla questo nella **Console** e premi Invio.
+```js
+window.VELA_LANDING = {mcpUrl: "https://vela-n506.onrender.com/mcp", elevenLabsAgentId: "   ", phoneNumber: "+39 02 1234 5678"};
+document.body.appendChild(Object.assign(document.createElement("script"), {src: "main.js?t=" + Date.now()}));
+```
+- In "Al telefono" compare `+39 02 1234 5678`. Tasto destro sul numero, poi Ispeziona: `href="tel:+390212345678"`, senza spazi.
+- "A voce" resta "In arrivo" e in Network non c'è ancora nessuna richiesta a `unpkg`.
+
+**4. Agent id valorizzato.** Ricarica la pagina e incolla:
+```js
+window.VELA_LANDING = {mcpUrl: "https://vela-n506.onrender.com/mcp", elevenLabsAgentId: 'prova"<x>', phoneNumber: ""};
+document.body.appendChild(Object.assign(document.createElement("script"), {src: "main.js?t=" + Date.now()}));
+```
+- "In arrivo" della voce sparisce.
+- In Network parte la richiesta a `unpkg.com/@elevenlabs/convai-widget-embed`.
+- In Elements c'è `<elevenlabs-convai agent-id="prova&quot;<x>">`: le virgolette e il `<` restano testo dentro l'attributo e non creano HTML.
+- Che il widget dia errore è normale, perché l'agente "prova" non esiste.
+
+**5. Senza JavaScript**
+- DevTools, poi Cmd+Shift+P, scrivi "Disable JavaScript" e ricarica.
+- La pagina è completa: l'URL MCP è visibile, c'è "In arrivo" su voce e telefono e il pulsante "Copia" non compare.
+- Alla fine riattiva JavaScript con Cmd+Shift+P, "Enable JavaScript".
+
+Il `config.js` del repo non va toccato. Dimmi cosa non torna, oppure "tutto ok", e committo il Task 2.
+
+## Utente 16:12
+
+no dimmi come permetterti di controllare solo
+
+## Agente 16:12
+
+Ci sono due strade. Ti consiglio la prima perché non dipende dall'estensione.
+
+**1. Chrome headless (consigliata)**
+Il comando di prima te l'ho mandato in un blocco unico che conteneva anche `rm -rf`, `kill` e un loop, ed è per questo che l'hai negato. Ora lo spezzo in comandi semplici, uno per variante di config:
+- copio `landing/` in una cartella dello scratchpad e cambio solo `config.js` della copia;
+- avvio un server su quella copia;
+- lancio Chrome headless con `--dump-dom` per leggere l'HTML finale dopo `main.js`, e con `--screenshot --window-size=320,900` per vedere la pagina a 320 px (lo screenshot lo apro io).
+
+Tu devi solo **approvare** i comandi quando compaiono. Se non vuoi il prompt a ogni comando, scegli "don't ask again" al primo, oppure aggiungi a `.claude/settings.local.json`:
+```json
+{ "permissions": { "allow": ["Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless:*)"] } }
+```
+Con headless non vedo la scheda Network. Vedo però se il tag `<script src="https://unpkg.com/...">` è stato aggiunto alla pagina, e per il nostro controllo è equivalente.
+
+**2. Riparare l'estensione Claude in Chrome**
+L'errore `Tab not found for session ID` di solito vuol dire che il collegamento dell'estensione con questa sessione si è perso. In ordine:
+1. In Chrome apri `chrome://extensions`, trova Claude e clicca il tasto ricarica (↻).
+2. Se non basta, chiudi del tutto Chrome (Cmd+Q) e riaprilo.
+3. In Claude Code, `/chrome` dovrebbe mostrare lo stato della connessione e permettere di ricollegarla.
+
+Poi scrivimi "riprova".
+
+Quale scegli? Se dici "headless", parto subito con il primo comando.
+
+## Utente 16:12
+
+1
+
+## Agente 16:12
+
+Procedo con headless. Primo passo: tre copie della landing nello scratchpad, ognuna con una config diversa.
+
+- 🔧 Bash: Copy landing into two scratchpad variants with test config
+
+- 🔧 Bash: Serve the phone variant on port 8092
+
+- 🔧 Bash: Serve the voice variant on port 8093
+
+Config vuota (quella del repo, porta 8080): leggo l'HTML finale.
+
+- 🔧 Bash: Dump DOM of the empty-config landing
+
+Config vuota: "Copia" visibile, "In arrivo" su voce e telefono, nessuno script unpkg. Ora la variante con il numero.
+
+- 🔧 Bash: Dump DOM of the phone variant
+
+Numero corretto, voce ancora "In arrivo" perché l'agent id è di soli spazi. Ora la variante con l'agent id.
+
+- 🔧 Bash: Dump DOM of the voice variant
+
+Agent id finito nell'attributo come testo, nessun elemento `<x>`, script caricato. Ora lo screenshot a 320 px.
+
+- 🔧 Bash: Screenshot the landing at 320px width
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/m320.png
+
+- 🔧 Bash: Screenshot the landing inside a 320px iframe
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/f320.png
+
+A 320 px è tutto a posto: niente scroll orizzontale e l'URL MCP va a capo. Il taglio di prima era della finestra headless, non della pagina. Ultimo controllo: pagina senza JavaScript.
+
+- 🔧 Bash: Dump DOM with JavaScript disabled
+
+- 🔧 Bash: Inspect raw no-JS DOM output
+
+Con JavaScript disattivato `--dump-dom` non restituisce nulla, perché per leggere la pagina usa JavaScript anche lui. Faccio uno screenshot al suo posto.
+
+- 🔧 Bash: Screenshot the landing with JavaScript disabled
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/nojs.png
+
+- 🔧 Bash: Commit task 2 and record completion

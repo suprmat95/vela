@@ -90,5 +90,18 @@ class StylesTest(unittest.TestCase):
         self.assertIn("[hidden] { display: none !important; }", read("landing", "styles.css"))
 
 
+class ScriptsTest(unittest.TestCase):
+    def test_config_loads_before_main(self):
+        srcs = [attrs["src"] for tag, attrs in parse_page().tags
+                if tag == "script" and "src" in attrs]
+        self.assertEqual(srcs, ["config.js", "main.js"])
+
+    def test_main_makes_no_requests_but_the_widget(self):
+        js = read("landing", "main.js")
+        for forbidden in ("fetch(", "XMLHttpRequest", "innerHTML", "document.write"):
+            self.assertNotIn(forbidden, js)
+        self.assertIn(WIDGET_SRC, js)
+
+
 if __name__ == "__main__":
     unittest.main()
