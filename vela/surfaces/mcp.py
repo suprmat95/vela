@@ -37,7 +37,8 @@ INSTRUCTIONS = (
     "returns an intent_id. Once a proposal exists, every change the user asks for (place, dates, "
     "sport, budget, people, somewhere cooler or warmer) goes through reject_proposal on that "
     "proposal, never through a new create_intent. Accepting a proposal puts the order in a "
-    "queue: the payment link comes later from get_order_status."
+    "queue: Vela texts the payment link and later the booking confirmation to the traveler's "
+    "phone, so do not poll get_order_status: call it only when the user asks."
 )
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
@@ -77,12 +78,14 @@ DESCRIPTIONS = {
         "first and last name of every other participant. If the result has `missing`, ask the "
         "user only for those details and call accept_proposal again with everything you have: "
         "calling it again never creates a second order. On success the answer is a wait, not a "
-        "link: the order is `queued` with `order_id`, `position` and `wait_seconds`. Get the "
-        "payment link with get_order_status after the stated wait, or whenever the user asks."
+        "link: the order is `queued` with `order_id`, `position` and `wait_seconds`. Vela texts "
+        "the payment link to the traveler's phone when it is ready and texts again when the "
+        "booking is confirmed; call get_order_status only when the user asks."
         + _VOICE),
     "get_order_status": (
-        "Check an order after the wait stated by accept_proposal, when the user says they paid or "
-        "asks how it is going. Returns `status`: queued (with `position` and `wait_seconds`), "
+        "Check an order only when the user asks how it is going or says they paid: Vela already "
+        "texts the payment link and the confirmation. Returns `status`: queued (with `position` "
+        "and `wait_seconds`), "
         "awaiting_payment (with `payment_url` and the real `total`: show the link in the chat, "
         "never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
         "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "

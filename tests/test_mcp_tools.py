@@ -166,6 +166,12 @@ class DescriptionsM5Test(unittest.TestCase):
     def test_instructions_mention_the_queue(self):
         self.assertIn("queue", INSTRUCTIONS)
 
+    def test_instructions_say_vela_texts_the_link(self):
+        self.assertIn("texts the payment link", INSTRUCTIONS)
+        self.assertNotIn("comes later from get_order_status", INSTRUCTIONS)
+        self.assertIn("only when the user asks", DESCRIPTIONS["get_order_status"])
+        self.assertIn("texts", DESCRIPTIONS["accept_proposal"])
+
 
 class ErrorsTest(McpCase):
     async def test_unknown_ids_read_a_sentence(self):

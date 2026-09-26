@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable, Optional, Tuple, Union
 
-from vela.domain import geo, say
+from vela.domain import geo, phone, say
 from vela.domain.chooser import Choice, choose
 from vela.domain.intent import parse_intent
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
@@ -201,7 +201,7 @@ class Vela:
                                     enqueued_at, now))
         position, wait = self._queue_position(order.id)
         return OrderQueued(order.id, OrderStatus.QUEUED, position, wait,
-                           say.say_queued(wait_minutes(wait or 0), lang))
+                           say.say_queued(wait_minutes(wait or 0), lang, phone.tail(order.traveler.phone)))
 
     def _queue_position(self, order_id: str) -> Tuple[Optional[int], Optional[int]]:
         """RF-48: posizione tra gli acquisti in attesa e attesa stimata in secondi."""
@@ -219,11 +219,12 @@ class Vela:
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
         status = order.status
+        tail = phone.tail(order.traveler.phone)
         if status == OrderStatus.QUEUED:
             position, wait = self._queue_position(order.id)
             minutes = None if wait is None else wait_minutes(wait)
             return OrderStatusResponse(order.id, status, say.say_status(status, None, None, lang,
-                                                                        minutes=minutes),
+                                                                        minutes=minutes, phone_tail=tail),
                                        position=position, wait_seconds=wait)
         if status == OrderStatus.REPLACED and order.replacement_proposal_id:
             proposal = self._made(self.repos.proposals.get(order.replacement_proposal_id), lang=lang)
@@ -238,7 +239,7 @@ class Vela:
         return OrderStatusResponse(
             order.id, status,
             say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
-                           price_from_total=estimate),
+                           price_from_total=estimate, phone_tail=tail),
             total=order.total, currency=order.currency if order.total is not None else None,
             price_from_total=estimate if order.total is not None else None, total_differs=differs,
             payment_url=order.payment_url if payable else None, booking_code=order.booking_code,

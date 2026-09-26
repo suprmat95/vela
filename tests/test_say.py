@@ -323,3 +323,38 @@ class AgentToolSayTest(unittest.TestCase):
                     s = say.say_no_match(criterion, Criteria(language=lang)).lower()
                     self.assertNotIn("riformul", s)
                     self.assertNotIn("rephras", s)
+
+
+class SmsPhrasesTest(unittest.TestCase):
+    def test_queued_announces_both_sms(self):
+        self.assertEqual(say.say_queued(1, phone_tail="4567"),
+                         "Ti ho messo in coda: tra circa un minuto il link di pagamento sarà pronto e "
+                         "te lo mando per SMS al numero che finisce con 4567. Ti scrivo di nuovo "
+                         "quando la prenotazione è confermata.")
+        self.assertEqual(say.say_queued(12, "en", "4567"),
+                         "You're in the queue: the payment link will be ready in about 12 minutes and "
+                         "I'll text it to the number ending in 4567. I'll text you again when the "
+                         "booking is confirmed.")
+
+    def test_queued_without_valid_phone_is_unchanged(self):
+        self.assertIn("Chiedimi a che punto è", say.say_queued(1))
+
+    def test_awaiting_payment_mentions_the_sms(self):
+        s = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, "it", Decimal("700"),
+                           phone_tail="4567")
+        self.assertEqual(s, "L'ordine è in attesa del pagamento di 700 euro: usa il link che ti ho "
+                            "mandato, anche per SMS al numero che finisce con 4567.")
+        en = say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, "en", Decimal("700"),
+                            phone_tail="4567")
+        self.assertEqual(en, "The order is waiting for payment of 700 euros: use the link I sent "
+                             "you, also by text to the number ending in 4567.")
+
+    def test_queued_status_passes_the_tail(self):
+        s = say.say_status(OrderStatus.QUEUED, None, None, "it", minutes=3, phone_tail="4567")
+        self.assertIn("finisce con 4567", s)
+
+    def test_sms_phrases_have_no_url(self):
+        for text in (say.say_queued(5, "it", "4567"), say.say_queued(5, "en", "4567"),
+                     say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, "it", Decimal("1"),
+                                    phone_tail="4567")):
+            self.assertNotIn("http", text)

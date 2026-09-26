@@ -80,5 +80,22 @@ class SmsFlowTest(unittest.TestCase):
         self.assertEqual(f.sms.sent, [])
 
 
+class AgentPhraseTest(unittest.TestCase):
+    def test_accept_announces_the_sms_with_the_last_digits(self):
+        queued = Flow().accept()
+        self.assertIn("SMS al numero che finisce con 4567", queued.say)
+
+    def test_status_while_awaiting_payment_mentions_the_sms(self):
+        f = Flow()
+        order_id = f.accept().order_id
+        f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        self.assertIn("anche per SMS", f.vela.get_order_status(order_id).say)
+
+    def test_invalid_phone_keeps_todays_phrase(self):
+        f = Flow(TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000",
+                                 participants=(Participant("Bo", "Bi"),)))
+        self.assertNotIn("SMS", f.accept().say)
+
+
 if __name__ == "__main__":
     unittest.main()

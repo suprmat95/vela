@@ -932,3 +932,89 @@ None.
 - 🔧 Agent: Implement Task 7: Twilio configuration
 
 Task 6 (adapter Twilio) approvato. In corso il Task 7: configurazione, `render.yaml` e README.
+
+## Utente 17:11
+
+<task-notification>
+<task-id>af1bcd82de78d3d9b</task-id>
+<tool-use-id>toolu_01BbFwkQmdSZuWouhztcugMv</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/af1bcd82de78d3d9b.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 7: Twilio configuration" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**DONE**
+
+**Commit**: 5318648 - "Read the Twilio variables and choose real or fake SMS at startup"
+
+**Tests**: 962 tests passing (33 new/updated + 929 existing), 0 failures
+
+**Implementation**: Added `twilio_account_sid`, `twilio_auth_token`, `twilio_from` to Settings; implemented `build_notifier()` that returns `TwilioSms` when all three vars are set, `FakeSms` when none are set, or raises RuntimeError on partial configuration; updated `build_worker()` to use builder; documented in render.yaml and README.md; created 4 new test cases covering all scenarios.
+
+**Concerns**: None
+
+**Report**: `/Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-7-report.md`</result>
+<usage><subagent_tokens>69981</subagent_tokens><tool_uses>28</tool_uses><duration_ms>188573</duration_ms></usage>
+</task-notification>
+
+## Agente 17:11
+
+- 🔧 Bash: Build Task 7 review package
+
+- 🔧 Agent: Review Task 7 (spec + quality)
+
+Revisione del Task 7 in corso.
+
+## Utente 17:13
+
+<task-notification>
+<task-id>adbeed2bcf87f69a1</task-id>
+<tool-use-id>toolu_01F7dRwU5BA11D7UX9G6otC2</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/adbeed2bcf87f69a1.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 7 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Only the one call site in `build_notifier` itself, confirming `build_worker`'s old hardcoded `FakeSms()` was fully replaced and no other production code path bypasses the new logic.
+
+### Spec Compliance
+- ✅ `Settings` gains `twilio_account_sid`, `twilio_auth_token`, `twilio_from` (all `Optional[str]`), read in `from_env` via `env.get(...)` only — `vela/config.py:67-69,100-102`. No file is opened; `from_env` only reads the passed/`os.environ` mapping.
+- ✅ `build_notifier` in `vela/app.py:73-83` implements the exact three-way rule: all three set → `TwilioSms(sid, token, from_)`; none set → `FakeSms()`; some set → `RuntimeError("SMS Twilio: mancano %s" % ...)` naming only variable *names*, never values (verified against `TwilioSms.__init__(account_sid, auth_token, from_number, ...)` signature in `vela/adapters/sms_twilio.py`, which matches positionally).
+- ✅ Independent of `VELA_UPSTREAM_MODE`: `build_notifier` never reads `settings.vela_upstream_mode`; covered by `tests/test_notifier_config.py:19-20` (`test_twilio_is_independent_from_upstream_mode`).
+- ✅ `build_worker` now calls `notifier or build_notifier(settings)` (`vela/app.py:152`), replacing the old hardcoded `FakeSms()`; grep confirms this is the only remaining `FakeSms()` call site in production code.
+- ✅ `render.yaml` adds all three keys with `sync: false` (`render.yaml:32-37`).
+- ✅ No secrets read/printed/logged: `RuntimeError` message uses only the missing variable *names* from the `TWILIO_VARS` tuple, never attribute values; test `test_partial_configuration_blocks_startup_naming_the_missing` explicitly asserts the secret value `"token-segreto"` is absent from the exception text.
+- ✅ No new dependency: `TwilioSms` (using `httpx`, already a dependency) was added in the prior, already-merged Task 6 commit; this diff only imports it.
+- ✅ Tests match the brief's prescribed additions verbatim (`tests/test_config.py`, new `tests/test_notifier_config.py`, `tests/test_render_yaml.py`), and exercise real behavior (`isinstance` checks against real `TwilioSms`/`FakeSms` classes, real `RuntimeError` content), not mocks.
+- ⚠️ Cannot verify from diff alone: full-suite pass (962 tests OK) is only claimed in the report; I did not rerun it (per instructions, only for a specific doubt, and I found none warranting a rerun).
+- Note (not a defect): README's new `TWILIO_ACCOUNT_SID` row references `docs/sms.md`, which doesn't exist yet — confirmed via the plan (`docs/plans/2026-09-26-sms-twilio.md:1607`) that its creation is explicitly a later task in this same SDD sequence (Task 9 per `task-7-brief.md:97-98`'s own comment about §6). This is plan-mandated sequencing, not a gap in this task.
+
+### Strengths
+- Exact, disciplined adherence to the brief's specified code, both production and tests — no scope creep, no extra abstractions.
+- Symmetric design with the existing `build_payments`/`STRIPE_SECRET_KEY` pattern, keeping the codebase's fail-fast-on-partial-config idiom consistent.
+- Error message correctly built from names only, never secret values, matching the security constraint precisely.
+- `docs/decisions.md`'s pre-existing "Mittente" row (design phase, dated 2026-09-26) already documents this exact three-vars-or-none/partial-blocks rule, so no new decision entry was needed for this task.
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- `tests/test_notifier_config.py` only checks that the missing-var error names `TWILIO_FROM` when the other two are set; it doesn't exercise the other two "missing one" permutations (e.g., only `TWILIO_FROM` present) to confirm the joined-name ordering/format holds generally. Low risk since the implementation is a simple list comprehension over a fixed tuple.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The diff implements every step of the brief exactly, satisfies all binding spec constraints (three-way Twilio/Fake/error logic, upstream-mode independence, `sync: false`, no secret exposure, no file I/O, no new dependencies), and its tests exercise real class instances and real exception content rather than mocks.</result>
+<usage><subagent_tokens>71743</subagent_tokens><tool_uses>14</tool_uses><duration_ms>102067</duration_ms></usage>
+</task-notification>
+
+## Agente 17:13
+
+- 🔧 Bash: Record Task 7 completion and extract Task 8 brief
+
+- 🔧 Agent: Implement Task 8: agent phrases and MCP
+
+Task 7 (configurazione Twilio) approvato. In corso il Task 8: frasi dell'agente e istruzioni MCP.
