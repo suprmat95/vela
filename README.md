@@ -28,15 +28,27 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
-A ogni avvio l'app riallinea la tabella `products` alla fixture dell'ambiente
-(`fixtures/catalog.json`, 110 prodotti, in replay): se i prodotti attivi sono diversi carica la
-fixture e archivia gli altri, senza cancellarli; se sono gli stessi non tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
+In replay, a ogni avvio l'app riallinea la tabella `products` alle fixture dell'host di
+produzione (`fixtures/catalog*.json`, una per brand, `docs/fixtures.md`): se i prodotti attivi
+sono diversi carica le fixture e archivia gli altri, senza cancellarli; se sono gli stessi non
+tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
 prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
 
 `VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
-`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo è la
-fixture `fixtures/catalog*.json` registrata su `HOFJ_BASE_URL` (senza, l'app non parte), e le
-chiamate del carrello usano il suo locale; resta così finché non c'è il sync (M10).
+`HOFJ_BRANDS` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo viene dal
+sync multi-brand (M10): al boot, dopo la quota, parte un thread che sincronizza subito se il
+catalogo è vuoto o più vecchio di 6 ore e poi ogni 6 ore, un'istanza alla volta (advisory lock
+Postgres). Ogni brand di `HOFJ_BRANDS` ha il suo client HofJ; carrello e prenotazione usano il
+brand del prodotto dell'ordine. Il locale delle chiamate è quello delle fixture registrate su
+`HOFJ_BASE_URL` (senza fixture per l'host l'app non parte).
+
+Sync a mano (stampa prima le chiamate previste; `--dry-run` si ferma lì):
+
+```bash
+uv run python -m vela.sync --dry-run      # piano, nessuna chiamata
+uv run python -m vela.sync                # un giro su tutti i brand, nel DB di DATABASE_URL
+uv run python -m vela.sync --record --sport tennis   # rigenera una fixture (docs/fixtures.md)
+```
 
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
@@ -156,12 +168,13 @@ serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri rice
 
 ```
 vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2); quota, job d'acquisto, prenotazione e verifica del pagamento, processore (M5)
-vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5)
-vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6)
+vela/sync.py    sync multi-brand del catalogo, scheduler e comando `python -m vela.sync` (M10); vela/fixtures.py registra le fixture
+vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5); HofJRouter, CatalogSource (M10)
+vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6); router per brand, catalogo da fixture (M10)
 vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), checkout_pages.py (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
-fixtures/       catalogo registrato per la modalità replay (M1)
+fixtures/       catalogo registrato per replay e test, una fixture per host e brand (M1, M10)
 loadtest/       Locust (M13)
 tests/          python3 -m unittest discover -s tests
 docs/           brief, spec, roadmap, decisioni, piani

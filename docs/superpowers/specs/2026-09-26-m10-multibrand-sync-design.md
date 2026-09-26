@@ -22,7 +22,7 @@ roadmap sono verdi; nessun file di M17 toccato.
   classe `SYNC` e cede il passo agli acquisti in attesa.
 - Nessuna chiamata HofJ nei test automatici. Le chiamate reali si dichiarano prima e partono
   solo dopo conferma.
-- Python 3.7+ compatibile come il resto del codice; nessuna dipendenza nuova.
+- Python 3.12 come il resto del codice (`uv run`); nessuna dipendenza nuova.
 
 ## Componenti
 
@@ -48,9 +48,8 @@ roadmap sono verdi; nessun file di M17 toccato.
   - `archive_missing(keep_ids, brand=None) -> int`: con `brand` archivia solo i prodotti attivi
     di quel brand non in `keep_ids`; senza `brand` si comporta come oggi (usato solo dal
     replay).
-  - `brands_of(ids) -> Dict[id, Optional[brand]]` e `updated_at_of(ids) -> Dict[id,
-    hofj_updated_at]` per il confronto incrementale, `set_brand(ids, brand, sport)` per le righe
-    con `brand` NULL (nomi finali nel piano).
+  - `sync_state(ids) -> Dict[id, SyncState(brand, updated_at, archived)]` per il confronto
+    incrementale, `mark_seen(ids, brand, sport, seen_at)` per i prodotti invariati.
 - Le righe già su Render restano con `brand` NULL finché il primo sync non le riscrive.
 
 ### Porta di lettura del catalogo (`vela/ports/catalog.py`)
@@ -78,14 +77,16 @@ Per ogni `(sport, brand)` della mappa, in ordine:
 2. Per ogni voce non archiviata: se l'id è già in `products` con un brand diverso (non NULL) →
    `BrandConflict`, il brand si ferma. Se è nuovo o ha `updatedAt` diverso da
    `hofj_updated_at` → dettaglio; altrimenti nessuna chiamata.
-   - Riga con `brand` NULL e `updatedAt` invariato: nessun dettaglio, il repository scrive solo
-     `brand` e `sport` dalla mappa (`set_brand(ids, brand, sport)`), una volta sola al primo sync
-     dopo la migrazione.
+   - Prodotto invariato (anche con `brand` NULL): nessun dettaglio, il repository scrive
+     `brand`, `sport` e `fetched_at` (`mark_seen(ids, brand, sport, seen_at)`).
+   - Prodotto archiviato nel DB e di nuovo attivo in lista: dettaglio anche a `updatedAt`
+     invariato.
 3. `Product` costruito con `product_from_entry` (esistente) più `brand` e `sport` = sport della
    mappa (`detect_sport` resta come riserva solo per le fixture senza brand).
 4. Scrittura per lotti di `batch_size` con `upsert_many`: ogni lotto è una transazione, quindi
    un'interruzione lascia un catalogo parziale ma coerente.
-5. A lista completata senza errori: `archive_missing(ids_visti, brand)`. Un brand con errori non
+5. A lista completata senza errori: `archive_missing(ids_visti, brand)`. Una lista senza
+   prodotti attivi è un errore del brand e non archivia nulla. Un brand con errori non
    archivia nulla e non tocca gli altri brand.
 
 Quota: prima di ogni chiamata `repos.quota.acquire(QuotaClass.SYNC, 1, now,
@@ -106,12 +107,12 @@ bootstrap in live. Al boot esegue subito se `products.count() == 0` o
 e il thread continua.
 
 Comando: `python -m vela.sync` esegue un giro in live (stessa config dell'app) e stampa il
-report. `python -m vela.sync --record --out-dir fixtures [--brand-sport tennis]` registra le
-fixture: stesso ciclo con un sink "fixture" al posto del repository (nessun confronto
-incrementale, tutti i dettagli), scrive un file per brand. Prima di partire stampa il numero di
-chiamate previsto (1 quota + pagine stimate + dettagli dei non archiviati dopo la lista) e con
-`--dry-run` si ferma lì. `scripts/record_catalog.py` viene rimosso; `strip_media` e la struttura
-della fixture passano in `vela/fixtures.py`.
+report. `python -m vela.sync --record [--sport tennis] [--out-dir fixtures]` registra le fixture: stesso
+`CatalogSync` su repository in memoria (quindi tutti i dettagli), con la quota allineata prima a
+`/v1/quota`; scrive un file per brand, tutto o niente. Prima di partire stampa il piano (stimato
+dalle fixture dell'host, se ci sono) e con `--dry-run` si ferma lì; alla fine stampa le chiamate
+fatte. `scripts/record_catalog.py` viene rimosso; `strip_media` e `project_detail` passano in
+`vela/domain/catalog.py`, `write_catalog` e `add_trap` in `vela/fixtures.py`.
 
 ### Router del carrello
 
@@ -119,16 +120,16 @@ della fixture passano in `vela/fixtures.py`.
   ```python
   class HofJRouter(Protocol):
       def client(self, brand: str) -> HofJPort: ...
+      def client_for(self, product: Optional[Product]) -> HofJPort: ...
       def get_quota(self) -> QuotaSnapshot: ...
   ```
 - `vela/adapters/hofj_router.py`: `BrandRouter(clients: Dict[brand, HofJPort], sport_brands)`;
-  `client` con brand sconosciuto → `ConfigError`. In live un `HofJHttp` per brand (stessa chiave,
-  stesso host, locale dell'host); in replay tutti i brand → lo stesso `ReplayHofJ`.
-- `resolve_brand(repos, sport_brands, product_id) -> str` in `vela/domain/brands.py`:
-  `products.brand`, oppure (NULL) il brand dello sport del prodotto; nessuno dei due → `ConfigError`.
-- `PurchaseJob` e `BookingJob` ricevono il router. A ogni esecuzione rileggono l'ordine,
-  risolvono il brand dal prodotto e usano `router.client(brand)` per tutte le chiamate del
-  passo. Nessun brand memorizzato nel job: dopo un riavvio vale il DB.
+  `client` con brand sconosciuto → `ConfigError`; `client_for` usa `product.brand`, oppure (NULL)
+  il brand dello sport del prodotto, e nessuno dei due → `ConfigError`. In live un `HofJHttp` per
+  brand (stessa chiave, stesso host, locale dell'host); in replay e nei test
+  `SingleClientRouter`, un solo client per tutti i brand.
+- `PurchaseJob` e `BookingJob` ricevono il router. A ogni esecuzione rileggono l'ordine e il
+  prodotto e usano `router.client_for(product)` per tutte le chiamate del passo. Nessun brand memorizzato nel job: dopo un riavvio vale il DB.
 - `JobProcessor.refresh_quota` usa `router.get_quota()`.
 - `Vela` riceve il router nell'argomento `hofj` (l'attributo è solo memorizzato e passato ai
   job). L'annotazione `HofJPort` in `usecases.py:43` resta com'è per non toccare il file di M17;
@@ -136,11 +137,11 @@ della fixture passano in `vela/fixtures.py`.
 
 ### Fixture
 
-- Nomi: `catalog-prod-padel.json`, `catalog-prod-tennis.json`, `catalog-staging-padel.json`,
-  `catalog-staging-tennis.json`. Metadati: `base_url`, `locale`, `brand`, `sport`,
-  `recorded_at`.
-- Le due padel esistenti si adattano offline: rinomina e aggiunta di `brand` (`weebora.com` in
-  produzione, dove oggi è `null`) e `sport`. Nessuna chiamata.
+- Nomi: `catalog.json` e `catalog-staging.json` (padel, esistenti), `catalog-tennis.json` e
+  `catalog-staging-tennis.json` (nuove); vedi `docs/decisions.md`, "M10: esecuzione".
+  Metadati: `base_url`, `locale`, `brand`, `sport`, `recorded_at`.
+- Le due padel esistenti si adattano offline: aggiunta di `brand` (`weebora.com` in
+  produzione, dove era `null`) e `sport`. Nessuna chiamata.
 - `select_fixtures(dir, base_url) -> List[path]` sostituisce `select_fixture`; errore esplicito
   se nessuna. Due fixture dello stesso host con lo stesso brand → errore.
 - `load_fixture` assegna `brand` e `sport` dai metadati; senza metadato `sport` usa

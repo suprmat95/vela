@@ -608,3 +608,22 @@ Origine: brainstorming di M10. Design in
 | Righe con `brand` NULL | Al primo sync, se `updatedAt` è invariato si scrivono solo `brand` e sport, senza dettaglio | Circa 77 chiamate in meno sul primo sync in produzione |
 | Metadati delle fixture | Ogni fixture porta `brand` e `sport`; il replay non ha bisogno di `HOFJ_BRANDS` | Il replay resta senza configurazione HofJ |
 | Annotazione in `usecases.py` | `Vela` riceve il router nell'argomento `hofj`; l'annotazione `HofJPort` resta fino al merge di M17 | Non toccare i file di M17; l'attributo è solo passato ai job |
+
+## 2026-09-26 — M10: esecuzione
+
+Decisioni prese durante l'implementazione; il design aggiornato è in
+`docs/superpowers/specs/2026-09-26-m10-multibrand-sync-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Nomi delle fixture | Restano `catalog.json` e `catalog-staging.json` (padel); le nuove sono `catalog-tennis.json` e `catalog-staging-tennis.json` (`vela.fixtures.fixture_name`) | La rinomina `catalog-<ambiente>-<sport>.json` prevista nel design avrebbe toccato geo, chooser, loadtest e molti test senza benefici |
+| Brand di `catalog.json` | `weebora.com`, aggiunto a mano con `sport: padel` | Registrata senza `?brand=` (brand `null`): il default del server è Weebora. Nessun prodotto cambia sport |
+| Prodotti invariati | Il sync scrive `brand`, `sport` e `fetched_at` anche sui prodotti invariati (`mark_seen`), senza dettaglio | Senza `fetched_at` aggiornato `/health` mostrerebbe un'età vecchia e lo scheduler rifarebbe il sync a ogni avvio; copre anche le righe pre-M10 con brand NULL |
+| Prodotto ricomparso | Un prodotto archiviato nel DB che torna attivo nella lista si riscarica anche con `updatedAt` invariato (`sync_state` riporta `archived`) | Altrimenti resterebbe archiviato per sempre |
+| Lista vuota | Un brand senza prodotti attivi è un errore del brand: niente archiviazione | Una risposta vuota per errore archivierebbe tutto il catalogo del brand |
+| Lotti | 25 prodotti per scrittura; un errore a metà scrive il lotto parziale già scaricato | La spec non fissa il numero; ogni lotto è una transazione coerente |
+| Router | `HofJRouter` ha anche `client_for(product)` (brand del prodotto, o dello sport se NULL); `SingleClientRouter` per replay e test | La regola del brand NULL sta in un posto solo; i test esistenti con un client finto restano validi |
+| Scheduler | Thread daemon per istanza; al boot sincronizza se il catalogo è vuoto o ha più di 6 h, poi ogni 6 h; dopo un giro fallito o saltato riprova dopo 15 minuti | Con l'advisory lock gira una sola istanza; il ritardo breve evita di restare 6 h senza catalogo dopo un errore |
+| Locale in live | Resta quello delle fixture registrate sull'host (`it` in produzione, `en` su staging) | L'elenco delle variabili di §6 resta chiuso; stesso comportamento di M7 |
+| Script di registrazione | `scripts/record_catalog.py` e i suoi test rimossi; `add_trap` (criterio 4) passa in `vela/fixtures.py` con i test | Un solo codice per sync e fixture (RF-32) senza perdere la trappola |
+| Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |
