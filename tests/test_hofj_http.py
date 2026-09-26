@@ -13,7 +13,7 @@ import httpx
 from support import make_product
 from vela.adapters.hofj_http import HofJHttp
 from vela.ports.hofj import (ConfigError, Customer, Itinerary, Pax, PaymentProof, ProductError,
-                             QuotaError, QuotaSnapshot, UpstreamError)
+                             QuotaError, QuotaSnapshot, UpstreamError, UpstreamTimeout)
 
 KEY = "sk-segreta-di-prova"
 CUSTOMER = Customer("Mario", "Rossi", "test@example.com", "+390200000000", "Via Roma 1", "20121",
@@ -148,16 +148,23 @@ class RequestShapeTest(unittest.TestCase):
         hofj.create_itinerary(make_product(1), date(2026, 12, 8), 2, 1, "EUR")
         self.assertEqual(rec.requests[0].url.params["locale"], "en")
 
-    def test_timeout_is_fifteen_seconds(self):
+    def test_timeout_is_twenty_seconds(self):
+        """M18: più dei 15 s di HofJ verso il brand, così riceviamo la sua risposta."""
         hofj, _ = adapter()
-        self.assertEqual(hofj.client.timeout.read, 15.0)
+        self.assertEqual(hofj.client.timeout.read, 20.0)
 
 
 class ErrorMappingTest(unittest.TestCase):
-    def test_timeout_is_upstream_error(self):
+    def test_timeout_is_upstream_timeout(self):
         hofj, _ = adapter(httpx.ReadTimeout("scaduto"))
-        with self.assertRaises(UpstreamError):
+        with self.assertRaises(UpstreamTimeout):
             hofj.set_customer("it1", CUSTOMER)
+
+    def test_connection_error_is_not_a_timeout(self):
+        hofj, _ = adapter(httpx.ConnectError("rifiutata"))
+        with self.assertRaises(UpstreamError) as ctx:
+            hofj.set_customer("it1", CUSTOMER)
+        self.assertNotIsInstance(ctx.exception, UpstreamTimeout)
 
     def test_connection_error_is_upstream_error(self):
         hofj, _ = adapter(httpx.ConnectError("rifiutata"))
@@ -203,9 +210,9 @@ class ErrorMappingTest(unittest.TestCase):
             with self.subTest(status), self.assertRaises(ProductError):
                 hofj.create_itinerary(make_product(1), date(2026, 12, 8), 2, 1, "EUR")
 
-    def test_502_upstream_timeout_is_upstream_error(self):
+    def test_502_upstream_timeout_is_upstream_timeout(self):
         hofj, _ = adapter((502, problem(502, "upstream timeout")))
-        with self.assertRaises(UpstreamError) as ctx:
+        with self.assertRaises(UpstreamTimeout) as ctx:
             hofj.create_itinerary(make_product(1), date(2026, 12, 8), 2, 1, "EUR")
         self.assertNotIsInstance(ctx.exception, ProductError)
 

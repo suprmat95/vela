@@ -255,7 +255,8 @@ def database_repositories(settings: Settings):
     from vela.adapters.db import make_engine
     from vela.adapters.repo_postgres import PostgresRepositories
     return PostgresRepositories(make_engine(settings.database_url), quota_margin=settings.quota_margin,
-                                booking_reserve=settings.booking_reserve)
+                                booking_reserve=settings.booking_reserve,
+                                quota_burst=settings.quota_burst, quota_floor=settings.quota_floor)
 
 
 def _host_fixtures(base_url: str) -> Dict[str, str]:
@@ -347,7 +348,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     repos = database_repositories(settings)
     if repos.quota.acquire(QuotaClass.SYNC, 1, _utcnow()):
-        repos.quota.sync_from_snapshot(source.get_quota())
+        repos.quota.sync_from_snapshot(source.get_quota(), _utcnow())
     report = CatalogSync(source, repos, brands).run()
     for b in report.brands:
         print("%s (%s): pagine %d, dettagli %d, scritti %d, invariati %d, archiviati %d%s"

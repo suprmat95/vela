@@ -135,9 +135,11 @@ errore esplicito.
    `STRIPE_SECRET_KEY`, `VELA_PUBLIC_URL` e `VELA_API_TOKEN`, altrimenti l'app non parte. Per tornare
    in replay si cambia il valore nel file.
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
-5. `curl https://<servizio>.onrender.com/health` → `{"status":"ok","db":"ok","catalog":{...},"quota":{...}}`
-   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota`: finestra corrente, usate,
-   residue, limite effettivo e riserva).
+5. `curl https://<servizio>.onrender.com/health` →
+   `{"status":"ok","db":"ok","catalog":{...},"quota":{...},"queue":{...}}`
+   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota`: token bucket con limite
+   effettivo, capienza, ritmo, gettoni, soglia e ultima finestra nota di HofJ; `queue`: età del
+   più vecchio acquisto in coda e itinerari orfani).
 
 Il piano free spegne il servizio dopo inattività: la prima richiesta può richiedere
 qualche decina di secondi. Il Postgres free scade dopo 30 giorni.

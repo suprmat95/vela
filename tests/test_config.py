@@ -64,13 +64,14 @@ class SettingsDefaultsTest(unittest.TestCase):
 
     def test_m5_defaults(self):
         s = Settings.from_env({})
-        self.assertEqual(s.worker_concurrency, 4)
+        self.assertEqual(s.worker_concurrency, 10)          # M18
         self.assertEqual(s.quota_margin, 0.10)
         self.assertEqual(s.booking_reserve, 0.20)
         self.assertEqual(s.purchase_max_attempts, 3)
         self.assertEqual(s.booking_max_attempts, 5)
         self.assertEqual(s.booking_backoff, (5, 10, 20, 40))
-        self.assertEqual(s.job_lease_seconds, 120)
+        self.assertEqual(s.job_lease_seconds, 180)          # M18: 5 × 20 s più margine
+        self.assertEqual((s.quota_burst, s.quota_floor), (8, 2))
         self.assertEqual(s.payment_poll_seconds, 60)
         self.assertEqual(s.replay_latency, (0.0, 0.0))
         self.assertIsNone(s.replay_limit)
@@ -78,7 +79,7 @@ class SettingsDefaultsTest(unittest.TestCase):
     def test_m5_parameters_are_not_read_from_environment(self):
         s = Settings.from_env({"VELA_WORKER_CONCURRENCY": "9", "WORKER_CONCURRENCY": "9",
                                "VELA_REPLAY_LIMIT": "120"})
-        self.assertEqual(s.worker_concurrency, 4)
+        self.assertEqual(s.worker_concurrency, 10)
         self.assertIsNone(s.replay_limit)
 
     def test_m5_parameters_can_be_set_in_code(self):

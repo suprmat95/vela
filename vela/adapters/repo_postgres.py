@@ -1,5 +1,6 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
 import threading
+from dataclasses import replace
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Set
@@ -14,8 +15,9 @@ from vela.adapters.schema import (intents_t, jobs_t, orders_t, products_t, propo
 from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, JobStatus, Order,
                                 OrderStatus, Product, Proposal, QuotaClass, Rejection, criteria_from_dict,
                                 criteria_to_dict, profile_from_dict, profile_to_dict)
-from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
-                               rolled, try_acquire)
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
+                               claim_refresh, describe, fresh_bucket, from_snapshot,
+                               available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder, SyncState
@@ -186,6 +188,7 @@ def _order_row(o: Order) -> dict:
         "booking_code": o.booking_code, "failure_reason": o.failure_reason,
         "created_at": o.created_at, "updated_at": o.updated_at, "paid_at": o.paid_at,
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
+        "orphan_itineraries": o.orphan_itineraries,
     }
 
 
@@ -196,7 +199,8 @@ def _order(m) -> Order:
                  itinerary_id=m["itinerary_id"], payment_url=m["payment_url"],
                  payment_ref=m["payment_ref"], booking_code=m["booking_code"],
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
-                 enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"])
+                 enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
+                 orphan_itineraries=m["orphan_itineraries"])
 
 
 class PostgresOrders:
@@ -237,6 +241,10 @@ class PostgresOrders:
             rows = conn.execute(select(orders_t.c.id).where(orders_t.c.status == status.value)
                                 .order_by(orders_t.c.id)).all()
         return [r[0] for r in rows]
+
+    def orphan_itineraries_total(self) -> int:
+        with self.engine.connect() as conn:
+            return int(conn.execute(select(func.coalesce(func.sum(orders_t.c.orphan_itineraries), 0))).scalar())
 
 
 class PostgresRejections:
@@ -350,75 +358,86 @@ class PostgresJobs:
             return conn.execute(select(jobs_t.c.id).where(jobs_t.c.kind == JobKind.PURCHASE.value,
                                                           jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
 
+    def oldest_purchase_enqueued_at(self) -> Optional[datetime]:
+        with self.engine.connect() as conn:
+            return conn.execute(select(func.min(jobs_t.c.enqueued_at)).where(
+                jobs_t.c.kind == JobKind.PURCHASE.value, jobs_t.c.status.in_(ACTIVE))).scalar()
+
 
 QUOTA_ROW = 1
 
 
-def _window_row(w: QuotaWindow) -> dict:
-    return {"window_start": w.window_start, "window_end": w.window_end,
-            "limit_per_minute": w.limit_per_minute, "used": w.used, "needs_refresh": w.needs_refresh}
+def _bucket_row(b: QuotaBucket) -> dict:
+    return {"window_start": b.window_start, "window_end": b.window_end,
+            "limit_per_minute": b.limit_per_minute, "needs_refresh": b.needs_refresh,
+            "tokens": b.tokens, "refilled_at": b.refilled_at}
 
 
-def _window(m) -> QuotaWindow:
-    return QuotaWindow(m["window_start"], m["window_end"], m["limit_per_minute"], m["used"],
-                       m["needs_refresh"])
+def _bucket(m) -> QuotaBucket:
+    return QuotaBucket(m["tokens"], m["refilled_at"], m["limit_per_minute"], m["needs_refresh"],
+                       m["window_start"], m["window_end"])
 
 
 class PostgresQuota:
-    """Contatore di quota condiviso tra istanze (RF-36, RF-47): una riga, bloccata con
-    `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prenotano sullo
-    stesso stato. Le regole sono quelle pure di `vela.domain.quota`."""
+    """Token bucket condiviso tra istanze (RF-36, RF-47, M18): una riga, bloccata con
+    `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prendono gli stessi
+    gettoni. Le regole sono quelle pure di `vela.domain.quota`."""
 
-    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20):
+    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20,
+                 rules: Optional[BucketRules] = None):
         self.engine = engine
-        self.margin, self.reserve = margin, reserve
+        self.rules = rules or BucketRules(margin, reserve)
 
-    def _locked(self, conn, now: datetime) -> QuotaWindow:
+    def _locked(self, conn, now: datetime) -> QuotaBucket:
         conn.execute(pg_insert(quota_window_t).values(
-            id=QUOTA_ROW, **_window_row(fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)))
+            id=QUOTA_ROW, **_bucket_row(fresh_bucket(now, DEFAULT_LIMIT_PER_MINUTE, self.rules)))
             .on_conflict_do_nothing(index_elements=[quota_window_t.c.id]))
         m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)
                          .with_for_update()).mappings().one()
-        return _window(m)
+        return _bucket(m)
 
-    def _read(self, now: datetime) -> Optional[QuotaWindow]:
+    def _read(self, now: datetime) -> QuotaBucket:
         with self.engine.connect() as conn:
             m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)).mappings().first()
-        return None if m is None else _window(m)
+        return fresh_bucket(now, DEFAULT_LIMIT_PER_MINUTE, self.rules) if m is None else _bucket(m)
 
-    def _save(self, conn, w: QuotaWindow) -> None:
-        conn.execute(update(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW).values(**_window_row(w)))
+    def _save(self, conn, b: QuotaBucket) -> None:
+        conn.execute(update(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW).values(**_bucket_row(b)))
 
-    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+    def _change(self, now: datetime, rule) -> bool:
+        """Applica `rule` alla riga bloccata; None dalla regola = nessuna modifica."""
         with self.engine.begin() as conn:
-            new = try_acquire(self._locked(conn, now), cls, n, now, self.margin, self.reserve,
-                              purchase_waiting)
+            new = rule(self._locked(conn, now))
             if new is not None:
                 self._save(conn, new)
             return new is not None
 
-    def on_429(self, now: datetime) -> None:
-        with self.engine.begin() as conn:
-            self._save(conn, after_429(self._locked(conn, now), now, self.margin, self.reserve))
+    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+        return self._change(now, lambda b: try_take(b, cls, n, now, self.rules, purchase_waiting))
+
+    def on_429(self, now: datetime, hold_seconds: float = 0.0) -> None:
+        self._change(now, lambda b: after_429(b, now, self.rules, hold_seconds))
 
     def needs_refresh(self, now: datetime) -> bool:
-        w = self._read(now)
-        return w is None or w.needs_refresh
+        return self._read(now).needs_refresh
 
-    def sync_from_snapshot(self, snapshot: QuotaSnapshot) -> None:
-        w = from_snapshot(snapshot.limit_per_minute, snapshot.used_in_window,
-                          snapshot.window_started_at, snapshot.window_ends_at)
-        with self.engine.begin() as conn:
-            conn.execute(pg_insert(quota_window_t).values(id=QUOTA_ROW, **_window_row(w))
-                         .on_conflict_do_update(index_elements=[quota_window_t.c.id], set_=_window_row(w)))
+    def claim_refresh(self, now: datetime) -> bool:
+        return self._change(now, lambda b: claim_refresh(b, now, self.rules))
+
+    def mark_refresh_needed(self, now: datetime) -> None:
+        self._change(now, lambda b: replace(b, needs_refresh=True))
+
+    def sync_from_snapshot(self, snapshot: QuotaSnapshot, now: datetime) -> None:
+        self._change(now, lambda b: from_snapshot(
+            b, snapshot.limit_per_minute, snapshot.used_in_window, snapshot.window_started_at,
+            snapshot.window_ends_at, now, self.rules))
 
     def snapshot(self, now: datetime) -> dict:
-        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
-        return describe(w, now, self.margin, self.reserve)
+        return describe(self._read(now), now, self.rules)
 
-    def next_window_start(self, now: datetime) -> datetime:
-        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
-        return rolled(w, now).window_end
+    def next_window_start(self, now: datetime, cls: QuotaClass = QuotaClass.PURCHASE,
+                          n: int = CALLS_PER_PURCHASE) -> datetime:
+        return available_at(self._read(now), now, self.rules, cls, n)
 
 
 # chiave dell'advisory lock del sync del catalogo (RF-30): costante, unica per tutti i brand
@@ -426,7 +445,8 @@ CATALOG_LOCK_KEY = 7_646_512_010
 
 
 class PostgresRepositories:
-    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20):
+    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20,
+                 quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.engine = engine
         self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock
         self.products = PostgresProducts(engine)
@@ -435,7 +455,8 @@ class PostgresRepositories:
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
-        self.quota = PostgresQuota(engine, margin=quota_margin, reserve=booking_reserve)
+        self.quota = PostgresQuota(engine, rules=BucketRules(quota_margin, booking_reserve,
+                                                             quota_burst, quota_floor))
 
     @contextmanager
     def catalog_lock(self):

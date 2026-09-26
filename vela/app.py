@@ -159,7 +159,8 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
         from vela.adapters.haiku import HaikuExtractor
         extractor = HaikuExtractor.from_api_key(settings.anthropic_api_key)
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
-                                 booking_reserve=settings.booking_reserve)
+                                 booking_reserve=settings.booking_reserve,
+                                 quota_burst=settings.quota_burst, quota_floor=settings.quota_floor)
     vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
     return vela, upstream
 

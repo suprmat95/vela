@@ -13,11 +13,15 @@ Prima di ogni passo l'ordine viene riletto: se non è più `queued` (rinuncia, R
 ferma senza altre chiamate. Esiti degli errori:
 - rete, timeout, 5xx, errore del fornitore di pagamento: nuovo tentativo nella finestra
   successiva, al terzo l'ordine è `failed` con un motivo leggibile;
+- timeout sulla creazione dell'itinerario (M18): esito incerto, HofJ può averlo creato e
+  `POST /v1/itineraries` non è idempotente. Il nuovo tentativo ne crea un altro; il primo resta
+  orfano, contato in `orphan_itineraries` e nel log. La chiamata è già nel budget;
 - 429: nuovo tentativo nella finestra successiva, senza contare il tentativo (RF-38);
 - errore del prodotto sulla creazione dell'itinerario: prodotto non prenotabile (RF-33), la
   proposta è chiusa come rifiutata e l'ordine è `replaced` con la proposta successiva (RF-17);
 - 401/403: `failed` senza toccare il prodotto.
 """
+import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -26,13 +30,16 @@ from typing import Callable, Union
 from vela.domain import say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
-from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError)
+from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError,
+                             UpstreamTimeout)
 from vela.ports.payments import PaymentsError, PaymentsPort
 from vela.ports.repositories import Repositories
 
 STEP_ITINERARY, STEP_CUSTOMER, STEP_PAX, STEP_TOTAL, STEP_LINK, STEP_DONE = range(6)
 _CALLS = {STEP_ITINERARY: 5, STEP_CUSTOMER: 4, STEP_PAX: 3, STEP_TOTAL: 1, STEP_LINK: 0, STEP_DONE: 0}
 UNBOOKABLE_REASON = "prodotto non prenotabile"
+
+log = logging.getLogger("vela.purchase")
 
 
 def calls_needed(job: Job) -> int:
@@ -74,6 +81,10 @@ class PurchaseJob:
             return self._retry(job, next_window, exc, "upstream")
         except PaymentsError as exc:
             return self._retry(job, next_window, exc, "payments")
+        except UpstreamTimeout as exc:
+            if job.step == STEP_ITINERARY:
+                self._count_orphan(job)
+            return self._retry(job, next_window, exc, "upstream")
         except HofJError as exc:
             return self._retry(job, next_window, exc, "upstream")
 
@@ -120,6 +131,13 @@ class PurchaseJob:
 
     def _save_order(self, order: Order) -> None:
         self.repos.orders.save(replace(order, updated_at=self.now()))
+
+    def _count_orphan(self, job: Job) -> None:
+        order = self.repos.orders.get(job.order_id)
+        if order is None:
+            return
+        self._save_order(replace(order, orphan_itineraries=order.orphan_itineraries + 1))
+        log.warning("orphan_itinerary order_id=%s attempt=%d", order.id, job.attempts + 1)
 
     def _close(self, job: Job, status: JobStatus, exc: Exception = None) -> JobResult:
         job = replace(job, status=status, locked_at=None,

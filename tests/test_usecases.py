@@ -332,7 +332,7 @@ class AcceptProposalTest(unittest.TestCase):
         first = vela.accept_proposal(proposal.proposal.id, FULL)
         second = accept_second_intent(vela)
         self.assertEqual((first.position, second.position), (1, 2))
-        self.assertEqual(second.wait_seconds, 7)             # 2 × 60 ÷ 17,4 per eccesso
+        self.assertEqual(second.wait_seconds, 8)             # 2 × 60 ÷ 16 per eccesso (M18)
 
     def test_profile_from_intent_is_enough(self):
         vela = make_vela()

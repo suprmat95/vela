@@ -84,9 +84,10 @@ Lettura:
 - Resta **non verificato** il campo `retryAfterSeconds` nel corpo del 429 (nessun 429
   generato).
 
-Conseguenza per Vela: il contatore di `vela/domain/quota.py` fa ripartire la finestra su una
-griglia di 60 s e può derivare rispetto a HofJ; vedi `docs/decisions.md`, "2026-09-26 — Twist,
-seconda lettura", e la roadmap M18.
+Conseguenza per Vela: fino a M18 il contatore di `vela/domain/quota.py` faceva ripartire la
+finestra su una griglia di 60 s e poteva derivare rispetto a HofJ. Da M18 le chiamate escono da
+un token bucket a ritmo costante (B + 60·r = 108), sicuro con qualunque regola della finestra;
+vedi `docs/decisions.md`, "2026-09-26 — Twist, seconda lettura" e "2026-09-26 — M18".
 
 Esempio:
 

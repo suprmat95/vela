@@ -139,11 +139,11 @@ class PaymentCheckJobTest(unittest.TestCase):
 
     def test_check_runs_with_no_hofj_budget_left(self):
         w = World(ScriptedPayments(LinkStatus("open", None, None, None)))
-        w.repos.quota.sync_from_snapshot(QuotaSnapshot(120, 108, NOW, NOW + timedelta(seconds=60)))
+        w.repos.quota.sync_from_snapshot(QuotaSnapshot(120, 108, NOW, NOW + timedelta(seconds=60)), NOW)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.payments.checked, ["cs_1"])
         self.assertEqual(w.hofj.calls, [])
-        self.assertEqual(w.repos.quota.snapshot(NOW)["used"], 108)
+        self.assertEqual(w.repos.quota.snapshot(NOW)["tokens"], -100)   # bloccato fino a fine finestra
 
 class PurchaseEnqueuesCheckTest(unittest.TestCase):
     def test_link_step_enqueues_a_payment_check(self):

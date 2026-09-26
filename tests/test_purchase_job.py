@@ -17,7 +17,7 @@ from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus,
                                 OrderStatus, Participant, Period, Proposal, ProposalMade,
                                 TravelerProfile)
 from vela.domain.purchase import PurchaseJob, calls_needed
-from vela.ports.hofj import ConfigError, ProductError, QuotaError, UpstreamError
+from vela.ports.hofj import ConfigError, ProductError, QuotaError, UpstreamError, UpstreamTimeout
 
 NEXT_WINDOW = NOW + timedelta(seconds=45)
 CRITERIA = Criteria("padel", Area("country", "Spagna", "ES"),
@@ -171,6 +171,30 @@ class RetryTest(unittest.TestCase):
         self.assertIsNone(job.locked_at)
         self.assertEqual(s.saved_job(), job)
         self.assertEqual(s.order().status, OrderStatus.QUEUED)
+
+    def test_itinerary_timeout_counts_an_orphan_and_retries(self):
+        """M18: HofJ può aver creato l'itinerario; il nuovo tentativo ne crea un altro."""
+        s = Setup(hofj=FakeHofJ(fail_at={"create_itinerary": [UpstreamTimeout("timeout")]}))
+        with self.assertLogs("vela.purchase", "WARNING") as logs:
+            s.run()
+        self.assertEqual(s.order().orphan_itineraries, 1)
+        self.assertIn("orphan_itinerary order_id=o1", logs.output[0])
+        job = s.saved_job()
+        self.assertEqual((job.status, job.step, job.attempts, job.run_after),
+                         (JobStatus.PENDING, 0, 1, NEXT_WINDOW))
+        s.run(attempts=1)
+        self.assertEqual(s.order().status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(s.order().orphan_itineraries, 1)
+
+    def test_timeout_after_the_itinerary_is_not_an_orphan(self):
+        s = Setup(hofj=FakeHofJ(fail_at={"set_customer": [UpstreamTimeout("timeout")]}))
+        s.run()
+        self.assertEqual(s.order().orphan_itineraries, 0)
+
+    def test_network_error_on_the_itinerary_is_not_an_orphan(self):
+        s = Setup(hofj=FakeHofJ(fail_at={"create_itinerary": [UpstreamError("rete")]}))
+        s.run()
+        self.assertEqual(s.order().orphan_itineraries, 0)
 
     def test_third_network_failure_fails_the_order_with_a_readable_reason(self):
         s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [UpstreamError("502")]}))

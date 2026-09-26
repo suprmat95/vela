@@ -66,13 +66,17 @@ class Settings:
     anthropic_api_key: Optional[str] = None
     vela_public_url: Optional[str] = None
     # Parametri di M5: configurabili da codice, mai da env (l'elenco di §6 resta chiuso).
-    worker_concurrency: int = 4                        # RF-50, thread per istanza
+    # M18: il ritmo lo decide il token bucket, non i thread. Legge di Little: ~1,45 chiamate/s
+    # × 2-6 s di latenza ≈ 6-9 chiamate contemporanee.
+    worker_concurrency: int = 10                       # RF-50, thread per istanza
     quota_margin: float = 0.10                         # limite effettivo = limitPerMinute × 0,9
-    booking_reserve: float = 0.20                      # RF-47, quota della finestra per i booking
+    booking_reserve: float = 0.20                      # RF-48: quota del ritmo non contata per gli acquisti
+    quota_burst: int = 8                               # M18: capienza B, con B + 60·r = limite effettivo
+    quota_floor: int = 2                               # M18: gettoni che purchase e sync lasciano ai booking
     purchase_max_attempts: int = 3                     # RF-46
     booking_max_attempts: int = 5                      # RF-24
     booking_backoff: Tuple[int, ...] = (5, 10, 20, 40)  # secondi tra i tentativi di booking
-    job_lease_seconds: int = 120                       # un job running più vecchio torna prelevabile
+    job_lease_seconds: int = 180                       # M18: 5 chiamate × 20 s di timeout + link e margine
     payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata

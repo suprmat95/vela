@@ -19,7 +19,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
                                 ProposalMade, Rejection, StructuredFields, TravelerDefaults,
                                 TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
-from vela.domain.quota import estimated_wait_seconds, purchases_per_window, wait_minutes
+from vela.domain.quota import estimated_wait_seconds, wait_minutes
 from vela.domain.refine import Refinement, is_price_reason, refine
 from vela.ports.hofj import HofJRouter
 from vela.ports.llm import IntentExtractor
@@ -209,8 +209,7 @@ class Vela:
         if position is None:
             return None, None
         snap = self.repos.quota.snapshot(self.now())
-        per_window = purchases_per_window(snap["effective_limit"], snap["reserve"])
-        return position, estimated_wait_seconds(position, per_window)
+        return position, estimated_wait_seconds(position, snap["purchases_per_minute"])
 
     # --- RF-25, RF-26 --------------------------------------------------------
 
