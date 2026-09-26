@@ -284,8 +284,9 @@ def _job(m) -> Job:
 
 
 ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value)
-CLAIM_PRIORITY = case({JobKind.BOOKING.value: 0, JobKind.PAYMENT_CHECK.value: 1},
-                      value=jobs_t.c.kind, else_=2)
+CLAIM_PRIORITY = case({JobKind.BOOKING.value: 0, JobKind.PAYMENT_CHECK.value: 1,
+                       JobKind.SMS_LINK.value: 2, JobKind.SMS_CONFIRMED.value: 2},
+                      value=jobs_t.c.kind, else_=3)
 
 
 class PostgresJobs:

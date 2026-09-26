@@ -479,3 +479,83 @@ None.
 - 🔧 Agent: Implement Task 2: SMS texts
 
 Task 1 approvato dalla revisione. Task 2 (testi degli SMS) in corso.
+
+## Utente 16:37
+
+<task-notification>
+<task-id>aaa863aed19182f96</task-id>
+<tool-use-id>toolu_01L19HLS3RtuWiR3v6mZzCqU</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/aaa863aed19182f96.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 2: SMS texts" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**DONE**
+
+Commit: `ef43526 Add GSM-7 texts for the payment link and confirmation SMS`
+
+Tests: 7 SMS text tests all pass; full suite 932 tests OK (skipped=47), no regressions
+
+Concerns: None
+
+Report: `/Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-2-report.md`</result>
+<usage><subagent_tokens>44462</subagent_tokens><tool_uses>21</tool_uses><duration_ms>114090</duration_ms></usage>
+</task-notification>
+
+## Agente 16:37
+
+- 🔧 Bash: Build Task 2 review package
+
+- 🔧 Agent: Review Task 2 (spec + quality)
+
+Revisione del Task 2 in corso.
+
+## Utente 16:40
+
+<task-notification>
+<task-id>a4562ec3c9b2ff928</task-id>
+<tool-use-id>toolu_01CAmCEZAxzWPEbZpeoEyt66</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a4562ec3c9b2ff928.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 2 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ Testi solo GSM-7: `gsm7()` strips/transliterates non-GSM-7 chars (`vela/domain/sms_text.py:95-114`); verified computationally that `GSM7` matches the canonical GSM 03.38 basic alphabet exactly (127/127 code points) plus the correct extension-table characters (only the non-printable form-feed control char is omitted, which is irrelevant for real message text).
+- ✅ Lingua dell'intento (`it`/`en`, `it` default): both `payment_link` and `confirmed` take `lang: str = "it"` and branch on `"en"` (`sms_text.py:126-153`); matches brief's tests for both languages.
+- ✅ Importo sempre in euro (RF-22): `_total()` always renders EUR — `"NNN,NN €"` for `it`, `"EUR NNN.NN"` for `en` (`sms_text.py:121-123`) — never another currency.
+- ✅ Nessuna dipendenza nuova: only `unicodedata`, `datetime`, `decimal` (stdlib) imported.
+- ✅ Interfaces match the brief exactly: `payment_link(title, start, end, pax, total, url, lang="it")`, `confirmed(title, start, end, pax, booking_code, lang="it")`, `gsm7(text) -&gt; str`, `GSM7: frozenset`.
+- ⚠️ Cannot verify from diff: "totale reale (`order.total`), non il prezzo 'da'" and "il testo dell'SMS non va mai nei log". `sms_text.py` is a pure formatter that only receives a `total: Decimal` argument and never logs anything — both constraints bind the not-yet-written caller (`SmsJob`/usecase wiring), which is out of this task's scope per `task-2-brief.md` (only `vela/domain/sms_text.py` + its test were to be created). Not a defect here, just unverifiable at this task boundary.
+- Note (not a defect): `docs/superpowers/specs/2026-09-26-sms-notifiche-design.md` names the functions `sms_payment_link`/`sms_confirmed`, while the brief and implementation use `sms_text.payment_link`/`sms_text.confirmed` (module-qualified). This is a pre-existing brief-vs-design naming difference, not something introduced by this diff, and reads consistently once module-qualified.
+
+### Strengths
+- Diff is a byte-for-byte match of the brief's Step 1 (tests) and Step 3 (implementation) — TDD was genuinely followed (report shows RED then GREEN), no scope creep.
+- `gsm7()` is a pure, side-effect-free function; the GSM-7 alphabet + `_REPLACE` transliteration table (curly quotes, en/em dash, ellipsis, NBSP→space) are correct, and NFKD-based accent stripping correctly reduces e.g. `Ñandú`→`Ñandu`, `È`→`E` while leaving already-supported accented letters untouched.
+- Style is consistent with the existing `vela/domain/say.py` module (lang-branch helpers, `%`-formatting, singular/plural pax helper), and the module docstring correctly explains why this text can't reuse `say.py` (contains a URL, isn't meant to be read aloud).
+- Test suite (`tests/test_sms_text.py`) exercises both languages for both message types, the transliteration table, and confirms the *entire* generated text (not just parts) stays within `GSM7` even with a torture-test title containing `&amp;`, curly quotes, en dash, ellipsis, and accented characters — a good defense against the exact "one stray char forces UCS-2" risk the docstring calls out.
+
+### Issues
+
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- `gsm7()`'s NFKD fallback only keeps `unicodedata.normalize("NFKD", ch)[0]`, i.e. the first component of the decomposition. For a character that decomposes into two base letters (e.g. the ligature `ﬁ` → `f`+`i`), only `f` would survive and `i` would be silently dropped rather than degrading gracefully. Untested edge case; low real-world likelihood for product titles but worth a guard or a comment if it's ever hit in production data (`sms_text.py:103-114`).
+- `payment_link` and `confirmed` repeat the same `if lang == "en": ... else: ...` shape for the greeting line; could be pulled into a small `{"it": ..., "en": ...}` dict (as `say.py` does elsewhere) to cut duplication. Purely cosmetic, and it's exactly the code from the brief (plan-mandated), not an implementer choice.
+- `_total()` uses default `Decimal.quantize` rounding (`ROUND_HALF_EVEN`) with no explicit rounding mode; harmless today since `order.total` is expected to already be 2dp, but worth being explicit if amounts with more precision ever reach this function.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The implementation matches the task brief and the design doc's GSM-7/bilingual/EUR-only constraints exactly, the GSM-7 character set was independently verified correct against the canonical table (the one risk explicitly worth checking), and no new dependencies or interface changes were introduced; remaining notes are cosmetic and don't block the task.</result>
+<usage><subagent_tokens>77651</subagent_tokens><tool_uses>13</tool_uses><duration_ms>190730</duration_ms></usage>
+</task-notification>
+
+## Agente 16:40
+
+- 🔧 Bash: Record Task 2 completion and extract Task 3 brief
+
+- 🔧 Agent: Implement Task 3: SMS job kinds
+
+Il Task 2 è approvato. Ora è in corso il Task 3: i nuovi tipi di job e la priorità con cui la coda li preleva.
