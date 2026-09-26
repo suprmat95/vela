@@ -7,7 +7,8 @@ indipendenti: si può accettare con o senza rifiuto.
 Sentinelle, in più degli N viaggiatori:
 - **Marco** arriva a 55 s e accetta a 60 s, paga appena ha il link: la seconda lettura (§6) prevede
   il codice entro il minuto 7;
-- **Anna** arriva al minuto 6, rifiuta ("troppo caro") e accetta: proposta < 500 ms e un'attesa
+- **Anna** arriva al 60% della finestra degli arrivi (il minuto 6 di 10 del twist; il minuto 3
+  nei giri ridotti da 5), rifiuta ("troppo caro") e accetta: proposta < 500 ms e un'attesa
   dichiarata, senza errori.
 Le sentinelle chiedono lo stato ogni 5 s per misurare i tempi con precisione.
 """
@@ -69,7 +70,7 @@ def travelers(n: int, minutes: float = 10.0, seed: int = 13, funnel: Funnel = Fu
         text, sport = INTENTS[0]
         marco = Traveler(n, 55.0, text, sport, rejects=False, accepts=True, pays=True,
                          role="marco", accept_at=60.0, poll=(SENTINEL_POLL, SENTINEL_POLL))
-        anna = Traveler(n + 1, 360.0, text, sport, rejects=True, accepts=True, pays=True,
+        anna = Traveler(n + 1, 0.6 * minutes * 60, text, sport, rejects=True, accepts=True, pays=True,
                         role="anna", poll=(SENTINEL_POLL, SENTINEL_POLL))
         out += [tr for tr in (marco, anna) if tr.arrival < minutes * 60]
     return sorted(out, key=lambda tr: tr.arrival)

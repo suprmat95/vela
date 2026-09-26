@@ -41,8 +41,11 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(len(travelers(100, sentinels=False)), 100)
 
     def test_sentinels_outside_a_short_window_are_left_out(self):
-        self.assertEqual([t.role for t in travelers(10, minutes=3) if t.role], ["marco"])
-        self.assertEqual([t.role for t in travelers(10, minutes=0.5) if t.role], [])
+        self.assertEqual([t.role for t in travelers(10, minutes=0.5) if t.role], ["anna"])
+
+    def test_anna_arrives_at_sixty_percent_of_the_window(self):
+        anna = lambda m: next(t for t in travelers(10, minutes=m) if t.role == "anna").arrival
+        self.assertEqual((anna(10), anna(5)), (360.0, 180.0))
 
 
 class IntentsTest(unittest.TestCase):

@@ -408,3 +408,90 @@ Stack fermo. Ora la modifica, test prima: in modo `loadtest` il catalogo si cari
 - 🔧 Bash: Update docs and comments for fixture catalog; run suite
 
 - 🔧 Bash: Commit, rebuild images and start stack
+
+- 🔧 Monitor
+
+- 🔧 Bash: Read boot check output
+
+Modifica fatta e committata (`7df97a6`): immagine ricostruita, stack avviato. Aspetto che Vela sia pronta per controllare che il catalogo ci sia già e che il finto non abbia ricevuto chiamate di sync; poi rilancio i 4 giri.
+
+## Utente 15:51
+
+cosa aspetti adesso?
+
+## Agente 15:51
+
+- 🔧 Bash: Check Vela health and fake HofJ stats now
+
+- 🔧 ToolSearch
+
+- 🔧 TaskStop
+
+- 🔧 Bash: Run the four load test runs in sequence
+
+Ho rilanciato i 4 giri in background (1k → 10k → 50k → 50k con guasti). Ognuno riparte da un compose pulito con il catalogo caricato dalle fixture, quindi niente sync: circa 16 minuti a giro, poco più di un'ora in tutto.
+
+Quando arriva la notifica di fine leggo i quattro report e compilo `loadtest/RESULTS.md`. Nel frattempo non devo aspettare altro.
+
+## Utente 15:52
+
+quanto ci vorra?
+
+## Agente 15:52
+
+- 🔧 Bash: Check load test run progress
+
+I quattro giri dovrebbero finire verso le **17:00**, poco più di un'ora. Il primo (1k) è partito alle 15:52.
+
+Ogni giro dura circa 17 minuti:
+- 10 minuti di arrivi e 5 di coda;
+- fino a 2 minuti di margine per chiudere Locust;
+- qualche secondo di avvio del compose (niente più sync).
+
+| Giro | Fine prevista |
+|---|---|
+| 1k | ~16:09 |
+| 10k | ~16:26 |
+| 50k | ~16:43 |
+| 50k con guasti | ~17:00 |
+
+I giri da 50k potrebbero allungarsi di qualche minuto se Locust o Vela vanno sotto sforzo con ~10.000 viaggiatori che chiedono lo stato. Il tempo del giro però è fisso: chi è ancora in coda alla fine viene contato, non aspettato.
+
+Poi mi servono circa 10 minuti per leggere i report e compilare `loadtest/RESULTS.md`.
+
+## Utente 15:53
+
+teniamo dei numeri piu bassi, ma che consentono di fare delle proiezioni,
+
+## Agente 15:53
+
+Ha senso: il confine sulla quota si vede già con pochi viaggiatori, perché conta solo che la coda sia satura.
+
+**Perché bastano numeri più bassi:**
+- Vela smaltisce circa 12-17 acquisti al minuto (previsione della seconda lettura). Con il 20% che accetta, la coda satura appena arrivano più di ~85 viaggiatori al minuto.
+- Da quel punto in poi le chiamate a HofJ al minuto e gli acquisti al minuto restano gli stessi con 1k o con 50k. Cresce solo la coda.
+- A 50k la coda si ricava con i numeri misurati: accettazioni al minuto meno acquisti al minuto misurati. L'attesa di chi arriva al minuto *t* è la sua posizione divisa per il ritmo misurato. Anche Marco e Anna si proiettano così.
+- La proiezione sarebbe meno solida sul carico REST di Vela (a 50k ~10.000 viaggiatori chiedono lo stato, ~200 richieste/s). Quello cresce in modo lineare, ma oltre il giro più grande sarebbe un dato **[proiezione]**, non misurato.
+
+**Proposta:** giri più corti, 5 minuti di arrivi + 3 di coda (8 finestre di quota), con carichi tutti oltre la saturazione:
+
+| Giro | Viaggiatori in 5 min | Accettazioni/min |
+|---|---|---|
+| A | 500 | ~20 |
+| B | 1.000 | ~40 |
+| C | 2.500 | ~100 |
+| D | 1.000 con guasti e latenza pessimistica | ~40 |
+
+Sono circa 40 minuti in tutto invece di 70. `RESULTS.md` avrebbe le misure dei 4 giri più una tabella di proiezione a 1k/10k/50k in 10 minuti, marcata come tale.
+
+Il giro da 1k in 10 minuti gira da ~5 minuti.
+
+- 🔧 AskUserQuestion
+
+- 🔧 TaskStop
+
+- 🔧 Bash: Stop current runs and write the reduced-run script
+
+- 🔧 Bash: Place Anna at 60% of arrival window and test
+
+- 🔧 Bash: Record reduced-runs decision and commit

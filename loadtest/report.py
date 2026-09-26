@@ -216,7 +216,7 @@ def markdown(report: dict, label: str) -> str:
              "| POST di booking per itinerario, massimo (itinerari con più di una) | %d (%d) |"
              % (b["booking_posts_max_per_itinerary"], b["itineraries_booked_more_than_once"]),
              "| Itinerari orfani | %d |" % b["orphan_itineraries"], ""]
-    for role, name in (("marco", "Marco (accetta a 60 s)"), ("anna", "Anna (arriva al minuto 6)")):
+    for role, name in (("marco", "Marco (accetta a 60 s)"), ("anna", "Anna (arriva al 60% della finestra)")):
         s = t.get(role)
         if s:
             lines.append("- **%s**: proposta %s ms, posizione %s, attesa dichiarata %s s, link a %s s, "
