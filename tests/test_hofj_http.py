@@ -239,3 +239,41 @@ class ErrorMappingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CatalogSourceTest(unittest.TestCase):
+    """Lettura del catalogo per il sync (M10, RF-29): il brand è quello chiesto, non quello del client."""
+
+    def test_list_page_passes_brand_limit_and_cursor_and_returns_next_cursor(self):
+        hofj, rec = adapter((200, {"data": [{"id": 1}, {"id": 2}], "meta": {"nextCursor": "c2"}}),
+                            (200, {"data": [{"id": 3}], "meta": {}}))
+        self.assertEqual(hofj.list_page("terrarossa.com", None), ([{"id": 1}, {"id": 2}], "c2"))
+        self.assertEqual(hofj.list_page("terrarossa.com", "c2"), ([{"id": 3}], None))
+        first, second = rec.requests
+        self.assertEqual((first.method, first.url.path), ("GET", "/v1/products"))
+        self.assertEqual(dict(first.url.params),
+                         {"brand": "terrarossa.com", "locale": "it", "limit": "100"})
+        self.assertEqual(dict(second.url.params),
+                         {"brand": "terrarossa.com", "locale": "it", "limit": "100", "cursor": "c2"})
+
+    def test_list_page_without_meta_has_no_next_cursor(self):
+        hofj, _ = adapter((200, {"data": []}))
+        self.assertEqual(hofj.list_page("terrarossa.com", None), ([], None))
+
+    def test_detail_is_extended_for_the_brand(self):
+        hofj, rec = adapter((200, {"data": {"id": 7, "title": "Tennis"}}), locale="en")
+        self.assertEqual(hofj.detail("terrarossa.com", "7"), {"id": 7, "title": "Tennis"})
+        req = rec.requests[0]
+        self.assertEqual((req.method, req.url.path), ("GET", "/v1/products/7"))
+        self.assertEqual(dict(req.url.params),
+                         {"brand": "terrarossa.com", "locale": "en", "extended": "true"})
+
+    def test_catalog_errors_use_the_same_mapping(self):
+        hofj, _ = adapter((429, problem(429, "slow down", "rate-limited")), (503, problem(503, "down")),
+                          (401, problem(401, "no")))
+        with self.assertRaises(QuotaError):
+            hofj.list_page("terrarossa.com", None)
+        with self.assertRaises(UpstreamError):
+            hofj.detail("terrarossa.com", "7")
+        with self.assertRaises(ConfigError):
+            hofj.list_page("terrarossa.com", None)

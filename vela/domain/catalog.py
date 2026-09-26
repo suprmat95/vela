@@ -14,6 +14,33 @@ from typing import Iterable, List, Optional
 from vela.domain.models import Availability, Product
 
 SPORTS = ("padel", "tennis")
+# chiavi scartate a ogni profondità del dettaglio: immagini e programma di viaggio
+MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media", "travelProgram"])
+# campi di RF-28 presi pari pari dal dettaglio (category, venue, destination, hotels a parte)
+CATALOG_FIELDS = ("id", "title", "slug", "shortDescription", "price", "currency", "minPax",
+                  "maxPax", "minDate", "maxDate", "availabilities", "defaultDurationInDays",
+                  "updatedAt")
+
+
+def strip_media(value):
+    """Copia ricorsiva di `value` senza le chiavi in MEDIA_KEYS. Non modifica l'input."""
+    if isinstance(value, dict):
+        return {k: strip_media(v) for k, v in value.items() if k not in MEDIA_KEYS}
+    if isinstance(value, list):
+        return [strip_media(v) for v in value]
+    return value
+
+
+def project_detail(detail: dict) -> dict:
+    """Campi di RF-28 presi dal dettaglio esteso, con i nomi dell'API; None se mancanti.
+    È il `catalog` delle fixture e l'ingresso di `product_from_entry` nel sync (M10)."""
+    catalog = {k: detail.get(k) for k in CATALOG_FIELDS}
+    catalog["category"] = detail.get("category")
+    catalog["venue"] = detail.get("venue")
+    catalog["destination"] = detail.get("destination")
+    raw_attributes = detail.get("rawAttributes") or {}
+    catalog["hotels"] = strip_media(raw_attributes.get("hotels"))
+    return catalog
 
 
 def detect_sport(*texts: Optional[str]) -> str:
