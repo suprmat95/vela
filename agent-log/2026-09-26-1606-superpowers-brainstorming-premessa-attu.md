@@ -1,4 +1,4 @@
-# /superpowers:brainstorming: premessa: attualmente, quando l'utente conferma un p
+# Come la esegui
 
 - Sessione: `576016cb-6ef3-43a1-9dc0-e73d62ca456a`
 - Inizio: 2026-09-26 16:06
@@ -239,3 +239,96 @@ si
 - 🔧 Bash: Fix accent and retry-count consistency in spec
 
 - 🔧 Bash: Check retry lines in spec
+
+Spec scritta. Aggiungo le decisioni a `docs/decisions.md` e faccio il commit.
+
+- 🔧 Bash: Append decisions and commit the spec
+
+La spec è scritta e committata in `docs/superpowers/specs/2026-09-26-sms-notifiche-design.md`, insieme alle decisioni aggiunte in `docs/decisions.md` (commit `89d5a4f`). Per ora solo documenti: il codice non l'ho ancora toccato.
+
+Una correzione rispetto a quello che ti avevo detto in chat: avevo scritto "si riprova dopo 30 s, poi 2 min, poi 10 min" e poi "al terzo fallimento `dead`". Le due cose non tornano, perché con tre attese servono quattro tentativi. Nella spec ho scritto **4 tentativi in tutto (attese di 30 s, 2 min, 10 min), poi `dead`**. Se preferisci 3 tentativi, tolgo l'attesa di 10 min.
+
+Tre cose nella spec che vale la pena rileggere:
+- **Titoli dei prodotti:** se contengono caratteri fuori dall'alfabeto base degli SMS (per esempio `’` o `–`), li converto in `'` e `-`. Altrimenti l'intero SMS passa a una codifica che ne dimezza la lunghezza per segmento e fa salire il costo.
+- **Nuova RF-57:** la aggiungerò in `docs/spec.md` per l'SMS di conferma, e riscriverò RF-19: il link lo manda Vela via SMS e l'agente non interroga più lo stato di sua iniziativa.
+- **Doppio invio:** resta possibile solo in un caso raro, se il processo si ferma dopo che Twilio ha accettato il messaggio ma prima che il job sia segnato come fatto.
+
+Rivedila e dimmi se vuoi cambiare qualcosa. Quando mi dai l'OK, preparo il piano di implementazione.
+
+## Utente 16:12
+
+come la esegui
+
+## Agente 16:12
+
+La esecuzione si divide in due fasi, e c'è un tuo OK prima di ciascuna.
+
+**1. Piano scritto.** Quando approvi la spec, uso la skill `writing-plans` e scrivo il piano in `docs/plans/2026-09-26-sms-twilio.md`, come quelli di M0-M17. Sono passi piccoli, ciascuno con i test da scrivere prima, il codice e un commit. L'ordine previsto:
+
+1. `phone.py`: normalizzazione e mascheramento del numero, con i test.
+2. Porta `Notifier` e adapter finto `FakeSms`.
+3. Testi dei due SMS in `say.py`, con il controllo sui caratteri e la conversione dei titoli.
+4. `SmsJob`: stato atteso, invio, tentativi, `dead`.
+5. Nuovi tipi di job, priorità di prelievo (memoria e Postgres), accodamento in `purchase.py` e `booking.py`.
+6. Test del flusso completo in replay: esattamente 2 SMS.
+7. Adapter Twilio con `httpx` e test con `MockTransport`.
+8. Configurazione, `app.py` e `render.yaml`.
+9. Frasi dell'agente (`say_queued`, `awaiting_payment`) e istruzioni MCP, con i test esistenti da aggiornare.
+10. Documenti: `docs/sms.md`, RF-19 e RF-57 in `docs/spec.md`, `docs/decisions.md`.
+
+**2. Esecuzione.** Dopo che hai letto il piano scegli tu come procedere:
+- **Con subagenti (consigliata):** un subagente per passo, e dopo ogni passo una revisione del risultato. Tiene pulito il contesto e controlla ogni passo.
+- **Inline:** lo eseguo io qui, passo per passo, e mi fermo nei punti di controllo per un tuo OK.
+
+In entrambi i casi:
+- Committo un passo alla volta.
+- Uso sempre l'adapter finto: nessuna chiamata a Twilio, Stripe o HofJ.
+- Alla fine faccio girare tutta la suite (`uv run python -m unittest discover -s tests`) e ti riporto l'esito vero.
+
+Il **test reale** (2 SMS sul tuo numero, 1 pagamento di test Stripe) è l'ultimo passo. Lo lancio solo quando mi dici di procedere e dopo che hai impostato tu le tre variabili Twilio nell'ambiente: io non le leggo.
+
+Approvi la spec così com'è, con i 4 tentativi? Se sì, scrivo il piano.
+
+## Utente 16:14
+
+scrivi il pian
+
+## Agente 16:14
+
+- 🔧 Skill superpowers:writing-plans
+
+Uso la skill writing-plans per il piano. Prima leggo i file che il piano tocca, per scrivere codice coerente con quello esistente.
+
+- 🔧 Bash: Read job classes and Job model
+
+- 🔧 Bash: Read job claim priority in repos and fake payments adapter
+
+- 🔧 Bash: Read config and app wiring
+
+- 🔧 Bash: Read say.py formatting helpers and status phrases
+
+- 🔧 Bash: Read accept/order status use cases and MCP instructions
+
+- 🔧 Bash: Find tests asserting queue/link phrases and MCP instructions
+
+- 🔧 Bash: Read test patterns for jobs, flow, support helpers, repo contract, render.yaml
+
+- 🔧 Bash: Read test helpers, repo contract claim tests, booking tests, Product model, spec §6
+
+Sto ancora leggendo il codice per scrivere il piano con codice reale. Ultimi controlli: costruttore di `Vela`, test della config e adapter `httpx` esistente.
+
+- 🔧 Bash: Read Vela init, accept body, config tests, httpx usage, purchase tests
+
+- 🔧 Bash: Find tests that count jobs and ReplayHofJ constructor
+
+- 🔧 Bash: Read repo contract helpers and order status head
+
+- 🔧 Bash: Check config tests, Postgres test gating, README env table
+
+- 🔧 Bash: Align spec with sms_text and notify modules
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-twilio-setup/docs/plans/2026-09-26-sms-twilio.md
+
+Piano scritto. Verifico al volo con un'esecuzione di prova le parti più delicate: le regex del numero e la traslitterazione GSM-7.
+
+- 🔧 Bash: Sanity-check phone normalization and GSM-7 logic from the plan

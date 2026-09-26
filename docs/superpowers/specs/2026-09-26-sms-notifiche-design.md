@@ -77,7 +77,10 @@ il testo né le credenziali.
 - `vela/adapters/sms_fake.py` — `FakeSms`: salva `(to, body)` in `sent`; può essere
   programmato per sollevare un'eccezione (test dei retry). Usato in replay e nei test.
 
-### Testi (`vela/domain/say.py`)
+### Testi (`vela/domain/sms_text.py`)
+
+`say.py` promette frasi senza URL da leggere ad alta voce: i testi degli SMS, che contengono il
+link, stanno in un modulo a parte. Le frasi dell'agente restano in `say.py`.
 
 Lingua dell'intento (`criteria.language`), `it` e `en`. Solo caratteri GSM-7 (niente apostrofi
 tipografici, trattino lungo o puntini tipografici; `€` e le minuscole accentate italiane sono ammessi).
@@ -128,7 +131,10 @@ Due tipi nuovi in `JobKind`: `SMS_LINK = "sms_link"`, `SMS_CONFIRMED = "sms_conf
 
 L'ordine non viene mai modificato da `SmsJob`.
 
-### Accodamento
+### Accodamento (`vela/domain/notify.py`)
+
+`enqueue_sms(repos, kind, order_id, now, new_id)` accoda il job se non ce n'è già uno attivo.
+Modulo a parte perché `sms.py` importa `JobResult` da `purchase.py`, che a sua volta accoda.
 
 - `purchase.py`, passo `STEP_LINK`: dopo il job `payment_check`, accoda `sms_link` se non ne
   esiste già uno attivo per l'ordine (`active_for_order`).
