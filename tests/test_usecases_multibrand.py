@@ -1,0 +1,164 @@
+"""Casi d'uso MB1-MB9 di `docs/usecases/multi-brand.md` (M10): catalogo di due brand in memoria.
+
+Lo sport arriva dal testo con il parser di oggi; i campi strutturati (`sport=`, `sport="any"`, la
+domanda "Padel o tennis?" di MB6 e MB7) sono di M17 e non si testano qui. MB5 si verifica sul
+chooser con criteri senza filtro sport (`None`), come deciso nel design di M10.
+"""
+import os
+import unittest
+from datetime import date
+from decimal import Decimal
+
+from support import NOW, TODAY, FakeHofJ, StubPayments, make_product
+from test_usecases import Clock
+from vela.adapters.hofj_router import BrandRouter
+from vela.adapters.repo_memory import MemoryRepositories
+from vela.app import build_worker
+from vela.config import DEFAULT_TRAVELER, Settings
+from vela.domain.chooser import Choice, NoChoice, choose
+from vela.domain.models import (Criteria, IntentCreated, NoMatch, OrderStatus, Participant, Period,
+                                ProposalMade, TravelerProfile)
+from vela.domain.usecases import Vela
+
+BRANDS = {"padel": "weebora.com", "tennis": "terrarossa.com"}
+TRAVELER = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
+MAY = (("2027-05-14", "2027-05-17"),)
+JUNE = (("2027-06-11", "2027-06-14"),)
+OCTOBER = (("2026-10-09", "2026-10-12"),)
+NOVEMBER = (("2026-11-13", "2026-11-16"),)
+
+
+def padel(pid, **kw):
+    return make_product(pid, sport="padel", brand="weebora.com", **kw)
+
+
+def tennis(pid, **kw):
+    kw.setdefault("title", "Tennis a %s %s" % (kw.get("destination", "Roma"), pid))
+    return make_product(pid, sport="tennis", brand="terrarossa.com", **kw)
+
+
+CATALOG = [
+    padel(1, country="ES", destination="Valencia", windows=OCTOBER, max_date="2027-12-31"),
+    padel(2, country="IT", destination="Riccione", windows=MAY + NOVEMBER, max_date="2027-12-31"),
+    tennis(11, country="IT", destination="Roma", windows=MAY + NOVEMBER, max_date="2027-12-31"),
+    tennis(12, country="PT", destination="Lisbona", windows=JUNE, max_date="2027-12-31"),
+]
+
+
+class MultiBrand:
+    """Vela con i due brand, un client HofJ finto per brand e il worker senza thread."""
+
+    def __init__(self, products=CATALOG, brands=BRANDS):
+        self.repos = MemoryRepositories()
+        self.repos.products.upsert_many(products)
+        self.clients = {brand: FakeHofJ() for brand in brands.values()}
+        self.router = BrandRouter(self.clients, brands)
+        ids = iter("id%d" % i for i in range(1, 200))
+        self.vela = Vela(self.repos, self.router, StubPayments(), DEFAULT_TRAVELER, now=Clock(),
+                         new_id=lambda: next(ids))
+        self.worker = build_worker(self.vela, Settings(worker_concurrency=0), self.router)
+
+    def propose(self, text):
+        created = self.vela.create_intent(text, TRAVELER)
+        assert isinstance(created, IntentCreated), created
+        return self.vela.get_proposal(created.intent_id)
+
+    def buy(self, proposal):
+        order_id = self.vela.accept_proposal(proposal.proposal.id).order_id
+        self.worker.drain()
+        return self.vela.get_order_status(order_id)
+
+    def product(self, proposal):
+        return self.repos.products.get(proposal.proposal.product_id)
+
+    def cart_calls(self, brand):
+        """Chiamate del carrello; `/v1/quota` è per chiave, letta da un client qualsiasi."""
+        return [c[0] for c in self.clients[brand].calls if c[0] != "get_quota"]
+
+
+class MB1TennisTest(unittest.TestCase):
+    def test_tennis_request_gets_a_terrarossa_product_and_a_terrarossa_cart(self):
+        mb = MultiBrand()
+        proposal = mb.propose("Un weekend di tennis in Italia a maggio, siamo in due.")
+        self.assertIsInstance(proposal, ProposalMade)
+        self.assertEqual((mb.product(proposal).id, mb.product(proposal).brand), ("11", "terrarossa.com"))
+        self.assertEqual(mb.buy(proposal).status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(mb.cart_calls("terrarossa.com"),
+                         ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
+        self.assertEqual(mb.cart_calls("weebora.com"), [])
+
+
+class MB2PadelTest(unittest.TestCase):
+    def test_padel_request_stays_on_weebora(self):
+        mb = MultiBrand()
+        proposal = mb.propose("Padel in Spagna a ottobre, siamo in due.")
+        self.assertEqual((mb.product(proposal).id, mb.product(proposal).brand), ("1", "weebora.com"))
+        mb.buy(proposal)
+        self.assertTrue(mb.cart_calls("weebora.com"))
+        self.assertEqual(mb.cart_calls("terrarossa.com"), [])
+
+
+class MB3EnglishTest(unittest.TestCase):
+    def test_language_does_not_choose_the_brand(self):
+        mb = MultiBrand()
+        proposal = mb.propose("A tennis weekend in June for two.")
+        self.assertEqual(mb.product(proposal).brand, "terrarossa.com")
+        self.assertEqual(proposal.proposal.product_id, "12")
+
+
+class MB4SwitchSportTest(unittest.TestCase):
+    def test_rejecting_padel_for_tennis_moves_to_terrarossa(self):
+        mb = MultiBrand()
+        first = mb.propose("Padel in Italia a novembre, siamo in due.")
+        self.assertEqual(mb.product(first).brand, "weebora.com")
+        second = mb.vela.reject_proposal(first.proposal.id, "Preferisco il tennis")
+        self.assertIsInstance(second, ProposalMade)
+        self.assertEqual((mb.product(second).id, mb.product(second).brand), ("11", "terrarossa.com"))
+        mb.buy(second)
+        self.assertTrue(mb.cart_calls("terrarossa.com"))
+        self.assertEqual(mb.cart_calls("weebora.com"), [])
+
+
+class MB5AnySportTest(unittest.TestCase):
+    """`sport=any` = nessun filtro sport (M17): qui con `Criteria.sport=None`."""
+
+    NOVEMBER_FOR_TWO = Criteria(sport=None, period=Period(date(2026, 11, 1), date(2026, 11, 30), "novembre"),
+                                pax=2)
+
+    def test_without_sport_filter_both_brands_are_candidates(self):
+        chosen, rejected = [], set()
+        while True:
+            result = choose(CATALOG, self.NOVEMBER_FOR_TWO, rejected, TODAY, NOW)
+            if isinstance(result, NoChoice):
+                break
+            chosen.append(result.product.brand)
+            rejected.add(result.product.id)
+        self.assertEqual(sorted(chosen), ["terrarossa.com", "weebora.com"])
+
+    def test_the_brand_of_the_chosen_product_decides_the_cart(self):
+        mb = MultiBrand(products=[padel(2, country="IT", destination="Riccione", windows=NOVEMBER, price=900),
+                                  tennis(11, country="IT", destination="Roma", windows=NOVEMBER, price=400)])
+        result = choose(mb.repos.products.list_all(), self.NOVEMBER_FOR_TWO, set(), TODAY, NOW)
+        self.assertIsInstance(result, Choice)
+        self.assertEqual(result.product.brand, "terrarossa.com")
+        self.assertIs(mb.router.client_for(result.product), mb.clients["terrarossa.com"])
+
+
+class MB8NoProductForTheSportTest(unittest.TestCase):
+    def test_tennis_brand_not_configured_gives_the_existing_sport_no_match(self):
+        mb = MultiBrand(products=[p for p in CATALOG if p.sport == "padel"],
+                        brands={"padel": "weebora.com"})
+        result = mb.propose("Tennis a novembre, siamo in due.")
+        self.assertIsInstance(result, NoMatch)
+        self.assertEqual(result.failed_criterion, "sport")
+        self.assertIn("tennis", result.say)
+
+    def test_no_terrarossa_product_passing_the_filters(self):
+        mb = MultiBrand()
+        result = mb.propose("Tennis a gennaio, siamo in due.")
+        self.assertIsInstance(result, NoMatch)
+        self.assertEqual(mb.cart_calls("terrarossa.com"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
