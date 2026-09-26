@@ -111,9 +111,15 @@ GSM-7, viene traslitterato (es. `’` → `'`, `–` → `-`) per non passare a 
 Frasi dell'agente aggiornate:
 
 - `say_queued`: dice che il link arriverà via SMS al numero che finisce con le ultime 4 cifre del
-  numero normalizzato, e che arriverà un secondo SMS alla conferma. Non invita più a chiedere lo
-  stato. Se il numero non si normalizza, resta la frase di oggi.
+  numero normalizzato, e che arriverà un secondo SMS alla conferma. Se il numero non si
+  normalizza, resta la frase di oggi.
 - `awaiting_payment` (`say_status`): aggiunge che il link è stato mandato anche via SMS.
+
+Nota (revisione finale, decisioni del 2026-09-26): le frasi e i testi MCP con gli SMS valgono
+solo se Twilio è configurato (`Vela.sms_enabled`, acceso solo con `TwilioSms`); con gli SMS
+finti restano le frasi e i testi di prima. `say_queued` con gli SMS chiude con "Se vuoi sapere a
+che punto è, o se l'SMS non arriva entro qualche minuto, chiedimi pure." (en: "If you want to
+know how it's going, or the text hasn't arrived in a few minutes, just ask me.").
 
 ### Job SMS (`vela/domain/sms.py`)
 
@@ -162,6 +168,12 @@ Modulo a parte perché `sms.py` importa `JobResult` da `purchase.py`, che a sua 
 Istruzioni: la frase "the payment link comes later from get_order_status" diventa "Vela texts
 the payment link and the booking confirmation to the traveler's phone; do not poll
 get_order_status, call it only when the user asks". Nessun campo o tool cambia.
+
+Nota (revisione finale, decisioni del 2026-09-26): questi testi valgono solo se Twilio è
+configurato; altrimenti istruzioni e descrizioni restano quelle di prima degli SMS. Con gli SMS
+l'agente non interroga `get_order_status` di sua iniziativa, ma lo chiama ogni volta che
+l'utente chiede come va e una volta se dice che l'SMS non è arrivato (sostituisce "only when the
+user asks").
 
 ## Flusso
 

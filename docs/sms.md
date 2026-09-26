@@ -12,7 +12,8 @@ Codice: `vela/domain/sms.py` (job), `vela/domain/sms_text.py` (testi), `vela/dom
 
 ## Numeri
 
-Il telefono è quello di RF-12. Spazi e separatori vengono tolti; `+…` resta com'è; `00…`
+Il telefono è quello di RF-12. Uno "(0)" (es. `+39 (0)333…`) viene tolto, poi spazi e
+separatori; `+…` resta com'è; `00…`
 diventa `+…`; altrimenti si aggiunge `+39` (test in Italia). Un numero che non risulta `+` e
 8-15 cifre non riceve SMS: il job lo registra nei log e l'ordine va avanti.
 
@@ -21,6 +22,9 @@ diventa `+…`; altrimenti si aggiunge `+39` (test in Italia). Un numero che non
 | Variabile | Effetto |
 |---|---|
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Tutte e tre: SMS reali con Twilio. Nessuna: SMS finti (replay e test). Solo alcune: l'app non parte. Indipendenti da `VELA_UPSTREAM_MODE` |
+
+Solo con Twilio configurato l'agente annuncia gli SMS (frasi di `say` e testi MCP); con gli SMS
+finti restano le frasi e i testi di prima, perché nessun SMS parte davvero.
 
 `TWILIO_FROM` è il numero Twilio acquistato, in E.164. Mai incollare le chiavi in chat, nei
 commit o in `docs/`.
