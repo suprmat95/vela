@@ -99,7 +99,7 @@ class Vela:
         """RF-08: il motivo aggiorna i criteri dell'intento, persistiti prima della nuova scelta."""
         product = self.repos.products.get(proposal.product_id)
         area = geo.area_of_destination(product.destination, product.country) if product else None
-        criteria = refine(intent.criteria, reason, proposal, area, self.now().date())
+        criteria = refine(intent.criteria, reason, proposal, area, self.now().date()).criteria
         if criteria == intent.criteria:
             return intent
         self.repos.intents.update_criteria(intent.id, criteria)

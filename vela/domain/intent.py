@@ -431,11 +431,10 @@ def _same(a, b) -> bool:
     return a == b
 
 
-def conflicts_between(before: Criteria, given: dict) -> tuple:
-    """(campo, valore precedente, valore del campo) dove un campo valido cambia un valore già letto."""
-    return tuple((name, _plain(getattr(before, name)), _plain(value))
-                 for name, value in given.items()
-                 if getattr(before, name) is not None and not _same(getattr(before, name), value))
+def conflicts_between(read: dict, given: dict) -> tuple:
+    """(campo, valore letto nel testo, valore del campo) dove un campo valido contraddice il testo."""
+    return tuple((name, _plain(read[name]), _plain(value)) for name, value in given.items()
+                 if read.get(name) is not None and not _same(read[name], value))
 
 
 def _with_fallback(criteria: Criteria, text: str, today: date,
@@ -483,4 +482,4 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
-    return ParseResult(criteria, question, discarded, conflicts_between(parsed, given))
+    return ParseResult(criteria, question, discarded, conflicts_between(vars(parsed), given))
