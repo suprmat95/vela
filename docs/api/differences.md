@@ -15,7 +15,7 @@ imprecisione documentale.
 | 5 | media | `limit` fuori range | 400 | 400 confermato, ma `detail` è una **stringa contenente un array JSON** di errori zod (`code: too_big`, `maximum: 100`, `path: ["limit"]`), da parsare a parte. |
 | 6 | media | `locale` non valido | nessuna indicazione | 200 con `data: []` invece di 400: un refuso nel locale svuota silenziosamente il catalogo. |
 | 7 | media | `cursor` | string opaca | base64url di `{"p":2}`: è un numero di pagina. Funziona come opaco ma non è stabile se il set cambia tra due pagine. |
-| 8 | media | `/v1/quota` | "rolling 60s window" | Finestra **fissa di 60 s ancorata alla prima richiesta** (`windowStartedAt` = istante della prima chiamata; alla scadenza la finestra riparte con la richiesta successiva). Nessun header `Retry-After`/`X-RateLimit-*`. |
+| 8 | media | `/v1/quota` | "rolling 60s window" | Finestra **fissa di 60 s ancorata alla prima richiesta** (`windowStartedAt` = istante della prima chiamata; alla scadenza la finestra riparte con la richiesta successiva). Verificato anche a cavallo della scadenza il 2026-09-26 (`scripts/quota_probe.py`, [quota-health.md](quota-health.md)): non scorrevole, non a griglia. Nessun header `Retry-After`/`X-RateLimit-*`. |
 | 9 | media | `Venue.rating`, `ProductVenueSummary.rating` | number nullable | Solo `0` (158 su 184) o `null` (26): il campo non è informativo. |
 | 10 | media | `Product.price` vs `Money.amount` | `price: number`; `Money.amount: string` | Prezzi interi in catalogo (`340`), stringhe nel checkout: due rappresentazioni del denaro nello stesso contratto. |
 | 11 | media | `ProductTravelProgram.id` | string | Nel DTO `"733"` (stringa), in `rawAttributes.travelProgram.id` `733` (intero). |

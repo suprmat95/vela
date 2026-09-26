@@ -70,3 +70,23 @@ non pagato.
 
 7. **Carrelli di prova.** I due carrelli sopra e i relativi pagamenti di test vanno annullati o
    segnalati da qualche parte?
+
+## Domande aggiunte il 2026-09-26 (seconda lettura del twist)
+
+Nate dalla rilettura del twist (`docs/plans/2026-09-26-twist-seconda-lettura.md`,
+`docs/decisions.md` "2026-09-26 — Twist, seconda lettura").
+
+8. **Finestra di quota.** Su staging abbiamo misurato una finestra fissa di 60 s ancorata alla
+   prima chiamata dopo la scadenza (`docs/api/quota-health.md`, sonda del 2026-09-26), mentre
+   il brief e l'OpenAPI parlano di "rolling 60s window". In produzione la finestra è la stessa
+   o è davvero scorrevole?
+
+9. **Riferimento del cliente sull'itinerario.** `POST /v1/itineraries` non è idempotente: dopo
+   un timeout non sappiamo se l'itinerario è stato creato, e ripetere ne crea un secondo. Possiamo
+   passare un nostro riferimento (per esempio `affiliateId`) e ritrovare l'itinerario con quello
+   dopo un timeout, come la `Retrieve` con `affiliate_reference_id` di Expedia Rapid?
+
+10. **Cliente e passeggeri dopo il pagamento.** `PUT /v1/itineraries/{id}/customer` e
+    `PUT /v1/itineraries/{id}/pax` sono accettati anche dopo che il viaggiatore ha pagato (prima
+    di `POST /v1/bookings`)? Il totale dell'itinerario può cambiare dopo l'inserimento dei
+    passeggeri?

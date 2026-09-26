@@ -631,3 +631,81 @@ Decisioni prese durante l'implementazione; il design aggiornato è in
 | Registrazione delle fixture tennis | 2026-09-26: `catalog-tennis.json` 51 chiamate (1 quota, 1 pagina, 49 dettagli; 80 prodotti, 49 attivi), `catalog-staging-tennis.json` 15 chiamate (1 quota, 1 pagina, 13 dettagli; 36 prodotti, 13 attivi). Nessun 429 | Numeri uguali a quelli dichiarati prima delle chiamate |
 | Rebase su M17 | 2026-09-26: `task/m10` riportato su `master` dopo il merge di M17 (unico conflitto: le sezioni in coda a questo file). Annotazione di `hofj` in `usecases.py` e `orders.py` corretta in `HofJRouter`; MB5 testato anche con `sport="any"` vero. Suite 916 test | I file di M17 si toccano solo dopo il suo merge |
 | Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |
+
+## 2026-09-26 — Accettazione con attesa breve
+
+Origine: discussione sul twist. Con la coda vuota l'accettazione risponde comunque "ti ho
+messo in coda" e l'agente deve chiedere lo stato per avere il link, anche quando il job lo
+prepara in pochi secondi. Roadmap M20.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Strategia | B: un solo percorso; in posizione 1 `accept_proposal` attende fino a `accept_wait_seconds` (default 10 s) il link preparato dal job, poi risponde come oggi | Stesso risultato per chi è solo, costo 1-2 h, nessuna regola cambiata. Scartata A (con budget libero l'accept fa subito le 5 chiamate): rompe RF-45, richiesta di 10-30 s, errori gestiti in due posti, e sotto picco girerebbe il percorso meno usato in demo |
+| RF-45 | Resta: l'accettazione non chiama HofJ né Stripe | La decisione del twist del 2026-09-25 ("un solo percorso da testare") vale ancora |
+| Limite noto | Con HofJ reale le 5 chiamate richiedono 10-20 s: l'attesa di 10 s non sempre basta | Accettato: nel caso peggiore la risposta è quella di oggi, con una frase più adatta |
+
+
+## 2026-09-26 — Twist, seconda lettura
+
+Origine: rilettura del testo dettagliato del twist (`docs/brief.md`, "The twist", richieste
+1-5) in una conversazione fuori dal repo, rilettura del codice di M5 e M10, e la sonda della
+finestra di quota (`scripts/quota_probe.py`, 6 chiamate a `GET /v1/quota` su staging,
+`docs/api/quota-health.md`). Contesto completo e numeri in
+`docs/plans/2026-09-26-twist-seconda-lettura.md`. La prima lettura ("Twist: 50.000 viaggiatori
+in dieci minuti", 2026-09-25) resta valida; questa ne è il seguito.
+
+Etichette: **[misurato]** = verificato con chiamate reali o leggendo il codice; **[previsto]** =
+deduzione da confermare con il load test (M13a); **[proposta]** = scelta di design non ancora
+implementata.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Finestra di quota di HofJ | **[misurato]** Fissa di 60 s, ancorata alla prima chiamata dopo la scadenza della precedente; non scorrevole, non a griglia; nessun header di rate limit. Spec RF-36 corretta ("finestra mobile" tolto) | Sonda del 2026-09-26: la chiamata a S + 63 s vede `used=1` e una finestra che parte al suo istante. Brief e OAS dicono "rolling": domanda 8 in `docs/hofj-questions.md` |
+| Ritmo della quota | **[proposta, M18]** Token bucket condiviso in Postgres, ritmo r e capienza B con B + 60·r ≤ 108 (es. B = 8, r = 100/60): nessun intervallo di 60 s supera 108 chiamate, qualunque sia la regola di HofJ | **[misurato il codice]** `rolled()` in `vela/domain/quota.py` fa ripartire la finestra su una griglia di 60 s, HofJ alla prima chiamata dopo la scadenza. **[previsto, da confermare con M13a]** Sotto carico i worker ripartono insieme all'azzeramento di Vela e la raffica cade nella coda della finestra di HofJ → 429 quasi a ogni finestra, ritmo dimezzato. Copiare la regola di HofJ non basta: non si osserva senza pagare quota |
+| Concorrenza dei worker | **[proposta, M18]** `worker_concurrency` ~10, con il ritmo deciso dal bucket e non dal numero di thread | **[previsto, da confermare con M13a]** Con 5 chiamate in serie da 2-6 s un acquisto occupa un worker ~20 s: con 4 thread e una sola istanza ~12 acquisti/min, sotto i 17,4 consentiti dalla quota. Legge di Little: 1,45 chiamate/s × 4-6 s ≈ 6-9 chiamate contemporanee |
+| Timeout come esito incerto | **[misurato il codice]** Ci contiamo già sull'upsert di `POST /v1/bookings`: `BookingJob.run` ripete la stessa `POST` con lo stesso `itinerary_id` (5 tentativi, 5-10-20-40 s) e un job con lease scaduto viene rieseguito. **[da verificare nel codice]** Due job concorrenti per lo stesso ordine manderebbero la `POST` due volte. **[proposta, M18]** Client a 20 s invece di 15; timeout su `POST /v1/itineraries` contato come itinerario orfano; lease rivisto per 5 × 20 s | HofJ rinuncia verso il brand dopo 15 s: con il client a 15 s chiudiamo un attimo prima della risposta. `POST /v1/itineraries` non è idempotente: un retry dopo timeout crea un secondo itinerario (domanda 9 in `docs/hofj-questions.md`) |
+| Spendere su chi paga | **[proposta, M19, condizionata]** Link con 2 chiamate (itinerario + totale); cliente e pax dopo il pagamento, nel job di booking; scadenza degli ordini silenziosi | Look-to-book: oggi ogni accettazione costa 5 chiamate prima di sapere se il viaggiatore pagherà. **[previsto]** Link al minuto da ~17 a ~43. Condizionata alla verifica su staging (domanda 10 in `docs/hofj-questions.md`) |
+| Load test | **[proposta, M13a, M13b]** Solo contro un finto HofJ che applica le regole di HofJ (finestra ancorata di default, scorrevole come opzione); modo `VELA_UPSTREAM_MODE=loadtest` con pagamenti finti, che rifiuta host diversi da localhost/`fake-hofj`; M13a misura il codice di oggi ("prima"), M18 corregge, M13b rilancia ("dopo"). Spec RNF-10 corretta ("contro l'URL live" tolto) | **[misurato il codice]** `render.yaml` punta a HofJ staging in modo `live` e `live` richiede `STRIPE_SECRET_KEY`: un load test contro Render porterebbe il carico a HofJ. Il test dimostra un confine: chiamate a HofJ al minuto piatte, sotto 108, da 1k a 50k viaggiatori |
+| Sync nel budget | **[misurato il codice]** Il sync di M10 chiama HofJ al boot e ogni 6 h come classe `sync` e si ferma se ci sono acquisti in attesa (`vela/sync.py`); padel e tennis usano la stessa chiave. È la prima cosa sacrificata sotto picco | Il sync consuma la stessa quota degli acquisti |
+| Ipotesi "rolling" | Il 2026-09-26 si era preso per buono il "rolling" del brief e proposto il token bucket per quel motivo; la sonda l'ha smentito. Il token bucket resta, per un motivo diverso: la deriva del contatore e il fatto che non possiamo osservare HofJ gratis | Il twist chiede di leggere "come rispondete a un cambio di requisiti sotto pressione": l'errore e la correzione vanno scritti |
+| Documenti aggiornati | `docs/api/quota-health.md`, `docs/api/differences.md` (#8), `docs/hofj-questions.md` (8-10), `docs/spec.md` (RF-36, RF-47, nota su RF-48, RNF-04, RNF-10), `docs/roadmap.md` (M13a, M13b, M18, M19, M15, riga di M20). RF-48 resta invariato fino a M18. Nessun test da aggiornare: nessun test legge roadmap o spec | Solo documenti; le correzioni al codice sono di M18 e M19 |
+
+### Il diff nel pensiero
+
+1. **Prima del twist (mattina del 2026-09-25).** La quota era un errore da gestire:
+   accettazione sincrona entro 30 s (vecchia RNF-04), "riprova tra un minuto" a quota finita
+   (vecchia RF-37).
+2. **Prima lettura (sera del 2026-09-25).** La quota diventa capacità da pianificare: coda in
+   Postgres, scheduler unico per il cluster, accettazione sempre asincrona con attesa
+   dichiarata, riserva per le prenotazioni, nessun tetto all'attesa. Scartati Redis/Celery,
+   drenatore unico eletto, ibrido sincrono.
+3. **Seconda lettura (2026-09-26).** L'impianto regge; cambiano cinque idee:
+
+| Prima pensavamo | Ora pensiamo | Cosa ce l'ha fatto cambiare |
+|---|---|---|
+| Bisogna copiare la finestra di HofJ e allinearsi | Bisogna essere sicuri con qualunque finestra: ritmo costante | Il brief dice "rolling", la sonda misura una finestra ancorata, il nostro contatore va a griglia. Non potendo osservare HofJ gratis, ci si protegge da tutti i modelli |
+| Il limite è la quota | Il limite può essere la latenza: ~12 acquisti/min con 4 thread invece di 17,4 (**[previsto]**, da confermare con M13a) | La ricerca dell'alloggio da 2-6 s; legge di Little |
+| Un timeout è un errore: si riprova | Un timeout è un esito incerto: si riprova solo dove è idempotente | Il timeout a 15 s: booking upsert sicuro, itinerario no (orfani); precedenti Expedia e Brandur |
+| Le chiamate si spendono in ordine d'arrivo | Le chiamate vanno spese su chi pagherà | Look-to-book: 5 chiamate per link che magari nessuno paga |
+| Il load test misura le prestazioni | Il load test dimostra un confine: chiamate a HofJ piatte da 1k a 50k utenti | Il vincolo "mai contro HofJ"; il finto deve applicare le regole di HofJ, non le nostre |
+
+Non cambia: coda in Postgres, accettazione asincrona con un solo percorso, riserva per le
+prenotazioni, nessun servizio in più.
+
+### Budget di quota
+
+Limite 120/min per chiave (padel e tennis insieme). Margine 10% per gli altri usi della chiave
+→ 108. Riserva `booking` 20% → 21. Acquisti → 87, cioè 17,4 al minuto.
+
+| Voce del brief | Chiamate HofJ | Classe | Note |
+|---|---|---|---|
+| Browse (intento, proposta, rifiuto) | 0 | — | Catalogo nel DB, sincronizzato da M10 |
+| Cart | 5 per ordine: itinerario, cliente, lettura pax, scrittura pax, totale | `purchase` | Una sola volta per ordine; ripetizioni solo su rete/5xx, massimo 3 finestre |
+| Hotel | Dentro `POST /v1/itineraries` (hotel di default, RF-15) | `purchase` | È la chiamata da 2-6 s; nessuna chiamata a `/accommodations` |
+| Booking | 1 per ordine pagato | `booking` | Dalla riserva di 21/min: non aspetta la coda d'acquisto |
+| Lettura quota | 1 al boot e dopo un 429 | `booking` | Mai in ciclo |
+| Verifica del pagamento | 0 HofJ | — | Interroga Stripe |
+| Sync del catalogo | pagine + dettagli dei due brand, ogni 6 h | `sync` | Solo a coda d'acquisto vuota |
+
+Cosa si sacrifica, in ordine: 1) il sync; 2) l'attesa degli acquisti, che cresce, dichiarata,
+senza tetto; 3) mai le prenotazioni degli ordini pagati.
