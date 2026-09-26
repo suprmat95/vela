@@ -424,3 +424,57 @@ Ho scritto RESULTS.md con "prima" e "dopo". Correggo un dettaglio (i job doppi e
 - 🔧 Bash: Check end of decisions file
 
 - 🔧 Bash: Add M13b decisions entry and rerun tests
+
+Nessun criterio è fallito e i test sono verdi, quindi faccio i due commit previsti dal piano.
+
+- 🔧 Bash: Commit M13b results and decisions
+
+M13b è chiusa su `task/m13b` con due commit. Passo al fix: nuovo branch e un Postgres usa e getta per i test.
+
+- 🔧 Bash: Create fix branch, start test Postgres, run full suite
+
+- 🔧 Bash: Read memory repos and DuplicateOrder handling
+
+- 🔧 Bash: Check job statuses, enqueue callers, migration and order tests
+
+- 🔧 Bash: Read order tests, Orders service header and migration test
+
+Scrivo prima i test (fase RED): contratto dei repository, dominio e migrazione.
+
+- 🔧 Bash: Read contract seed helpers and migration test header
+
+- 🔧 Bash: Write failing tests for atomic transition and unique booking job
+
+Il replace ha cambiato anche `"0008"` dentro un test che riguarda proprio la 0008. Controllo e, se serve, ripristino.
+
+- 🔧 Bash: Review migration test changes
+
+Aggiungo altri due test. Il primo è di dominio con thread veri, nel contratto, quindi gira sia in memoria sia su Postgres. Il secondo verifica il downgrade della 0009.
+
+- 🔧 Bash: Add remaining tests and run them to see RED
+
+- 🔧 Bash: Run the new tests per module to confirm they fail
+
+- 🔧 Bash: Add port signatures and rerun contract tests
+
+- 🔧 Bash: Add migration dedupe test and confirm it fails
+
+Tutti i test sono rossi per il motivo giusto. Adesso il codice (GREEN): migrazione 0009, repository e dominio.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13b/alembic/versions/0009_unique_active_booking_job.py
+
+- 🔧 Bash: Implement atomic transition, duplicate job guard and schema index
+
+Nello schema mancano `text` e la costante: li aggiungo, poi rilancio i test.
+
+- 🔧 Bash: Fix schema import and rerun the affected tests
+
+Tutto verde. Adesso la suite completa, con e senza Postgres, e i test di concorrenza ripetuti 10 volte per escludere che passino per caso.
+
+- 🔧 Bash: Run full suite with and without Postgres and repeat race tests
+
+- 🔧 Bash: Repeat race tests ten times and count tests run
+
+- 🔧 Bash: Prepare verification script and rebuild images with the fix
+
+- 🔧 Bash: Rerun runs A-500 and C-2500 on the fixed code

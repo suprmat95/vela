@@ -11,6 +11,7 @@ from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
+from vela.ports.jobs import DuplicateJob
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder, SyncState
 
@@ -117,6 +118,14 @@ class MemoryOrders:
         with self._lock:
             self._items[order.id] = order
 
+    def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
+        with self._lock:
+            current = self._items.get(order.id)
+            if current is None or current.status != expected:
+                return False
+            self._items[order.id] = order
+            return True
+
     def orphan_itineraries_total(self) -> int:
         return sum(o.orphan_itineraries for o in self._items.values())
 
@@ -159,6 +168,10 @@ class MemoryJobs:
 
     def enqueue(self, job: Job) -> None:
         with self._lock:
+            if job.kind == JobKind.BOOKING and job.status in ACTIVE and any(
+                    j.order_id == job.order_id and j.kind == JobKind.BOOKING and j.status in ACTIVE
+                    for j in self._jobs.values()):
+                raise DuplicateJob(job.order_id)
             self._jobs[job.id] = job
 
     def get(self, job_id: str) -> Optional[Job]:

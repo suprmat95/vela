@@ -1,10 +1,11 @@
 import unittest
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from support import NOW, FakeHofJ
 from vela.adapters.repo_memory import MemoryRepositories
-from vela.domain.models import Order, OrderStatus, TravelerProfile
+from vela.domain.models import JobKind, Order, OrderStatus, TravelerProfile
 from vela.domain.orders import NotFound, OrderService
 
 
@@ -69,6 +70,36 @@ class MarkPaidTest(unittest.TestCase):
         self.assertEqual(s.resume_bookings(), ["o1"])
         self.assertEqual(s.resume_bookings(), [])
         self.assertIsNotNone(s.repos.jobs.active_for_order("o1", JobKind.BOOKING))
+
+class ConcurrentPaymentTest(unittest.TestCase):
+    """Checkout e verifica del pagamento che leggono l'ordine insieme (M13b, `task/booking-race`):
+    la seconda lettura è vecchia, ma il passaggio di stato atomico la ferma."""
+
+    def test_stale_mark_paid_enqueues_no_second_booking(self):
+        s = service(order())
+        stale = s.repos.orders.get("o1")
+        first = s.mark_paid("o1", "pi_1")
+        with patch.object(s.repos.orders, "get", return_value=stale), \
+                patch.object(s.repos.jobs, "active_for_order", return_value=None):
+            s.mark_paid("o1", "pi_2")
+        self.assertIsNone(s.repos.jobs.get("job2"))
+        self.assertEqual(s.repos.orders.get("o1"), first)
+
+    def test_stale_expire_does_not_undo_a_payment(self):
+        s = service(order())
+        stale = s.repos.orders.get("o1")
+        paid = s.mark_paid("o1", "pi_1")
+        with patch.object(s.repos.orders, "get", return_value=stale):
+            s.expire("o1")
+        self.assertEqual(s.repos.orders.get("o1"), paid)
+
+    def test_resume_bookings_skips_a_job_enqueued_meanwhile(self):
+        s = service(order(status=OrderStatus.PAID_PENDING_BOOKING))
+        self.assertEqual(s.resume_bookings(), ["o1"])
+        with patch.object(s.repos.jobs, "active_for_order", return_value=None):
+            self.assertEqual(s.resume_bookings(), [])
+        self.assertEqual(s.repos.jobs.active_for_order("o1", JobKind.BOOKING).id, "job1")
+
 
 class ExpireTest(unittest.TestCase):
     def test_awaiting_becomes_expired(self):

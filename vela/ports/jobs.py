@@ -10,8 +10,14 @@ from typing import Optional, Protocol
 from vela.domain.models import Job, JobKind
 
 
+class DuplicateJob(Exception):
+    """L'ordine ha già un job `booking` attivo (RF-51); il database lo garantisce con un indice
+    unico parziale (migrazione 0009)."""
+
+
 class JobRepository(Protocol):
-    def enqueue(self, job: Job) -> None: ...
+    def enqueue(self, job: Job) -> None:
+        """Solleva `DuplicateJob` se l'ordine ha già un job `booking` `pending` o `running`."""
     def get(self, job_id: str) -> Optional[Job]: ...
     def save(self, job: Job) -> None: ...
     def claim(self, now: datetime, lease_seconds: int) -> Optional[Job]: ...

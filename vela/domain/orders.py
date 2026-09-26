@@ -13,6 +13,7 @@ from typing import Callable, List
 
 from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
 from vela.ports.hofj import HofJRouter
+from vela.ports.jobs import DuplicateJob
 from vela.ports.payments import LinkStatus, to_cents
 from vela.ports.repositories import Repositories
 
@@ -47,15 +48,19 @@ class OrderService:
         now = self.now()
         order = replace(order, status=OrderStatus.PAID_PENDING_BOOKING, payment_ref=payment_ref,
                         paid_at=now, updated_at=now)
-        self.repos.orders.save(order)
+        if not self.repos.orders.save_if_status(order, OrderStatus.AWAITING_PAYMENT):
+            return self.get(order_id)   # un'altra conferma di pagamento è arrivata prima
         self._enqueue_booking(order.id, now)
         return order
 
     def _enqueue_booking(self, order_id: str, now: datetime) -> bool:
-        """RF-51: un solo job di prenotazione attivo per ordine."""
+        """RF-51: un solo job di prenotazione attivo per ordine, garantito dal repository."""
         if self.repos.jobs.active_for_order(order_id, JobKind.BOOKING) is not None:
             return False
-        self.repos.jobs.enqueue(Job(self.new_id(), JobKind.BOOKING, order_id, JobStatus.PENDING, now, now))
+        try:
+            self.repos.jobs.enqueue(Job(self.new_id(), JobKind.BOOKING, order_id, JobStatus.PENDING, now, now))
+        except DuplicateJob:
+            return False
         return True
 
     def resume_bookings(self) -> List[str]:
@@ -86,7 +91,8 @@ class OrderService:
         if order.status != OrderStatus.AWAITING_PAYMENT:
             return order
         order = replace(order, status=OrderStatus.EXPIRED, updated_at=self.now())
-        self.repos.orders.save(order)
+        if not self.repos.orders.save_if_status(order, OrderStatus.AWAITING_PAYMENT):
+            return self.get(order_id)   # pagato nel frattempo: il pagamento vince
         return order
 
     def pending_booking_ids(self) -> List[str]:
