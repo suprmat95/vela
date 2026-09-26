@@ -709,3 +709,19 @@ Limite 120/min per chiave (padel e tennis insieme). Margine 10% per gli altri us
 
 Cosa si sacrifica, in ordine: 1) il sync; 2) l'attesa degli acquisti, che cresce, dichiarata,
 senza tetto; 3) mai le prenotazioni degli ordini pagati.
+
+## 2026-09-26 — Bozza di `ARCHITECTURE.md` (M15)
+
+Origine: richiesta dell'utente di scrivere la bozza di `ARCHITECTURE.md` da roadmap M15 (sezione
+twist) e da `docs/plans/2026-09-26-twist-seconda-lettura.md` (sezioni 3-7), senza i numeri del
+load test. Approccio approvato dall'utente.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Numeri del load test | Segnaposto "[numeri da M13a]" per la colonna "prima" e "[numeri da M13b]" per la colonna "dopo"; comandi di lancio "[comandi da `loadtest/README.md`, M13a]" | `loadtest/RESULTS.md` non esiste ancora: niente numeri inventati |
+| Merge | Il branch `doc/architecture` non si mergia su `master` finché M13b non è su `master` | Indicazione dell'utente; M15 dipende da M13b |
+| Allineamento del branch | `doc/architecture` portato a `master` con un fast-forward | Il piano e la sezione twist di M15 erano solo su `master`; nessun commit proprio sul branch, nessuna riscrittura della storia |
+| Portata | Documento completo secondo M15 (panoramica, decisioni e compromessi, vincoli RF-13, twist con le 5 richieste e i precedenti, prossimi passi); README, video e checklist restano per dopo | Scelta dell'utente tra "tutto lo scheletro" e "solo twist" |
+| Etichette | Mantenute [misurato] / [previsto] / [proposta] del piano; le correzioni di M18 e M19 restano proposte | Il piano (sezione 9) vieta di scrivere le previsioni come fatti |
+| Doppio job di prenotazione | Il punto 3 della sezione 3.3 del piano ("da verificare nel codice") è scritto come letto nel codice: `_enqueue_booking` controlla e poi accoda senza lock né vincolo unico, quindi due job concorrenti sono possibili; non riprodotto | Verificato leggendo `vela/domain/orders.py` e `vela/adapters/schema.py`; la correzione, se serve, è di M18 |
+| Mapping A2A | Stati del task A2A ↔ stati dell'ordine scritti come proposta da confermare | Non era nei documenti; va confermato dall'utente o da M16 |
