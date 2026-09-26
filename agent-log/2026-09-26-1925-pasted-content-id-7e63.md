@@ -221,3 +221,13 @@ A real bug caught by the test: `start or "?"` turns 0 into "?". I'll use `is Non
 - 🔧 Bash: Fix zero handling in discarded value and rerun
 
 - 🔧 Bash: Commit say and nights changes
+
+Step 4: rejection (`refine.py`).
+
+- 🔧 Bash: Read test_refine helpers
+
+Refine tests (RED). The proposal in the tests is 3 nights (1→4 October):
+
+- 🔧 Bash: Add refine duration tests and run
+
+- 🔧 Bash: Implement duration changes in refine and run suite
