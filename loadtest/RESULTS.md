@@ -121,7 +121,8 @@ Una frase per ogni differenza tra "prima" e "dopo".
    frequente. In D il DB mostra 1 ordine con due job: le altre 5 ripetizioni sono quelle previste
    dopo un timeout con esecuzione (`hang_then_execute`). Il finto registra sempre un booking per
    itinerario (upsert), quindi il criterio passa, ma ogni doppione costa un gettone e l'upsert di
-   HofJ vero è stato visto solo in due sonde. Correzione in una task separata.
+   HofJ vero è stato visto solo in due sonde. Corretta in `task/booking-race` (sotto, "Dopo il
+   fix").
 7. **Più itinerari orfani nel giro con guasti:** 3 invece di 1, con lo stesso 3% di
    `hang_then_execute` su `POST /v1/itineraries`, perché Vela fa più acquisti (125 link contro
    76). Adesso sono contati (`orders.orphan_itineraries` e `/health`).
@@ -147,6 +148,24 @@ Una frase per ogni differenza tra "prima" e "dopo".
     connessioni. **[Ipotesi, non misurata a parte.]** Restiamo ben sotto la soglia di 500 ms per
     la proposta (sentinella Anna: 10-12 ms), ma il margine a 430 req/s della proiezione si
     riduce.
+
+## Dopo il fix delle prenotazioni doppie (task/booking-race) [misurato]
+
+Passaggio di stato atomico dell'ordine più indice unico sui job `booking` attivi (decisione in
+`docs/decisions.md`). Rilanciati identici A-500 e C-2500 il 2026-09-26 sul commit `49cc1cb`.
+
+| | A dopo M18 | A dopo il fix | C dopo M18 | C dopo il fix |
+|---|---|---|---|---|
+| Itinerari con `POST /v1/bookings` ripetuta | 1 | **0** | 4 | **0** |
+| `POST /v1/bookings` / itinerari prenotati | 68 / 67 | 67 / 67 | 89 / 85 | 85 / 85 |
+| Massimo chiamate Vela → HofJ in 60 s | 108 | 106 | 106 | 106 |
+| 429 ricevuti | 0 | 0 | 0 | 0 |
+| Marco confermato a (s) | 95 | 95 | 367 | 372 |
+| Accettazioni / link / confermati | 110 / 110 / 67 | 110 / 110 / 67 | 487 / 135 / 74 | 487 / 135 / 75 |
+| Errori REST / p95 REST peggiore (ms) | 0 / 20 | 0 / 19 | 0 / 200 | 0 / 190 |
+
+Una sola `POST /v1/bookings` per itinerario prenotato, in entrambi i giri. Gli altri numeri
+restano quelli di M18: criteri tutti passati. Il p95 della conversazione non cambia (punto 12).
 
 ## Cosa dicevano i numeri prima di M18
 

@@ -478,3 +478,61 @@ Tutto verde. Adesso la suite completa, con e senza Postgres, e i test di concorr
 - 🔧 Bash: Prepare verification script and rebuild images with the fix
 
 - 🔧 Bash: Rerun runs A-500 and C-2500 on the fixed code
+
+- 🔧 Bash: Record fix decision and commit the fix
+
+Fix committato su `task/booking-race` (`49cc1cb`), con test e decisione registrata. La verifica sul banco (A-500 e C-2500 rilanciati identici sul codice corretto) sta girando e finisce verso le 18:40.
+
+Stato:
+
+**M13b, chiusa su `task/m13b`** (commit `17b3447` e `1c78e8d`)
+- `loadtest/RESULTS.md` ha le colonne "prima" e "dopo" per i cinque giri, una tabella dei criteri e 12 frasi, una per ogni differenza.
+- Dopo M18 **tutti i criteri passano in tutti i giri**: 0 429, massimo 105-108 chiamate in 60 s (prima 132-138), Marco sempre confermato entro il minuto 7, un solo booking per itinerario.
+- Due cose da notare:
+  - le POST di booking doppie, registrate come regressione;
+  - la conversazione più lenta: p95 fino a 200 ms contro 30 ms, sempre senza errori. La mia ipotesi, non misurata, è che i 10 worker girino nello stesso processo uvicorn della conversazione.
+
+**Fix, su `task/booking-race`** (commit `49cc1cb`, ramo aperto da `task/m13b`)
+- **A:** `mark_paid` ed `expire` passano di stato con un `UPDATE … WHERE status = 'awaiting_payment'` atomico (`save_if_status`). Chi arriva secondo non accoda niente. Come effetto in più, una scadenza letta prima del pagamento non può più annullarlo.
+- **B:** la migrazione 0009 aggiunge un indice unico parziale: al massimo un job `booking` attivo per ordine. `enqueue` solleva `DuplicateJob`.
+- **Migrazione su dati esistenti:** prima di creare l'indice, la 0009 porta a `dead` gli eventuali job doppi già in tabella e tiene il più vecchio. Senza questo passo, su un DB con la corsa già avvenuta la creazione dell'indice fallirebbe al boot. Questa scelta non l'avevamo discussa: dimmi se preferisci un'altra strategia.
+- **Test:** 18 nuovi, scritti prima del codice e visti fallire. Tra questi, 8 thread su Postgres che chiamano `mark_paid` sullo stesso ordine: prima del fix riproduceva il bug, dopo passa 10 volte su 10.
+- **Suite completa:** 1.062 test verdi senza Postgres (62 saltati), tutti verdi con Postgres.
+
+**Dubbi**
+- `save_if_status` e `DuplicateJob` sono aggiunte a porte interne. Me le avevi approvate con l'opzione A e B, ma restano un cambio d'interfaccia (solo interna, nessuna superficie MCP/REST cambia).
+- Mi aspetto che la verifica sul banco dia 0 itinerari con POST ripetute in A e C. Se non è così te lo riporto con i numeri.
+
+Niente push e niente PR finché non me lo chiedi.
+
+## Utente 17:59
+
+ok procedi
+
+## Agente 17:59
+
+- 🔧 Bash: Check verification run progress
+
+La verifica sul banco è partita alle 17:58. Ogni giro dura circa 8 minuti, quindi A-500 e C-2500 finiscono verso le 18:15 (prima avevo detto 18:40, era sbagliato). Quando finiscono ricevo una notifica, poi:
+
+1. leggo i due report e controllo che gli itinerari con POST ripetute siano 0 e che gli altri tre criteri passino ancora;
+2. aggiungo la nota "dopo il fix" in `loadtest/RESULTS.md` (punto 6) e il risultato in `docs/decisions.md`;
+3. faccio il commit su `task/booking-race` e ti riporto i numeri.
+
+## Utente 18:14
+
+<task-notification>
+<task-id>b5o8ly8bv</task-id>
+<tool-use-id>toolu_017x93Apbk2xJHGUbtmhwKyb</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m13b/ab4e3114-493e-48f3-9964-89b174f316e1/tasks/b5o8ly8bv.output</output-file>
+<status>completed</status>
+<summary>Background command "Rerun runs A-500 and C-2500 on the fixed code" completed (exit code 0)</summary>
+</task-notification>
+
+## Agente 18:14
+
+- 🔧 Bash: Read verification run results
+
+Il fix funziona: 0 POST ripetute in entrambi i giri, e ora le POST di booking sono esattamente una per itinerario prenotato. Aggiungo la nota in RESULTS.md e il risultato nella decisione.
+
+- 🔧 Bash: Add fix verification to RESULTS and decisions
