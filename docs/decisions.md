@@ -631,3 +631,19 @@ Decisioni prese durante l'implementazione; il design aggiornato è in
 | Registrazione delle fixture tennis | 2026-09-26: `catalog-tennis.json` 51 chiamate (1 quota, 1 pagina, 49 dettagli; 80 prodotti, 49 attivi), `catalog-staging-tennis.json` 15 chiamate (1 quota, 1 pagina, 13 dettagli; 36 prodotti, 13 attivi). Nessun 429 | Numeri uguali a quelli dichiarati prima delle chiamate |
 | Rebase su M17 | 2026-09-26: `task/m10` riportato su `master` dopo il merge di M17 (unico conflitto: le sezioni in coda a questo file). Annotazione di `hofj` in `usecases.py` e `orders.py` corretta in `HofJRouter`; MB5 testato anche con `sport="any"` vero. Suite 916 test | I file di M17 si toccano solo dopo il suo merge |
 | Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |
+
+## 2026-09-26 — SMS: design delle notifiche
+
+Origine: brainstorming "setup Twilio". Design in
+`docs/superpowers/specs/2026-09-26-sms-notifiche-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Notifiche proattive | Due SMS via Twilio al viaggiatore principale: link di pagamento con riepilogo (`awaiting_payment`) e conferma con codice (`confirmed`). Nessun SMS per gli altri esiti | Il viaggiatore doveva chiedere più volte all'agente se il link o la conferma erano pronti |
+| Normalizzazione del numero | Tolti spazi e separatori; `+…` invariato; `00…` → `+…`; altrimenti `+39` davanti; valido se `+` e 8-15 cifre, altrimenti nessun invio | Test in Italia; un `+39` già scritto non si raddoppia e un numero estero dichiarato non diventa italiano |
+| Mittente | Numero Twilio acquistato: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`. Nessuna variabile → notificatore finto; solo alcune → l'app non parte | Il caso più semplice e subito attivo; stesso schema di Stripe |
+| Invio | Due tipi di job nella coda esistente (`sms_link`, `sms_confirmed`), porta `Notifier`, adapter Twilio con `httpx` e finto; priorità dopo `payment_check`, prima di `purchase`; 4 tentativi (30 s, 2 min, 10 min), 4xx definitivo | Un errore di Twilio non blocca acquisto né prenotazione; retry e ripresa già gestiti dalla coda. Scartati: invio diretto nei job (perde o raddoppia SMS, rallenta gli acquisti) e campi `sms_*_sent_at` (migrazione) |
+| Libreria | `httpx` (già presente), nessun SDK `twilio` | Una sola chiamata REST; nessuna dipendenza nuova |
+| Contratto dell'agente | `say_queued` annuncia gli SMS (ultime 4 cifre del numero); `awaiting_payment` dice che il link è arrivato via SMS; istruzioni MCP: non interrogare `get_order_status`, chiamarlo solo se l'utente chiede. Campi e tool invariati | L'agente smette di sollecitare lo stato; il viaggiatore sa cosa aspettarsi |
+| Testo degli SMS | Titolo, date, persone, totale reale (o codice), link; solo GSM-7 con traslitterazione del titolo; SMS 1 su 2-3 segmenti, nessun link corto | Un redirect `/pay/<id>` sarebbe un endpoint in più non richiesto |
+| Doppioni | Un solo job attivo per ordine e tipo; accettato il raro doppio invio se il processo muore tra invio e salvataggio | Eliminarlo richiede un registro degli invii (schema) |
