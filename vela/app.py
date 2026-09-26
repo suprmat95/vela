@@ -12,11 +12,14 @@ La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RF
 Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ e Vela lo scopre
 interrogando la Checkout Session (job di M5).
 Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
+In ``loadtest`` (M13a) HofJ è il finto di ``loadtest/fake_hofj`` via HTTP, come in live, ma solo su
+localhost o ``fake-hofj``; il pagamento è sempre finto e il checkout di replay è montato.
 """
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from sqlalchemy.engine import Engine
@@ -50,14 +53,17 @@ from vela.sync import CatalogSync, SyncScheduler
 
 REPLAY = "replay"
 LIVE = "live"
+LOADTEST = "loadtest"
+LOADTEST_HOSTS = ("localhost", "127.0.0.1", "fake-hofj")   # mai HofJ vero sotto carico (M13a)
 CatalogLoader = Callable[[], List[Product]]
 FIXTURES_DIR = os.path.dirname(FIXTURE_PATH)   # fixture per (host, brand) (decisioni M7 e M10)
 
 
 def build_payments(settings: Settings) -> PaymentsPort:
     """Stripe se `STRIPE_SECRET_KEY` è impostata (indipendente dall'upstream HofJ), altrimenti
-    il pagamento finto. Senza `VELA_PUBLIC_URL` l'avvio si blocca: servono i ritorni del Checkout."""
-    if not settings.stripe_secret_key:
+    il pagamento finto. Senza `VELA_PUBLIC_URL` l'avvio si blocca: servono i ritorni del Checkout.
+    In `loadtest` sempre finto: il load test non tocca Stripe (M13a)."""
+    if not settings.stripe_secret_key or settings.vela_upstream_mode == LOADTEST:
         return FakePayments(settings.vela_public_url)
     if not settings.vela_public_url:
         raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
@@ -79,21 +85,34 @@ def build_hofj(settings: Settings) -> Upstream:
     """Replay (RNF-08) oppure HofJ vero con `VELA_UPSTREAM_MODE=live` (M5). In live servono
     chiave, host, `HOFJ_BRANDS` e un pagamento vero: il checkout finto non è montato in live.
     Un `HofJHttp` per brand, stessa chiave e stesso host; il locale è quello delle fixture
-    registrate sull'host (`it` in produzione, `en` su staging)."""
+    registrate sull'host (`it` in produzione, `en` su staging).
+    `loadtest` (M13a): come live ma verso il finto HofJ, solo su `LOADTEST_HOSTS`, senza Stripe;
+    il locale di ogni brand è quello della sua fixture, perché il finto non è un host registrato."""
     if settings.vela_upstream_mode == REPLAY:
         hofj = ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
         return Upstream(SingleClientRouter(hofj), catalog_loader=hofj.load_catalog)
-    if settings.vela_upstream_mode != LIVE:
-        raise RuntimeError("VELA_UPSTREAM_MODE=%s sconosciuto: usare replay o live"
-                           % settings.vela_upstream_mode)
+    mode = settings.vela_upstream_mode
+    if mode not in (LIVE, LOADTEST):
+        raise RuntimeError("VELA_UPSTREAM_MODE=%s sconosciuto: usare replay, live o loadtest" % mode)
     missing = [name for name, value in (("HOFJ_API_KEY", settings.hofj_api_key),
                                         ("HOFJ_BASE_URL", settings.hofj_base_url)) if not value]
     if missing:
-        raise RuntimeError("VELA_UPSTREAM_MODE=live richiede %s" % ", ".join(missing))
+        raise RuntimeError("VELA_UPSTREAM_MODE=%s richiede %s" % (mode, ", ".join(missing)))
     try:
         brands = live_brands(settings)
     except ValueError as exc:
-        raise RuntimeError("VELA_UPSTREAM_MODE=live: %s" % exc) from None
+        raise RuntimeError("VELA_UPSTREAM_MODE=%s: %s" % (mode, exc)) from None
+    if mode == LOADTEST:
+        host = urlparse(settings.hofj_base_url).hostname
+        if host not in LOADTEST_HOSTS:
+            raise RuntimeError("VELA_UPSTREAM_MODE=loadtest: HOFJ_BASE_URL deve puntare al finto HofJ "
+                               "(%s), non a %s" % (", ".join(LOADTEST_HOSTS), host))
+        locales = brand_locales(FIXTURES_DIR)
+        clients = {brand: HofJHttp(settings.hofj_base_url, settings.hofj_api_key, brand,
+                                   locale=locales.get(brand, "it"))
+                   for brand in brands.values()}
+        return Upstream(BrandRouter(clients, brands), catalog_source=next(iter(clients.values())),
+                        brands=brands)
     if not settings.stripe_secret_key:
         raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
                            "non esiste contro HofJ vero")
@@ -102,6 +121,16 @@ def build_hofj(settings: Settings) -> Upstream:
                for brand in brands.values()}
     return Upstream(BrandRouter(clients, brands), catalog_source=next(iter(clients.values())),
                     brands=brands)
+
+
+def brand_locales(fixtures_dir: str) -> dict:
+    """{brand: locale} dalle fixture `catalog*.json` di qualunque host (modo `loadtest`)."""
+    locales = {}
+    for name in sorted(os.listdir(fixtures_dir)):
+        if name.startswith("catalog") and name.endswith(".json"):
+            meta = fixture_meta(os.path.join(fixtures_dir, name))
+            locales[meta["brand"]] = meta["locale"]
+    return locales
 
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
@@ -209,7 +238,7 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
     install_problem_handlers(app)
     app.include_router(rest_router)
     app.include_router(checkout_router)
-    if settings.vela_upstream_mode == REPLAY:
+    if settings.vela_upstream_mode in (REPLAY, LOADTEST):
         app.include_router(replay_router)
     app.router.routes.extend(mcp_routes(app.state.mcp, settings.vela_public_url))
     return app

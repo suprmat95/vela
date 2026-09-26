@@ -102,3 +102,21 @@ Il transport del `TestClient` usa un pacchetto `httpx2` diverso da `httpx`, quin
 - 🔧 Bash: Add sync ASGI transport adapter and rerun tests
 
 - 🔧 Bash: Add fake HofJ CLI, test it, commit
+
+- 🔧 Bash: Find other uses of upstream mode and existing mode tests
+
+- 🔧 Bash: Read live mode app tests for patterns
+
+Ora il modo `VELA_UPSTREAM_MODE=loadtest` in `vela/app.py`, test prima.
+
+- 🔧 Bash: Write failing tests for loadtest upstream mode
+
+- 🔧 Bash: Implement loadtest mode in app and run app tests
+
+- 🔧 Bash: Show the failing app test
+
+- 🔧 Bash: Fix route assertion and run full suite
+
+- 🔧 Bash: Find docs mentioning upstream mode and load test
+
+- 🔧 Bash: Update README and commit loadtest mode

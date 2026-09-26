@@ -100,7 +100,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | Variabile | Obbligatoria | Uso |
 |---|---|---|
 | `DATABASE_URL` | sì | Postgres (`postgres://...` di Render viene riscritto in `postgresql+psycopg://`). Senza, `/health` risponde 503 e le migrazioni falliscono. |
-| `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. |
+| `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. `loadtest` (M13a) chiama il finto HofJ di `loadtest/fake_hofj` (solo `localhost`, `127.0.0.1`, `fake-hofj`) con pagamenti finti: vedi `loadtest/README.md`. |
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
 | `HOFJ_BRANDS` | in `live` | Mappa sport → brand HofJ, es. `padel=weebora.com,tennis=terrarossa.com` (M10). Sport `padel` e `tennis`, brand distinti, almeno una voce. La vecchia `HOFJ_BRAND` da sola blocca l'avvio con l'indicazione di migrare. |
@@ -175,7 +175,7 @@ vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M
 vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per replay e test, una fixture per host e brand (M1, M10)
-loadtest/       Locust (M13)
+loadtest/       finto HofJ, scenario Locust, report e risultati (M13a)
 tests/          python3 -m unittest discover -s tests
 docs/           brief, spec, roadmap, decisioni, piani
 agent-log/      trascrizioni delle sessioni con gli agenti (vedi docs/agents-log.md)
