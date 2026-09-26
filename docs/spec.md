@@ -8,7 +8,9 @@ aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). RF-28..32, 
 aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). RF-36, RF-47, RNF-04,
 RNF-10 aggiornati il 2026-09-26 per la seconda lettura del twist
 (`docs/plans/2026-09-26-twist-seconda-lettura.md`). RF-36..38, RF-47, RF-48 e RF-50 aggiornati il
-2026-09-26 con M18 (token bucket con soglia per le prenotazioni). Origine: `docs/brief.md` e
+2026-09-26 con M18 (token bucket con soglia per le prenotazioni). RF-06, RF-16, RF-19, RF-25,
+RF-39, RF-45, RF-46, RF-49 e RNF-05 aggiornati il 2026-09-26 per la conferma del prezzo effettivo
+prima del link. Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -119,9 +121,12 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`).
 - **RF-15** Vela accetta la sistemazione di default dell'itinerario. Non sceglie hotel
   alternativi né aggiunge attività: il prodotto HofJ è già "esperienza + hotel".
-- **RF-16** Vela legge il totale reale dall'itinerario. Se differisce dal prezzo "a partire da"
-  della proposta, la risposta di stato (RF-25) lo dichiara esplicitamente prima del link di
-  pagamento. Il link porta sempre il totale reale.
+- **RF-16** Vela legge il totale reale dall'itinerario. La proposta dice il prezzo "a partire da"
+  come prezzo minimo e annuncia che il totale effettivo arriva prima del link. Dopo la lettura
+  del totale l'ordine passa a `awaiting_confirmation`: la risposta (RF-25) dà il totale reale,
+  la stima della proposta e la differenza, e chiede conferma. Il link nasce solo dopo la
+  conferma, cioè una seconda `accept_proposal` sulla stessa proposta, e porta sempre il totale
+  reale (decisione del 2026-09-26).
 - **RF-17** Se la creazione dell'itinerario fallisce per un errore del prodotto (4xx/5xx da
   HofJ riconducibile al prodotto, non alla quota o alla rete), il job d'acquisto segna il
   prodotto come non prenotabile, sceglie la proposta successiva per lo stesso intento e porta
@@ -137,7 +142,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   dell'ordine e dell'itinerario HofJ.
 - **RF-19** La risposta di `get_order_status` per un ordine `awaiting_payment` contiene l'URL
   del link, l'importo, l'id ordine e una frase pronta da leggere al viaggiatore. La risposta di
-  accettazione contiene solo id ordine, stato `queued`, attesa stimata e frase (RF-45). Vela manda
+  accettazione è lo stato dell'ordine dopo l'attesa di RF-45 (`awaiting_confirmation` alla prima
+  chiamata, `awaiting_payment` alla conferma) o, se l'attesa scade, id ordine, stato `queued`,
+  attesa stimata e frase. Vela manda
   il link con il riepilogo via SMS al telefono del viaggiatore principale appena l'ordine è
   `awaiting_payment` (decisione del 2026-09-26, `docs/sms.md`); l'agente non interroga lo stato
   di sua iniziativa e chiama `get_order_status` solo quando il viaggiatore lo chiede.
@@ -162,11 +169,11 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   upsert per itinerario, e Vela ripete la chiamata su errore di rete o 5xx con backoff, fino a
   un numero massimo configurato, poi marca l'ordine `booking_failed` con il motivo.
 - **RF-25** L'agente del viaggiatore ottiene link e codice interrogando lo stato dell'ordine.
-  La risposta contiene lo stato, l'attesa stimata se `queued` (RF-48), link e importo se
-  `awaiting_payment`, la proposta sostitutiva se `replaced` (RF-17), il codice di prenotazione
+  La risposta contiene lo stato, l'attesa stimata se `queued` (RF-48), totale reale e stima se
+  `awaiting_confirmation` (RF-16), link e importo se `awaiting_payment`, la proposta sostitutiva se `replaced` (RF-17), il codice di prenotazione
   se `confirmed`, il motivo leggibile se `failed` o `booking_failed`, e una frase pronta da
   leggere ("La tua prenotazione è confermata, codice R-789012"). Stati possibili: `queued`,
-  `awaiting_payment`, `paid_pending_booking`, `confirmed`, `replaced`, `cancelled`, `failed`,
+  `awaiting_confirmation`, `awaiting_payment`, `paid_pending_booking`, `confirmed`, `replaced`, `cancelled`, `failed`,
   `booking_failed`, `expired`.
 - **RF-26** Il codice di prenotazione resta disponibile tramite `get_order_status` senza
   limite di tempo, così il viaggiatore può richiederlo al proprio agente anche in seguito.
@@ -251,7 +258,7 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   | `create_intent` | testo, profilo opzionale, campi strutturati opzionali (RF-52) | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
   | `get_proposal` | id intento | una proposta (RF-06) oppure "niente di compatibile" (RF-09) |
   | `reject_proposal` | id proposta, motivo, campi strutturati e direzione opzionali (RF-52) | la proposta successiva (RF-08) oppure "niente di compatibile" con l'id della proposta da cui ripartire (RF-55) |
-  | `accept_proposal` | id proposta, dati viaggiatore mancanti | id ordine, stato `queued`, posizione e attesa stimata, frase da leggere (RF-45) |
+  | `accept_proposal` | id proposta, dati viaggiatore mancanti | lo stato dell'ordine dopo l'attesa: prezzo effettivo da confermare, oppure link dopo la conferma (RF-16), oppure `queued` con posizione e attesa stimata; frase da leggere (RF-45) |
   | `get_order_status` | id ordine | stato, attesa stimata oppure link e importo oppure codice oppure proposta sostitutiva, frase da leggere (RF-25) |
 
 - **RF-40** REST: `POST /v1/intents`, `GET /v1/intents/{id}/proposal`,
@@ -295,12 +302,17 @@ si sposta è la quota HofJ: con 120 chiamate al minuto e 5 chiamate per acquisto
 più una per la prenotazione, Vela completa al massimo 20 acquisti al minuto per client. Il
 design trasforma questo tetto in attesa dichiarata invece che in errori.
 
-- **RF-45** `accept_proposal` è sempre asincrono: valida i dati del viaggiatore (RF-12), crea
-  l'ordine in stato `queued` con posizione in coda e attesa stimata, e risponde senza chiamare
-  HofJ né Stripe. La frase `say` dichiara l'attesa in minuti, arrotondata per eccesso.
+- **RF-45** `accept_proposal` valida i dati del viaggiatore (RF-12), crea l'ordine in stato
+  `queued` con posizione in coda e attesa stimata, senza chiamare HofJ né Stripe. Poi aspetta
+  che il job d'acquisto porti l'ordine al prezzo effettivo, rileggendo l'ordine ogni secondo,
+  fino a un tetto configurabile (100 s, sotto i 120 s massimi di un tool MCP su ElevenLabs);
+  sulla conferma del prezzo aspetta allo stesso modo il link. Se il tetto scade risponde
+  `queued` e la frase `say` dichiara l'attesa in minuti, arrotondata per eccesso. In modalità
+  `loadtest` il tetto è zero (decisione del 2026-09-26).
 - **RF-46** Un job d'acquisto per ordine esegue in sequenza: creazione itinerario, cliente,
-  lettura pax, scrittura pax, lettura del totale reale, creazione del link di pagamento; poi
-  l'ordine passa a `awaiting_payment`. Ogni passo salva il proprio esito (`itineraryId`
+  lettura pax, scrittura pax, lettura del totale reale; qui l'ordine passa a
+  `awaiting_confirmation` e il job si chiude. La conferma (RF-16) accoda un job d'acquisto che
+  riparte dalla creazione del link di pagamento; poi l'ordine passa a `awaiting_payment`. Ogni passo salva il proprio esito (`itineraryId`
   compreso) così che un'interruzione riprenda dal passo successivo. Un passo fallito per rete,
   timeout o 5xx viene ripetuto fino a tre volte nelle finestre successive; poi l'ordine passa a
   `failed` con un motivo leggibile. Un errore del prodotto segue RF-17.
@@ -317,8 +329,10 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   minuto = ritmo al minuto × 80% ÷ 5 (16 con il limite di 120): il 20% del ritmo si lascia
   alle prenotazioni, così la stima è prudente. Ricalcolata a ogni `get_order_status`. Non
   esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
-- **RF-49** `reject_proposal` sulla proposta di un ordine `queued` porta l'ordine a
-  `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08).
+- **RF-49** `reject_proposal` sulla proposta di un ordine `queued`, `awaiting_confirmation` o
+  `awaiting_payment` porta l'ordine a `cancelled`, lo toglie dalla coda e restituisce la proposta
+  successiva (RF-08). Un rifiuto per prezzo dopo il prezzo effettivo usa il totale reale come
+  tetto della proposta successiva (decisione M7, aggiornata il 2026-09-26).
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
   tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
   istanza configurabile (default 10, M18). Un job è idempotente e ripartibile (RF-27).
@@ -381,7 +395,8 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
   finale leggibile.
 - **RNF-05 Latenza.** I cinque casi d'uso non chiamano servizi esterni (eccetto il fallback
   LLM di RF-03) e rispondono sotto i 500 ms al 95° percentile in modalità replay sul load
-  test.
+  test. Eccezione: `accept_proposal` aspetta il job d'acquisto fino al tetto di RF-45, senza
+  chiamare HofJ né Stripe; sotto load test il tetto è zero.
 - **RNF-06 Osservabilità.** Log strutturati JSON su stdout con id intento/ordine, chiamate
   HofJ con esito e quota residua. `GET /health` riporta stato DB, età del catalogo, quota
   residua nota.

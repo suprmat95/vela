@@ -12,7 +12,7 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 | `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
 | `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
-| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile}` | 202 `order_queued` (con `Location`), 200 `order_status` a un secondo accept, 200 `missing_traveler_data` |
+| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data` |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
 
 `Profile` = `{"first_name"?, "last_name"?, "email"?, "phone"?, "pax"? (≥ 1), "participants"?: [{"first_name"?, "last_name"?}]}`.
@@ -61,7 +61,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 | `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
 | `proposal` | 200 | una proposta |
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
-| `order_queued` | 202 | ordine in coda (M5, RF-45): `order_id`, `status` `queued`, `position`, `wait_seconds`. Nessun link: arriva con lo stato. Header `Location: /v1/orders/{order_id}` |
+| `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
 | `order_status` | 200 | stato dell'ordine con campi fissi, `null` quando non pertinenti (tabella sotto) |
 
@@ -72,6 +72,7 @@ Campi di `order_status` (RF-25, RF-39): `order_id`, `status`, `position`, `wait_
 | `status` | Campi valorizzati |
 |---|---|
 | `queued` | `position` e `wait_seconds` (ricalcolati a ogni richiesta, RF-48); `null` se il job è già in lavorazione |
+| `awaiting_confirmation` | `total` (prezzo effettivo, `openAmount` di HofJ), `currency`, `price_from_total`, `total_differs` (RF-16); `payment_url` `null`. Un nuovo `POST .../accept` sulla stessa proposta conferma il prezzo, `POST .../reject` annulla l'ordine |
 | `awaiting_payment` | `total` (importo reale, `openAmount` di HofJ), `currency`, `price_from_total`, `total_differs` (RF-16), `payment_url` |
 | `paid_pending_booking` | `total`, `currency` |
 | `confirmed` | `total`, `currency`, `booking_code` |
@@ -103,8 +104,8 @@ Lo script esegue il flusso e cronometra ogni passo (latenza per M13). Il token s
 `VELA_API_TOKEN` e non viene stampato.
 
 ```bash
-# criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, link,
-# pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
+# criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, prezzo
+# effettivo, secondo accept (la conferma), link, pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
 uv run python scripts/rest_flow.py https://vela-n506.onrender.com
 # criterio 4: la prima proposta di INTENT_TRAP è la trappola della fixture di staging; dopo
 # l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
@@ -141,13 +142,13 @@ P2=$(curl -s -X POST "$VELA_URL/v1/proposals/$(echo "$P1" | jq -r .proposal_id)/
   -H 'content-type: application/json' -d '{"reason":"troppo caro"}')
 echo "$P2" | jq '{outcome, proposal_id, product, total_from, say}'
 
-ORDER=$(curl -s -X POST "$VELA_URL/v1/proposals/$(echo "$P2" | jq -r .proposal_id)/accept" -H "$H")
-echo "$ORDER" | jq '{outcome, order_id, position, wait_seconds, say}'   # 202 order_queued
+ACCEPT="$VELA_URL/v1/proposals/$(echo "$P2" | jq -r .proposal_id)/accept"
+ORDER=$(curl -s -X POST "$ACCEPT" -H "$H")               # aspetta il prezzo effettivo (max 100 s)
+echo "$ORDER" | jq '{outcome, status, total, price_from_total, say}'   # awaiting_confirmation
 OID=$(echo "$ORDER" | jq -r .order_id)
 
-sleep "$(echo "$ORDER" | jq -r .wait_seconds)"
-STATUS=$(curl -s "$VELA_URL/v1/orders/$OID" -H "$H")     # atteso: awaiting_payment con payment_url
-echo "$STATUS" | jq '{status, total, total_differs, payment_url, say}'
+STATUS=$(curl -s -X POST "$ACCEPT" -H "$H")              # la conferma: aspetta il link
+echo "$STATUS" | jq '{status, total, total_differs, payment_url, say}'  # awaiting_payment
 
 curl -s "$(echo "$STATUS" | jq -r .payment_url)" | jq     # replay: simula il pagamento
 # con STRIPE_SECRET_KEY: aprire payment_url nel browser e pagare con 4242 4242 4242 4242 (docs/stripe.md)
