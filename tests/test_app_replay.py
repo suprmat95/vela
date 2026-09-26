@@ -96,6 +96,38 @@ class BootstrapTest(unittest.TestCase):
             self.assertEqual((snap["limit_per_minute"], snap["needs_refresh"]), (120, False))
 
 
+class FakeScheduler:
+    def __init__(self, events):
+        self.events = events
+
+    def start(self):
+        self.events.append("scheduler")
+
+    def stop(self):
+        self.events.append("stop")
+
+
+class LiveBootstrapTest(unittest.TestCase):
+    """Live (M10): al boot niente fixture; quota, poi lo scheduler del sync, fermato alla chiusura."""
+
+    def test_starts_the_sync_scheduler_after_reading_the_quota(self):
+        events = []
+        repos = MemoryRepositories()
+        vela = Vela(repos, ReplayHofJ(rng=random.Random(7)), FakePayments("http://test"),
+                    DEFAULT_TRAVELER, now=Clock())
+        worker = inline_worker(vela)
+        refresh = worker.processor.refresh_quota
+        worker.processor.refresh_quota = lambda: (events.append("quota"), refresh())[1]
+        app = create_app(Settings(vela_upstream_mode="replay", vela_public_url="http://test"),
+                         vela=vela, worker=worker, catalog_loader=None,
+                         scheduler=FakeScheduler(events))
+        with TestClient(app):
+            self.assertEqual(events, ["quota", "scheduler"])
+            self.assertEqual(app.state.bootstrap["catalog_sync"], "scheduled")
+            self.assertEqual(repos.products.count(), 0)
+        self.assertEqual(events[-1], "stop")
+
+
 STAGING = [make_product("118", destination="Barcellona", country="ES", price=245),
            make_product("119", destination="Madrid", country="ES", price=300),
            make_product("120", archived=True)]
@@ -214,53 +246,79 @@ class ModeTest(unittest.TestCase):
 
     LIVE = dict(database_url="sqlite://", vela_upstream_mode="live",
                 hofj_api_key="hofj-segreta", hofj_base_url="https://staging.api.hofj.com",
-                hofj_brand="staging.weebora.com", stripe_secret_key="rk_test_segreta",
-                vela_public_url="https://vela.test")
+                hofj_brands="padel=staging.weebora.com,tennis=staging.tennis.weebora.com",
+                stripe_secret_key="rk_test_segreta", vela_public_url="https://vela.test")
 
-    def test_live_builds_http_adapter_and_m6_payments(self):
+    def live_app(self, locale="en", **over):
+        with mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir(locale)):
+            return create_app(Settings(**dict(self.LIVE, **over)))
+
+    def test_live_builds_one_http_client_per_brand_and_m6_payments(self):
         from vela.adapters.hofj_http import HofJHttp
+        from vela.adapters.hofj_router import BrandRouter
         from vela.adapters.stripe_links import StripePayments
-        with mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir()):
-            app = create_app(Settings(**self.LIVE))
-        hofj = app.state.vela.hofj
-        self.assertIsInstance(hofj, HofJHttp)
-        self.assertEqual((str(hofj.client.base_url), hofj.brand, hofj.locale),
-                         ("https://staging.api.hofj.com", "staging.weebora.com", "en"))
+        app = self.live_app()
+        router = app.state.vela.hofj
+        self.assertIsInstance(router, BrandRouter)
+        self.assertEqual(sorted(router.clients), ["staging.tennis.weebora.com", "staging.weebora.com"])
+        for brand, client in router.clients.items():
+            self.assertIsInstance(client, HofJHttp)
+            self.assertEqual((str(client.client.base_url), client.brand, client.locale),
+                             ("https://staging.api.hofj.com", brand, "en"))
+        self.assertEqual(router.sport_brands, {"padel": "staging.weebora.com",
+                                               "tennis": "staging.tennis.weebora.com"})
         self.assertIsInstance(app.state.vela.payments, StripePayments)
 
-    def test_live_loads_the_fixture_recorded_on_hofj_base_url(self):
-        folder = staging_fixtures_dir()
-        with mock.patch("vela.app.FIXTURES_DIR", folder):
-            app = create_app(Settings(**self.LIVE))
-        self.assertEqual([p.id for p in app.state.catalog_loader()], ["118"])
+    def test_live_worker_uses_the_brand_router(self):
+        app = self.live_app()
+        self.assertIs(app.state.worker.processor.hofj, app.state.vela.hofj)
 
-    def test_live_cart_locale_is_the_locale_of_the_fixture(self):
+    def test_live_syncs_the_catalog_instead_of_loading_a_fixture(self):
+        from vela.sync import SyncScheduler
+        app = self.live_app()
+        self.assertIsNone(app.state.catalog_loader)
+        scheduler = app.state.scheduler
+        self.assertIsInstance(scheduler, SyncScheduler)
+        self.assertEqual(scheduler.sync.brands, {"padel": "staging.weebora.com",
+                                                 "tennis": "staging.tennis.weebora.com"})
+        self.assertIs(scheduler.sync.repos, app.state.vela.repos)
+
+    def test_live_cart_locale_is_the_locale_of_the_host_fixtures(self):
         for locale in ("en", "it"):
-            with self.subTest(locale), mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir(locale)):
-                app = create_app(Settings(**self.LIVE))
-                self.assertEqual(app.state.vela.hofj.locale, locale)
+            with self.subTest(locale):
+                router = self.live_app(locale).state.vela.hofj
+                self.assertEqual({c.locale for c in router.clients.values()}, {locale})
 
     def test_live_without_a_fixture_for_the_host_is_refused(self):
-        folder = staging_fixtures_dir()
-        settings = dict(self.LIVE, hofj_base_url="https://sandbox.api.hofj.com")
-        with mock.patch("vela.app.FIXTURES_DIR", folder), self.assertRaises(RuntimeError) as ctx:
-            create_app(Settings(**settings))
+        with self.assertRaises(RuntimeError) as ctx:
+            self.live_app(hofj_base_url="https://sandbox.api.hofj.com")
         self.assertIn("https://sandbox.api.hofj.com", str(ctx.exception))
         self.assertNotIn("hofj-segreta", str(ctx.exception))
 
-    def test_replay_keeps_the_production_fixture(self):
+    def test_replay_keeps_the_production_fixtures_and_no_scheduler(self):
         with mock.patch("vela.app.FIXTURES_DIR", staging_fixtures_dir()):
             app = create_app(Settings(database_url="sqlite://"))
-        self.assertEqual(len(app.state.catalog_loader()), 110)
+        self.assertEqual(len(app.state.catalog_loader()), len(ReplayHofJ().load_catalog()))
+        self.assertIsNone(app.state.scheduler)
 
     def test_live_requires_hofj_settings(self):
-        for missing in ("hofj_api_key", "hofj_base_url", "hofj_brand"):
-            settings = dict(self.LIVE, **{missing: None})
+        for missing, variable in (("hofj_api_key", "HOFJ_API_KEY"), ("hofj_base_url", "HOFJ_BASE_URL"),
+                                  ("hofj_brands", "HOFJ_BRANDS")):
             with self.subTest(missing), self.assertRaises(RuntimeError) as ctx:
-                create_app(Settings(**settings))
-            self.assertIn(missing.upper(), str(ctx.exception))
+                self.live_app(**{missing: None})
+            self.assertIn(variable, str(ctx.exception))
             for secret in ("hofj-segreta", "rk_test_segreta"):
                 self.assertNotIn(secret, str(ctx.exception))
+
+    def test_live_with_the_old_brand_variable_asks_to_migrate(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self.live_app(hofj_brands=None, hofj_brand="staging.weebora.com")
+        self.assertIn("HOFJ_BRANDS=padel=staging.weebora.com", str(ctx.exception))
+
+    def test_live_with_an_invalid_brand_map_is_refused(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            self.live_app(hofj_brands="golf=golf.com")
+        self.assertIn("golf", str(ctx.exception))
 
     def test_live_requires_real_payments(self):
         with self.assertRaises(RuntimeError) as ctx:
