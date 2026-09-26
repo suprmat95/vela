@@ -521,3 +521,36 @@ Giri fermati, stack spento. Aggiungo `--duration` a `run.py`, test prima.
 - 🔧 Bash: Implement --duration in run.py and test
 
 - 🔧 Bash: Update docs, commit duration option, adjust run script
+
+- 🔧 Bash: Run the four reduced load test runs
+
+Il load test ora ha una durata configurabile, `--duration`, e ho rilanciato i quattro giri ridotti.
+
+**Come funziona `--duration`** (commit `ddc0dee`, in `loadtest/run.py`):
+- è la durata dell'intero giro in minuti, **default 10**;
+- senza altre indicazioni si divide in 2/3 di arrivi e 1/3 di coda (10 minuti → 6,7 + 3,3);
+- `--arrival-minutes` e `--tail-minutes` restano per dividerla a mano. Se la loro somma supera `--duration`, il giro non parte (es. `arrivi 8 + coda 3 minuti superano --duration 10`);
+- Locust si chiude al massimo 60 s dopo la fine del giro, prima erano 120.
+
+Le regole sono coperte da test e registrate in `docs/decisions.md`. Tutta la suite è verde.
+
+**Giri in corso:** durano 8 minuti ciascuno (`--duration 8`, 5 di arrivi + 3 di coda), quindi finiscono verso le **16:45**:
+
+| Giro | Viaggiatori | Finto HofJ |
+|---|---|---|
+| A-500 | 500 | pulito |
+| B-1000 | 1.000 | pulito |
+| C-2500 | 2.500 | pulito |
+| D-1000-guasti | 1.000 | latenza pessimistica e guasti |
+
+Il file della proiezione (`loadtest/projection.py`) non l'ho scritto, perché mi avevi fermato su quello. Serve per ricavare dai giri ridotti i numeri a 1k/10k/50k, e i 50k devono entrare in `RESULTS.md` anche solo come proiezione. Lo scrivo mentre girano i test, se sei d'accordo.
+
+## Utente 16:14
+
+si
+
+## Agente 16:14
+
+- 🔧 Bash: Add projection model with tests
+
+- 🔧 Bash: Commit projection; check run progress
