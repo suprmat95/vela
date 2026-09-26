@@ -12,6 +12,7 @@ Un solo sync alla volta fra tutte le istanze (advisory lock, RF-30). Ogni chiama
 in attesa e aspetta la finestra successiva; un 429 marca la finestra e non si ripete subito.
 """
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -212,3 +213,152 @@ class SyncScheduler:
 
     def stop(self) -> None:
         self._stop.set()
+
+
+# --- comando: python -m vela.sync ------------------------------------------------------------
+
+from vela.adapters.hofj_replay import FIXTURES_DIR  # noqa: E402
+from vela.config import Settings, live_brands  # noqa: E402
+
+USAGE = """Sync del catalogo HofJ (M10). Senza opzioni: un giro su tutti i brand di HOFJ_BRANDS
+nel database di DATABASE_URL. Con --record: una fixture per brand in --out-dir, senza database.
+--dry-run stampa le chiamate previste e non ne fa nessuna. La chiave HOFJ_API_KEY non viene mai
+stampata."""
+
+
+class _CountingSource:
+    """Conta le chiamate HofJ vere del comando, `/v1/quota` compresa."""
+
+    def __init__(self, source):
+        self.source, self.calls = source, 0
+
+    def list_page(self, brand, cursor):
+        self.calls += 1
+        return self.source.list_page(brand, cursor)
+
+    def detail(self, brand, product_id):
+        self.calls += 1
+        return self.source.detail(brand, product_id)
+
+    def get_quota(self):
+        self.calls += 1
+        return self.source.get_quota()
+
+
+def http_source(settings: Settings, locale: str):
+    from vela.adapters.hofj_http import HofJHttp
+    brand = next(iter(live_brands(settings).values()))   # il brand vero arriva a ogni chiamata
+    return HofJHttp(settings.hofj_base_url, settings.hofj_api_key, brand, locale=locale)
+
+
+def database_repositories(settings: Settings):
+    from vela.adapters.db import make_engine
+    from vela.adapters.repo_postgres import PostgresRepositories
+    return PostgresRepositories(make_engine(settings.database_url), quota_margin=settings.quota_margin,
+                                booking_reserve=settings.booking_reserve)
+
+
+def _host_fixtures(base_url: str) -> Dict[str, str]:
+    from vela.domain.catalog import fixture_meta, select_fixtures
+    try:
+        paths = select_fixtures(FIXTURES_DIR, base_url)
+    except RuntimeError:
+        return {}
+    return {fixture_meta(path)["brand"]: path for path in paths}
+
+
+def plan(brands: Dict[str, str], base_url: str) -> List[str]:
+    """Chiamate previste per brand, stimate dalla fixture dell'host se c'è: le pagine sono
+    esatte a catalogo invariato, i dettagli un tetto (il sync scarica solo nuovi e cambiati)."""
+    import json
+    fixtures = _host_fixtures(base_url)
+    lines = ["1 /v1/quota"]
+    for sport, brand in brands.items():
+        path = fixtures.get(brand)
+        if path is None:
+            lines.append("%s (%s): nessuna fixture, pagine e dettagli sconosciuti "
+                         "(una pagina ogni 100 prodotti, un dettaglio per prodotto attivo)" % (brand, sport))
+            continue
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        total, active = len(data.get("products") or []), len(data.get("details") or {})
+        lines.append("%s (%s): %d pagine, al più %d dettagli (fixture: %d prodotti, %d attivi)"
+                     % (brand, sport, max(1, -(-total // 100)), active, total, active))
+    return lines
+
+
+def _locale(base_url: str, wanted: Optional[str]) -> str:
+    if wanted:
+        return wanted
+    from vela.domain.catalog import fixture_meta
+    fixtures = _host_fixtures(base_url)
+    return fixture_meta(next(iter(fixtures.values())))["locale"] if fixtures else "it"
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser(prog="python -m vela.sync", description=USAGE)
+    parser.add_argument("--record", action="store_true", help="registra le fixture invece del database")
+    parser.add_argument("--sport", help="solo il brand di questo sport (padel o tennis)")
+    parser.add_argument("--out-dir", default=FIXTURES_DIR, help="cartella delle fixture (--record)")
+    parser.add_argument("--locale", help="locale delle chiamate (default: quello delle fixture dell'host)")
+    parser.add_argument("--dry-run", action="store_true", help="stampa le chiamate previste, nessuna rete")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    settings = Settings.from_env()
+    if not settings.hofj_base_url:
+        sys.exit("manca HOFJ_BASE_URL")
+    try:
+        brands = live_brands(settings)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    if args.sport:
+        if args.sport not in brands:
+            sys.exit("sport %s non presente in HOFJ_BRANDS" % args.sport)
+        brands = {args.sport: brands[args.sport]}
+    base_url = settings.hofj_base_url.rstrip("/")
+    locale = _locale(base_url, args.locale)
+    print("%s su %s, locale %s. Chiamate previste:" % ("Registrazione" if args.record else "Sync",
+                                                       base_url, locale))
+    for line in plan(brands, base_url):
+        print("  " + line)
+    if args.dry_run:
+        return
+    if not args.record and not settings.database_url:
+        sys.exit("manca DATABASE_URL: il sync scrive nel database (per le fixture usare --record)")
+    if not settings.hofj_api_key:
+        sys.exit("manca HOFJ_API_KEY")
+
+    source = _CountingSource(http_source(settings, locale))
+    if args.record:
+        from vela.fixtures import RecordError, record_fixtures
+        try:
+            paths = record_fixtures(source, brands, base_url, locale, args.out_dir)
+        except RecordError as exc:
+            print(str(exc))
+            print("chiamate HofJ: %d" % source.calls)
+            sys.exit(1)
+        for path in paths:
+            print("scritta %s (%d byte)" % (path, os.path.getsize(path)))
+        print("chiamate HofJ: %d" % source.calls)
+        return
+
+    repos = database_repositories(settings)
+    if repos.quota.acquire(QuotaClass.SYNC, 1, _utcnow()):
+        repos.quota.sync_from_snapshot(source.get_quota())
+    report = CatalogSync(source, repos, brands).run()
+    for b in report.brands:
+        print("%s (%s): pagine %d, dettagli %d, scritti %d, invariati %d, archiviati %d%s"
+              % (b.brand, b.sport, b.pages, b.details, b.written, b.unchanged, b.archived,
+                 ", errore: %s" % b.error if b.error else ""))
+    if report.skipped:
+        print("saltato: un altro sync è in corso")
+    print("chiamate HofJ: %d" % source.calls)
+    if not report.ok:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
