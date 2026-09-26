@@ -558,3 +558,24 @@ già salvate, senza nuove chiamate.
 |---|---|---|
 | Pacchetti evento | `is_trip` esclude l'intera categoria dei pacchetti evento (Terrarossa: `categoryId` 23 in produzione, 12 prodotti attivi; 15 su staging, 1), identificata per nome di categoria. Persi di proposito i Watch & Play (Torino, Vienna, Dubai) e i tornei amatoriali MT100/MT400, circa 5 prodotti | Vela vende viaggi per giocare: proporre "guarda la finale" a chi vuole giocare è peggio di qualche prodotto in meno. Scartate: categoria con eccezioni per titolo ("Play", "Masters Tour"), parole chiave nei titoli (fragili). I tornei amatoriali potranno rientrare più avanti (tornei di M17) |
 | Nome della categoria | Letto dai dettagli quando M10 registra le fixture Terrarossa; nessuna chiamata `/v1/categories` ora | Gli id di categoria cambiano tra produzione e staging; il nome è già nel dettaglio (`products.category`) |
+
+## 2026-09-26 — M17: decisioni aperte sul parser (brainstorm)
+
+Chiude le "Decisioni aperte sul parser" del contratto agente-tool. Piano in
+`docs/plans/2026-09-26-m17-contratto-agente-tool.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Sinonimi dello sport | Dizionario fisso in `intent.py`: "terra rossa", "terrarossa", "clay" → tennis; "paddle", "pádel", "weebora" → padel. Haiku resta la riserva quando lo sport manca ancora e il suo prompt conosce gli stessi sinonimi | Deterministico e testabile, non lega il parser al catalogo né al sync di M10 |
+| "padel e tennis" | Entrambi gli sport nel testo → `any`; frasi di indifferenza ("indifferente", "tutti e due", "entrambi", "non importa", "either", "both sports", "doesn't matter") → `any` | È quello che il viaggiatore ha detto; il `say` lo ripete e si può correggere |
+| "beach tennis", "paddle tennis" | Esclusioni controllate prima dei sinonimi → sport non riconosciuto → domanda "Padel o tennis?"; il prompt di Haiku li tratta come null | Non li vendiamo; nessuna frase dedicata finché il caso non capita davvero |
+| Nomi di tornei | Fuori da M17: li risolve l'agente col campo `sport`, Haiku come riserva | Lista fissa o nomi dal catalogo restano tra i prossimi passi |
+| "più fresco", "più freddo", "cooler" / "più caldo", "warmer" nel rifiuto | `refine.py` li traduce in `north` / `south` con `geo.move` | Rete di sicurezza per i client solo testo |
+| Id dopo un `no_match` da rifiuto | Campo `rejected_proposal_id` nella risposta `no_match`, presente solo quando arriva da `reject_proposal` | Nelle altre risposte `proposal_id` è la proposta corrente: un nome distinto evita confusione |
+| Tipi dei campi strutturati | `sport`, `area`, `direction`, `period_start`, `period_end` stringhe libere nello schema MCP/REST; `pax` intero, `budget` numero. Valori fuori dominio scartati e dichiarati nel `say` | RF-53: un campo invalido non blocca. Un tipo JSON sbagliato resta un errore di validazione |
+| Periodo parziale | Servono `period_start` e `period_end`; una sola data → periodo scartato e dichiarato. Validazione: inizio ≤ fine, fine ≥ oggi (come il fallback Haiku) | Una data sola non dice la durata |
+| `pax` su MCP | L'argomento `pax` di `create_intent` (prima nel profilo) diventa il campo strutturato: vince sul testo. Su REST `profile.pax` resta il default e `pax` al primo livello è il campo | Stesso nome e stesso contratto su MCP e REST |
+| Fallback Haiku | Parte quando manca lo sport dopo campi e parser; riempie solo i criteri ancora vuoti (prima sovrascriveva il parser) | RF-03 e precedenza di RF-53 |
+| `say` del rifiuto | Ordine annullato (RF-49), campi scartati, motivo non traducibile (solo se il motivo non è vuoto e nessun criterio cambia), "Ho capito: …", proposta o `no_match` | RF-54 |
+| Frasi di `no_match` | "prova a riformulare la richiesta" → "dimmi cosa vuoi cambiare" | RF-09: non spingere l'agente verso un nuovo `create_intent` |
+| Interprete dei test | `uv run python -m unittest discover -s tests` (3.12); il `python3` di sistema è 3.7 e non ha le dipendenze | Come da M0; base di partenza 773 test, 42 saltati |
