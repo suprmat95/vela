@@ -160,5 +160,30 @@ class MB8NoProductForTheSportTest(unittest.TestCase):
         self.assertEqual(mb.cart_calls("terrarossa.com"), [])
 
 
+TENNIS_FIXTURE = os.path.join(os.path.dirname(__file__), "..", "fixtures", "catalog-tennis.json")
+
+
+@unittest.skipUnless(os.path.exists(TENNIS_FIXTURE), "fixtures/catalog-tennis.json assente")
+class MB9SpectatorPackagesTest(unittest.TestCase):
+    """Catalogo di produzione vero (padel + tennis): a Torino ci sono solo pacchetti evento."""
+
+    def test_tennis_in_turin_never_proposes_an_event_package(self):
+        from vela.adapters.hofj_replay import ReplayHofJ
+        catalog = ReplayHofJ().load_catalog()
+        events = {p.id for p in catalog if p.category == "Tornei" and p.sport == "tennis"}
+        self.assertTrue({"562", "779"} <= events)   # Hospitality e Watch & Play delle Finals
+        mb = MultiBrand(products=catalog)
+        result = mb.propose("Tennis a Torino a novembre, siamo in due.")
+        seen = []
+        while isinstance(result, ProposalMade):
+            product = mb.product(result)
+            seen.append(product.id)
+            self.assertEqual((product.sport, product.brand), ("tennis", "terrarossa.com"))
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+        self.assertTrue(seen)                        # si propone un viaggio da giocare
+        self.assertFalse(events & set(seen))
+        self.assertIsInstance(result, NoMatch)
+
+
 if __name__ == "__main__":
     unittest.main()

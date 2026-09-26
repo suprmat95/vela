@@ -90,6 +90,17 @@ riporta come sono. Rigenerandola, gli id attesi in `tests/test_staging_fixture.p
 
 ### `catalog-tennis.json` e `catalog-staging-tennis.json` (M10)
 
-Da registrare con `python -m vela.sync --record --sport tennis`. Chiamate dichiarate prima (stime
-dalla verifica degli id del 2026-09-26): produzione ≈ 51 (1 quota + 1 pagina + ~49 dettagli su 80
-prodotti), staging ≈ 15 (1 quota + 1 pagina + ~13 dettagli su 36 prodotti).
+Registrate il 2026-09-26 con `python -m vela.sync --record --sport tennis`; chiamate dichiarate
+prima e rispettate, nessun 429.
+
+| Voce | `catalog-tennis.json` | `catalog-staging-tennis.json` |
+|---|---|---|
+| Brand, locale | `terrarossa.com`, `it` | `staging.tennis.weebora.com`, `en` |
+| Prodotti | 80 in lista, 49 non archiviati | 36 in lista, 13 non archiviati |
+| Chiamate | 51 (1 quota + 1 pagina + 49 dettagli) | 15 (1 quota + 1 pagina + 13 dettagli) |
+| Dimensione | 873 601 byte | 261 024 byte |
+| Categorie attive | Vacanze 23, Accademie 13, Tornei 12, Holidays 1 | Holidays 8, Academies 4, Tournaments 1 |
+
+"Tornei"/"Tournaments" è la categoria dei pacchetti evento (Hospitality delle Finals, Watch &
+Stay/Play, Coppa Davis, tornei amatoriali MT100/MT400): `is_trip` la esclude per tutti i brand
+(decisione M10).

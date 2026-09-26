@@ -20,6 +20,7 @@ from vela.domain.models import OrderStatus, Participant, TravelerProfile
 from vela.domain.usecases import Vela
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
+PRODUCTION = 110 + 80   # fixture di produzione: padel (catalog.json) + tennis (catalog-tennis.json)
 FULL = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
 
 
@@ -68,14 +69,14 @@ class BootstrapTest(unittest.TestCase):
     def test_loads_fixture_when_catalog_is_empty(self):
         app, vela = make_app()
         with TestClient(app):
-            self.assertEqual(vela.repos.products.count(), 110)
-            self.assertEqual(app.state.bootstrap["catalog_loaded"], 110)
+            self.assertEqual(vela.repos.products.count(), PRODUCTION)
+            self.assertEqual(app.state.bootstrap["catalog_loaded"], PRODUCTION)
 
     def test_does_not_reload_when_catalog_exists(self):
         app, vela = make_app(preload=True)
         with TestClient(app):
             self.assertEqual(app.state.bootstrap["catalog_loaded"], 0)
-            self.assertEqual(vela.repos.products.count(), 110)
+            self.assertEqual(vela.repos.products.count(), PRODUCTION)
 
     def test_resumes_pending_bookings(self):
         """RF-27: un ordine pagato senza job di prenotazione (processo morto prima di accodarlo)."""
@@ -160,7 +161,7 @@ class CatalogRealignTest(unittest.TestCase):
             self.assertEqual(app.state.bootstrap["catalog_loaded"], 3)
             self.assertEqual(app.state.bootstrap["catalog_archived"], len(self.production_active))
             self.assertEqual(active_ids(vela), ["118", "119"])
-            self.assertEqual(vela.repos.products.count(), 110 + 3)   # nessun prodotto cancellato
+            self.assertEqual(vela.repos.products.count(), PRODUCTION + 3)   # nessun prodotto cancellato
 
     def test_proposals_on_archived_products_stay_readable_and_new_intents_use_the_new_catalog(self):
         repos = MemoryRepositories()

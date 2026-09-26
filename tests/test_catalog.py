@@ -95,6 +95,21 @@ class IsTripTest(unittest.TestCase):
         self.assertFalse(is_trip(replace(make_product(3), slug="weebora-gift-card")))
         self.assertTrue(is_trip(make_product(4, destination=None, country=None)))
 
+    def test_event_packages_category_of_any_brand_is_not_a_trip(self):
+        """Decisione M10: la categoria dei pacchetti evento ("Tornei" in `it`, "Tournaments" in
+        `en`) è esclusa per intero, per tutti i brand."""
+        from support import make_product
+        from vela.domain.catalog import is_trip
+        for category, sport, brand in (("Tornei", "tennis", "terrarossa.com"),
+                                       ("Tournaments", "tennis", "staging.tennis.weebora.com"),
+                                       ("Tornei", "padel", "weebora.com"),
+                                       ("Tournaments", "padel", None)):
+            with self.subTest(category=category, sport=sport):
+                self.assertFalse(is_trip(make_product(1, category=category, sport=sport, brand=brand)))
+        for category in ("Accademie", "Vacanze", "Holidays", "Academies", None):
+            with self.subTest(category=category):
+                self.assertTrue(is_trip(make_product(2, category=category)))
+
     def test_gift_card_of_any_brand_is_not_a_trip(self):
         from support import make_product
         from vela.domain.catalog import is_trip

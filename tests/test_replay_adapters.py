@@ -17,10 +17,13 @@ class ReplayHofJTest(unittest.TestCase):
     def setUp(self):
         self.hofj = ReplayHofJ(rng=random.Random(42))
 
-    def test_load_catalog_reads_the_fixture(self):
+    def test_load_catalog_reads_every_production_fixture(self):
+        """110 padel (77 attivi) di `catalog.json` + 80 tennis (49 attivi) di `catalog-tennis.json`."""
         products = self.hofj.load_catalog()
-        self.assertEqual(len(products), 110)
-        self.assertEqual(len([p for p in products if not p.archived]), 77)
+        self.assertEqual(len(products), 190)
+        self.assertEqual(len([p for p in products if not p.archived]), 77 + 49)
+        self.assertEqual({(p.brand, p.sport) for p in products},
+                         {("weebora.com", "padel"), ("terrarossa.com", "tennis")})
 
     def test_create_itinerary_returns_only_the_id(self):
         iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 2, 1, "EUR")

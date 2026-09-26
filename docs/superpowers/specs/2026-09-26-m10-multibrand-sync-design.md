@@ -156,8 +156,8 @@ fatte. `scripts/record_catalog.py` viene rimosso; `strip_media` e `project_detai
 Falso se:
 - lo slug contiene `giftcard` o `gift-card`, o il titolo contiene "gift card" (qualunque brand);
 - la destinazione è un nome di brand (`Weebora`, `Terrarossa`);
-- la categoria è quella dei pacchetti evento, confrontata per nome (costante
-  `EVENT_CATEGORIES`, il nome esatto si legge dalle fixture Terrarossa registrate).
+- la categoria è quella dei pacchetti evento, confrontata per nome (`EVENT_CATEGORIES` =
+  "Tornei", "Tournaments"), per tutti i brand (`docs/decisions.md`, "M10: esecuzione").
 
 La regola finale si verifica sulle quattro fixture: nessun prodotto giocabile escluso, tutte le
 gift card e i pacchetti evento esclusi.

@@ -164,13 +164,16 @@ def select_fixtures(fixtures_dir, base_url: str) -> List[str]:
 
 BRAND_DESTINATIONS = ("Weebora", "Terrarossa")
 GIFT_CARD_SLUGS = ("gift-card", "giftcard")
+# categoria dei pacchetti evento (Hospitality, Watch & Stay/Play, Ticket + Hotel) per nome: gli id
+# cambiano tra host e brand (Terrarossa 23 in produzione, 15 su staging). Tutti i brand (M10).
+EVENT_CATEGORIES = ("Tornei", "Tournaments")
 
 
 def is_trip(product: Product) -> bool:
-    """Falso per i prodotti del catalogo che non sono viaggi: la destinazione è un brand
-    (Weebora Gift Card) o il prodotto è una gift card di qualunque brand, riconosciuta dallo
-    slug o dal titolo (decisioni M11 e M10)."""
-    if product.destination in BRAND_DESTINATIONS:
+    """Falso per i prodotti del catalogo che non sono viaggi da giocare: la destinazione è un
+    brand (Weebora Gift Card), il prodotto è una gift card di qualunque brand, riconosciuta dallo
+    slug o dal titolo, o sta nella categoria dei pacchetti evento (decisioni M11 e M10)."""
+    if product.destination in BRAND_DESTINATIONS or product.category in EVENT_CATEGORIES:
         return False
     if any(slug in product.slug for slug in GIFT_CARD_SLUGS):
         return False

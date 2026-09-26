@@ -97,7 +97,8 @@ class CriteriaScenarioTest(unittest.TestCase):
         self.assertEqual(first.product.product_id, "78")
 
     def test_spain_phrase_of_section_10_1_ends_with_nothing_cheaper(self):
-        """La frase originale di §10.1 su staging: 28 (398 €), 867 (200 €), poi `price`."""
+        """La frase originale di §10.1 su staging: 28 (398 €), poi `price`. Il 867 (200 €, errore di
+        configurazione HofJ) è nella categoria "Tournaments", esclusa da M10."""
         vela = vela_on_staging()
         iid = vela.create_intent("un weekend di padel in Spagna a ottobre, siamo in due, "
                                  "massimo 800 euro").intent_id
@@ -106,7 +107,7 @@ class CriteriaScenarioTest(unittest.TestCase):
         while isinstance(r, ProposalMade):
             seen.append(r.product.product_id)
             r = vela.reject_proposal(r.proposal.id, rest_flow.REASON)
-        self.assertEqual(seen, ["28", "867"])
+        self.assertEqual(seen, ["28"])
         self.assertIsInstance(r, NoMatch)
         self.assertEqual(r.failed_criterion, "price")
 
