@@ -1,7 +1,8 @@
 """Parser deterministico degli intenti, italiano e inglese (RF-02, RF-04), con fallback LLM
 opzionale (RF-03).
 
-Estrae sport, area (dizionario `geo`), periodo, numero di persone, budget e lingua. I campi
+Estrae sport, area (dizionario `geo`), periodo, durata in notti (M21, RF-58), numero di
+persone, budget e lingua. I campi
 strutturati passati dall'agente (RF-52) vincono sul parser, che vince sul fallback (RF-53). Se
 manca lo sport, oppure il numero di persone (e il profilo non lo dà), produce una sola domanda
 per l'agente, prima lo sport (RF-04). `today` è iniettato per rendere i periodi deterministici.
@@ -52,6 +53,7 @@ NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 MAX_PAX = 20
+MAX_NIGHTS = 30
 SPORTS = ("padel", "tennis", "any")
 LLM_PERIOD_LABEL = "llm"
 FIELD_PERIOD_LABEL = "agent"
@@ -68,6 +70,9 @@ EN_MARKERS = {"the", "of", "for", "we", "are", "with", "max", "want", "would", "
               "each", "just", "early", "late", "mid", "family", "group", "alone", "players",
               "adults", "wife", "husband", "friends", "below"}
 
+# "per 4 notti", "in 5 giorni": una durata, non un numero di persone (M21-A)
+_NOT_PEOPLE_AFTER = r"(?!\s*(?:notti|notte|nights?|giorni|giorno|days?|settimane|weeks?)\b)"
+
 # (pattern, moltiplicatore): il numero catturato × moltiplicatore; i numeri espliciti vincono
 _PAX_PATTERNS = [
     (re.compile(r"\b(\w+)\s+(?:coppie|couples)\b"), 2),
@@ -77,9 +82,9 @@ _PAX_PATTERNS = [
     (re.compile(r"\b(\w+)\s+(?:persone|adulti|giocatori|amici|people|adults|players|friends|pax)\b"), 1),
     (re.compile(r"\b(\w+)\s+of us\b"), 1),
     (re.compile(r"\b(?:famiglia|gruppo|family|group)\s+(?:di|of)\s+(\w+)"), 1),
-    (re.compile(r"\b(?:per|for)\s+(\w+)\b"), 1),
+    (re.compile(r"\b(?:per|for)\s+(\w+)\b" + _NOT_PEOPLE_AFTER), 1),
     (re.compile(r"\bx\s?(\d+)\b"), 1),
-    (re.compile(r"\bin\s+(\d+)\b"), 1),
+    (re.compile(r"\bin\s+(\d+)\b" + _NOT_PEOPLE_AFTER), 1),
 ]
 _PAX_PHRASES = [
     (re.compile(r"\b(?:in coppia|una coppia|as a couple|a couple\b(?! of)|"
@@ -147,6 +152,9 @@ _TO = r"\s*(?:-|–|al|to|till|until)\s*"
 _PEOPLE_AFTER = (r"(?!\s*(?:persone|adulti|giocatori|amici|people|persons|adults|players|"
                  r"friends|pax|of us))")
 _WEEKEND_RE = re.compile(r"\bweek-?end\b|\bfine settimana\b")
+_THIS_WEEKEND = re.compile(r"\b(?:questo|prossimo|this|next|coming)\s+(?:\w+\s+)?"
+                           r"(?:week-?end|fine settimana)\b")
+_A_WEEKEND = re.compile(r"\b(?:un|a|an)\s+(?:\w+\s+)?(?:week-?end|fine settimana)\b")
 _RANGE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})%s(\d{4})-(\d{2})-(\d{2})\b" % _TO)
 _RANGE_SLASH = re.compile(r"\b(\d{1,2})/(\d{1,2})%s(\d{1,2})/(\d{1,2})\b" % _TO)
 _RANGE_DAY_FIRST = re.compile(
@@ -287,8 +295,10 @@ def _season(low, today):
 
 
 def _weekend(low, today):
+    """"Questo/prossimo weekend" e "weekend" da solo sono un periodo; "un weekend" è solo una
+    durata (decisione "Un weekend", M21)."""
     m = _WEEKEND_RE.search(low)
-    if m:
+    if m and (_THIS_WEEKEND.search(low) or not _A_WEEKEND.search(low)):
         start = today + timedelta(days=(5 - today.weekday()) % 7)
         return Period(start, start + timedelta(days=1), m.group(0))
 
@@ -324,6 +334,50 @@ def parse_pax(text: str) -> Optional[int]:
     for pattern, value in _PAX_PHRASES:
         if pattern.search(low):
             return value
+    return None
+
+
+_NUM = r"(\d+|%s)" % "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+_NIGHTS = r"(?:notti|notte|nights?)\b"
+_DURATION_RANGE = re.compile(r"\b(?:da\s+)?%s\s*(?:-|–|o|a|or|to)\s*%s\s+%s" % (_NUM, _NUM, _NIGHTS))
+_DURATION_AT_LEAST = re.compile(r"\b(?:almeno|at least)\s+%s\s+%s" % (_NUM, _NIGHTS))
+_DURATION_NIGHTS = re.compile(r"\b%s\s+%s" % (_NUM, _NIGHTS))
+_DURATION_DAYS = re.compile(r"\b%s\s+(?:giorni|giorno|days?)\b" % _NUM)
+# tabella di UC-A: (pattern, (min, max)), dal più specifico al più generico
+_DURATION_WORDS = [
+    (re.compile(r"\b(?:due|2|two)\s+(?:settimane|weeks)\b"), (13, 15)),
+    (re.compile(r"\b(?:una|1)\s+settimana\b|\b(?:a|one|1)\s+week\b"), (6, 8)),
+    (re.compile(r"\bponte\b|\blungo\s+(?:week-?end|fine settimana)\b|\bweek-?end\s+lungo\b|"
+                r"\blong\s+week-?end\b"), (2, 4)),
+    (_WEEKEND_RE, (1, 3)),
+]
+
+
+def _nights_ok(*values) -> bool:
+    return all(v is None or 1 <= v <= MAX_NIGHTS for v in values)
+
+
+def parse_duration(text: str) -> Optional[Tuple[int, Optional[int]]]:
+    """RF-58: (min, max) notti dal testo, `max` None per "almeno N notti". Le notti di N giorni
+    sono N − 1; fuori da 1..30 non è una durata."""
+    low = text.lower()
+    m = _DURATION_RANGE.search(low)
+    if m:
+        low_n, high_n = _to_int(m.group(1)), _to_int(m.group(2))
+        if _nights_ok(low_n, high_n) and low_n <= high_n:
+            return low_n, high_n
+    m = _DURATION_AT_LEAST.search(low)
+    if m and _nights_ok(_to_int(m.group(1))):
+        return _to_int(m.group(1)), None
+    m = _DURATION_NIGHTS.search(low)
+    if m and _nights_ok(_to_int(m.group(1))):
+        return _to_int(m.group(1)), _to_int(m.group(1))
+    m = _DURATION_DAYS.search(low)
+    if m and _nights_ok(_to_int(m.group(1)) - 1):
+        return _to_int(m.group(1)) - 1, _to_int(m.group(1)) - 1
+    for pattern, nights in _DURATION_WORDS:
+        if pattern.search(low):
+            return nights
     return None
 
 
@@ -413,6 +467,16 @@ def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> 
             valid["budget"] = value
         else:
             discarded.append(("budget", budget))
+    low_n, high_n = raw.get("duration_min_nights"), raw.get("duration_max_nights")
+    if low_n is not None or high_n is not None:
+        ints = all(v is None or (isinstance(v, int) and not isinstance(v, bool))
+                   for v in (low_n, high_n))
+        if ints and _nights_ok(low_n, high_n) and (low_n is None or high_n is None
+                                                   or low_n <= high_n):
+            # uno solo dei due sostituisce tutta la durata letta nel testo
+            valid["duration_min_nights"], valid["duration_max_nights"] = low_n, high_n
+        else:
+            discarded.append(("duration", (low_n, high_n)))
     return valid, tuple(discarded)
 
 
@@ -463,6 +527,7 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
     group = given.get("pax") or pax or profile.pax
     if budget is not None and group and is_per_person(text):
         budget = budget * group
+    nights = parse_duration(text) or (None, None)
     parsed = Criteria(
         sport=parse_sport(text),
         area=geo.find_area(text),
@@ -470,6 +535,8 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         pax=pax,
         budget=budget,
         language=detect_language(text),
+        duration_min_nights=nights[0],
+        duration_max_nights=nights[1],
     )
     criteria = replace(parsed, **given)
     if criteria.sport is None and extractor is not None:

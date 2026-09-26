@@ -41,6 +41,8 @@ class Criteria:
     pax: Optional[int] = None
     budget: Optional[Decimal] = None
     language: str = "it"
+    duration_min_nights: Optional[int] = None   # M21, RF-58: morbido, ordina e non esclude
+    duration_max_nights: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -54,10 +56,14 @@ class StructuredFields:
     pax: Optional[int] = None
     budget: Optional[object] = None
     direction: Optional[str] = None
+    duration_min_nights: Optional[object] = None
+    duration_max_nights: Optional[object] = None
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
-                "period_end": self.period_end, "pax": self.pax, "budget": self.budget}
+                "period_end": self.period_end, "pax": self.pax, "budget": self.budget,
+                "duration_min_nights": self.duration_min_nights,
+                "duration_max_nights": self.duration_max_nights}
 
 
 def criteria_to_dict(c: Criteria) -> dict:
@@ -70,6 +76,8 @@ def criteria_to_dict(c: Criteria) -> dict:
                                                  "label": c.period.label},
         "pax": c.pax,
         "budget": None if c.budget is None else money_str(c.budget),
+        "duration_min_nights": c.duration_min_nights,
+        "duration_max_nights": c.duration_max_nights,
         "language": c.language,
     }
 
@@ -86,6 +94,8 @@ def criteria_from_dict(d: dict) -> Criteria:
                                                   period["label"]),
         pax=d.get("pax"),
         budget=None if budget is None else Decimal(budget),
+        duration_min_nights=d.get("duration_min_nights"),
+        duration_max_nights=d.get("duration_max_nights"),
         language=d.get("language") or "it",
     )
 
