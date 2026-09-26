@@ -685,3 +685,25 @@ Il mobile è a posto: niente scroll orizzontale e le chat si leggono. Aggiorno l
 Suite verde. Faccio due commit, pagina e documenti, lasciando fuori `index_1.html`.
 
 - 🔧 Bash: Commit the restyle and the docs separately
+
+La landing ora segue il tuo design ed è committata in due commit: `5ec6a5c` (pagina, test, README) e `cdcc62c` (spec e decisioni). `index_1.html` è rimasto fuori dal commit, come chiedevi. Il server locale è ancora attivo: ricarica **http://127.0.0.1:8080** per vederla. La suite passa (47 test saltati) e ho controllato la pagina con screenshot a 1280 px e a 375 px: segue il design e su mobile non scorre di lato.
+
+**Cosa ho fatto**
+- **Aspetto:** il CSS del design è in `styles.css` e il markup in `index.html`. Il design ha solo il tema chiaro, quindi la versione scura della pagina precedente non c'è più.
+- **Comportamento:** `config.js` e `main.js` funzionano come prima. Il pulsante "Copia" copia il contenuto del campo e, se clicchi più volte, non si confonde; senza JavaScript resta nascosto. Nelle card "A voce" e "Al telefono" ci sono ancora "In arrivo", il posto per il widget e il link telefonico.
+- **Esempi:** le risposte di Vela sono quelle vere, ottenute facendo girare Vela in memoria sulle fixture, senza chiamate esterne. Sono le sue frasi di risposta accorciate: Pietrasanta, Fuerteventura, Bordighera, Málaga, Lago di Como.
+- **Calendario:** nell'esempio ora è Claude a leggere e a scrivere il calendario.
+- **Nome del connettore:** "Pacchetti Viaggio di Padel Tennis", sulla landing e nel README.
+- **Test nuovi:** controllano che non restino segnaposto del design, che il nome del connettore sia lo stesso nella pagina e nel README, e che i viaggi citati esistano nelle fixture.
+
+**Su cosa non sono sicuro**
+- **"Hotel incluso":** lo dicono l'hero e il footer, ma i prodotti usati negli esempi non hanno un hotel nei dati (`hotelSelection: false`). Va verificato, oppure va tolta la frase.
+- **Prezzi e date:** vengono dalle fixture del 25 settembre e diventeranno vecchi. Se le fixture vengono rigenerate, il test sui titoli se ne accorge; sui prezzi invece nessun test.
+- **Limiti del parser:** Vela oggi non capisce "in due", "Pasqua", "più fresco" come richiesta sul clima, "spostare di una settimana" e "al caldo". Per questo ho cambiato quelle frasi negli esempi. Se vuoi ne facciamo un task a parte.
+
+Il branch resta da chiudere: merge in `master`, pull request, oppure lo lasciamo così?
+
+## Utente 16:44
+
+Cambia "Tre passaggi.
+Un solo viaggio." in "Un viaggio, in soli tre passaggi"
