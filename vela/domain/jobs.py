@@ -24,7 +24,7 @@ def quota_needs(job: Job) -> Tuple[Optional[QuotaClass], int]:
         return QuotaClass.PURCHASE, calls_needed(job)
     if job.kind == JobKind.BOOKING:
         return QuotaClass.BOOKING, 1
-    return None, 0      # verifica del pagamento: nessuna chiamata HofJ
+    return None, 0      # verifica del pagamento e SMS: nessuna chiamata HofJ
 
 
 class JobProcessor:

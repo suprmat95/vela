@@ -647,3 +647,119 @@ None.
 Il Task 3 è approvato. È partito il Task 4 (porta `Notifier`, SMS finti e `SmsJob`).
 
 Una nota sui commit: due dei primi tre riportano nella riga di attribuzione "Claude Haiku 4.5", il modello che li ha scritti, invece della riga "Claude Opus 5.5" prevista dal piano. Non li riscrivo, perché cambiare la storia richiede il tuo OK. Per i task successivi ho chiesto di usare la riga del piano alla lettera.
+
+## Utente 16:49
+
+<task-notification>
+<task-id>a18b858db68ae3819</task-id>
+<tool-use-id>toolu_019JGXSZT529ASzxiAUMfKQE</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a18b858db68ae3819.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 4: Notifier and SmsJob" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Summary
+
+**Status:** DONE
+
+**Commit:** 13d8ab6 "Add the Notifier port, fake SMS adapter and SMS job"
+
+**Tests:** SMS: 13/13 passing (SendTest, SkipTest, RetryTest, PrivacyTest, EnqueueTest); Full suite: 947 passing, 48 skipped, no regressions
+
+**Concerns:** None
+
+**Report:** `/Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-4-report.md`</result>
+<usage><subagent_tokens>52522</subagent_tokens><tool_uses>21</tool_uses><duration_ms>164817</duration_ms></usage>
+</task-notification>
+
+## Agente 16:49
+
+- 🔧 Bash: Build Task 4 review package
+
+- 🔧 Agent: Review Task 4 (spec + quality)
+
+Revisione del Task 4 in corso.
+
+## Utente 16:50
+
+<task-notification>
+<task-id>a033444804f748cb4</task-id>
+<tool-use-id>toolu_013iBSFJTGMAQkyv1RQxX99Y</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a033444804f748cb4.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 4 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Good — `active_for_order`, `JobKind.SMS_LINK/SMS_CONFIRMED`, `phone.normalize_it`, `phone.mask` all pre-exist from earlier tasks (as the brief states) and follow the established pattern used identically by `orders.py`/`usecases.py`. This confirms `enqueue_sms`'s single-active-job semantics reuse a proven, already-tested repository method rather than reimplementing it — low risk.
+
+Everything in the diff matches the brief's prescribed code verbatim, and the test file matches the brief's Step 1 code exactly (13 tests, consistent with the noted plan typo). I checked the retry/backoff arithmetic, exception ordering (`NotifierRejected` caught before the broader `NotifierError`), masking calls, and the "order never mutated" guarantee (no `repos.orders.save` call anywhere in `sms.py`).
+
+### Spec Compliance
+- ✅ Number masked in logs/`last_error`, SMS text (and payment URL) never logged — `phone.mask(to)` used in both warning branches and the success log; `_describe(exc)` only stringifies the notifier exception, never the body. Verified by `PrivacyTest` (`vela/domain/sms.py:265-311`, `tests/test_sms_job.py:139-153`).
+- ✅ Retry schedule 30s/120s/600s then `dead` (4 attempts total): `vela/domain/sms.py:268-278`, `backoff=(30,120,600)` default, `attempts &gt; len(backoff)` triggers `DEAD` on the 4th failure. Matches `RetryTest` exactly.
+- ✅ `NotifierRejected` → `dead` immediately, no retry: caught before the broader `NotifierError` (correct subclass ordering), `vela/domain/sms.py:264-267`.
+- ✅ Order state never mutated by the SMS job: `sms.py` only calls `self.repos.jobs.save`, never touches `repos.orders`; enforced by `test_order_is_never_changed`.
+- ✅ Order no longer in expected state (`awaiting_payment`/`confirmed`) → `done` without sending: `vela/domain/sms.py:255-257`, `EXPECTED` map.
+- ✅ Unnormalizable number → `done` without sending, with a log: `vela/domain/sms.py:258-261`.
+- ✅ One active job per order+kind via `enqueue_sms`, reusing the existing `repos.jobs.active_for_order` (already used the same way by `vela/domain/orders.py:56` for `BOOKING`), so its correctness is inherited from a previously-tested contract (`tests/repo_contract.py:290-298`).
+- ✅ No new dependencies, no schema changes — only stdlib `threading`/`typing`/`logging`/`dataclasses`/`datetime` and existing `vela.*` modules are imported.
+- ⚠️ Cannot verify from this diff: whether a real Twilio adapter (a later task) will correctly classify 4xx (except 429) as `NotifierRejected` and avoid embedding the raw phone number or SMS body in exception messages. This task only ships `FakeSms`; the port's docstring documents the contract but there's no adapter here to check against it.
+
+### Strengths
+- Exception hierarchy and catch order correctly encode "temporary vs. permanent" without duplicating classification logic in the job.
+- Enqueue logic is properly factored out into `notify.py` and documented as shared by future purchase/booking jobs, avoiding duplication instead of inlining it into `sms.py`.
+- `_describe` truncates to 500 chars, guarding against log/DB bloat from a runaway exception message.
+- Tests exercise real behavior (actual retry counts, actual `run_after` deltas, actual masked strings) rather than mocking internals.
+
+### Issues
+
+#### Critical (Must Fix)
+None found.
+
+#### Important (Should Fix)
+None found — no plan-mandated defects or spec gaps identified beyond the adapter-scope item marked ⚠️ above, which is out of this task's stated file scope.
+
+#### Minor (Nice to Have)
+- `SmsJob._body` (`vela/domain/sms.py:283-292`) dereferences `self.repos.proposals.get(order.proposal_id)` without a None check, unlike the defensive `intent is None` handling two lines above. If a proposal were ever missing this would raise `AttributeError` instead of a clean skip/log; low risk since orders always reference an existing proposal in current invariants, but the asymmetric defensiveness is worth a comment or matching guard for consistency.
+- The task brief's own "OK (14 test)" line is a known-typo already flagged in the review instructions; report correctly notes the actual count (13), no action needed.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The implementation matches the brief and all binding spec constraints (masking, retry/backoff, dead-lettering, order immutability, single active job, no new deps/schema) exactly, backed by tests that check real observable behavior rather than mocks; the only gaps identified are out of this task's scope (real Twilio adapter) or cosmetic (asymmetric None-guarding in a helper).</result>
+<usage><subagent_tokens>63668</subagent_tokens><tool_uses>5</tool_uses><duration_ms>63107</duration_ms></usage>
+</task-notification>
+
+## Agente 16:50
+
+- 🔧 Bash: Record Task 4 completion and extract Task 5 brief
+
+- 🔧 Agent: Implement Task 5: enqueue SMS and wire worker
+
+Task 4 approvato. In corso il Task 5: accodamento degli SMS nei job d'acquisto e prenotazione, collegamento al worker e test del flusso completo.
+
+## Utente 16:52
+
+a che punto sei?
+
+## Agente 16:52
+
+Siamo a metà: 4 task su 10 sono chiusi e approvati dalla revisione, il Task 5 è ancora in corso.
+
+**Fatti:**
+1. Normalizzazione del numero: `+39` di default, e un `+39` già scritto non viene raddoppiato.
+2. Testi dei due SMS in italiano e inglese, solo caratteri GSM-7. Il revisore ha controllato che l'alfabeto nel codice sia quello standard.
+3. Nuovi tipi di job e priorità della coda: gli SMS passano prima degli acquisti.
+4. Porta `Notifier`, SMS finti e `SmsJob`: tentativi a 30 s, 2 min e 10 min, numero mascherato nei log.
+
+Dopo l'ultimo task chiuso la suite completa è verde: 947 test, 48 saltati perché senza Postgres.
+
+**In corso:** il Task 5 accoda gli SMS quando nasce il link e alla conferma, e li collega al worker. Include il test del flusso completo in replay, che verifica che arrivino esattamente 2 SMS. È il task più delicato, per questo l'ho assegnato a un modello più capace. Non ho ancora il suo esito.
+
+**Mancano:**
+- Task 6: adapter Twilio.
+- Task 7: configurazione.
+- Task 8: frasi dell'agente e istruzioni MCP.
+- Task 9: documenti.
+- Poi la revisione finale di tutto il branch.
+
+Il Task 10, il test con SMS reali, resta fermo finché non imposti le variabili Twilio e mi dai l'OK.
+
+Quello che ho annotato finora sono solo osservazioni minori da valutare nella revisione finale, più la riga di attribuzione dei due commit di cui ti ho parlato.

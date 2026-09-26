@@ -26,6 +26,7 @@ from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import FIXTURE_PATH, ReplayHofJ
 from vela.adapters.hofj_router import BrandRouter, SingleClientRouter
 from vela.adapters.repo_postgres import PostgresRepositories
+from vela.adapters.sms_fake import FakeSms
 from vela.adapters.stripe_fake import FakePayments
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
@@ -36,9 +37,11 @@ from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
 from vela.domain.purchase import PurchaseJob
+from vela.domain.sms import SmsJob
 from vela.domain.usecases import Vela
 from vela.ports.catalog import CatalogSource
 from vela.ports.hofj import HofJRouter
+from vela.ports.notifier import Notifier
 from vela.ports.payments import PaymentsPort
 from vela.surfaces.checkout_pages import router as checkout_router
 from vela.surfaces.health import router as health_router
@@ -124,20 +127,26 @@ def build_scheduler(vela: Vela, upstream: Upstream) -> Optional[SyncScheduler]:
     return SyncScheduler(sync, vela.repos, now=vela.now)
 
 
-def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = None) -> Worker:
-    """Job d'acquisto, prenotazione e verifica del pagamento sotto un solo processore (RF-50).
+def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = None,
+                 notifier: Optional[Notifier] = None) -> Worker:
+    """Job d'acquisto, prenotazione, verifica del pagamento e SMS sotto un solo processore (RF-50).
     Senza `router` (test con un client finto) tutti i brand usano `vela.hofj`."""
     router = router or SingleClientRouter(vela.hofj)
+    notifier = notifier or FakeSms()
     purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
                            new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
     booking = BookingJob(vela.repos, router, now=vela.now,
-                         max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff)
+                         max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff,
+                         new_id=vela.new_id)
     check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
                             poll_seconds=settings.payment_poll_seconds)
+    sms = SmsJob(vela.repos, notifier, now=vela.now)
     processor = JobProcessor(vela.repos, router, {JobKind.PURCHASE: purchase,
                                                      JobKind.BOOKING: booking,
-                                                     JobKind.PAYMENT_CHECK: check},
+                                                     JobKind.PAYMENT_CHECK: check,
+                                                     JobKind.SMS_LINK: sms,
+                                                     JobKind.SMS_CONFIRMED: sms},
                              now=vela.now, lease_seconds=settings.job_lease_seconds)
     return Worker(processor, settings.worker_concurrency)
 

@@ -267,5 +267,21 @@ class CancelledTest(unittest.TestCase):
         self.assertEqual(s.payments.links, [])
 
 
+class SmsLinkTest(unittest.TestCase):
+    def test_link_step_enqueues_one_sms_link(self):
+        s = Setup()
+        j = replace(s.repos.jobs.get("j1"), status=JobStatus.RUNNING, locked_at=NOW)
+        s.job.run(j, NEXT_WINDOW)
+        self.assertEqual(s.repos.orders.get("o1").status, OrderStatus.AWAITING_PAYMENT)
+        sms = [j for j in s.repos.jobs._jobs.values() if j.kind == JobKind.SMS_LINK]
+        self.assertEqual([(j.order_id, j.status) for j in sms], [("o1", JobStatus.PENDING)])
+
+    def test_failed_purchase_enqueues_no_sms(self):
+        s = Setup(hofj=FakeHofJ(fail_at={"create_itinerary": [ConfigError("401")]}))
+        j = replace(s.repos.jobs.get("j1"), status=JobStatus.RUNNING, locked_at=NOW)
+        s.job.run(j, NEXT_WINDOW)
+        self.assertFalse(any(j.kind == JobKind.SMS_LINK for j in s.repos.jobs._jobs.values()))
+
+
 if __name__ == "__main__":
     unittest.main()
