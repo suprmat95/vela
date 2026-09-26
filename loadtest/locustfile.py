@@ -81,15 +81,19 @@ class Arrivals(FastHttpUser):
             out.write(json.dumps(live.pop(tr.index)) + "\n")
 
         group = Group()
-        for tr in plan:
-            delay = tr.arrival - clock()
-            if delay > 0:
-                gevent.sleep(delay)
-            group.spawn(traveler, tr)
-        group.join(timeout=max(0.0, deadline - clock()) + 10)
-        group.kill(block=True, timeout=10)
-        for record in live.values():
-            record["final"] = record.get("final") or "open_%s" % record.get("last_status", "unknown")
-            out.write(json.dumps(record) + "\n")
-        out.close()
+        try:
+            for tr in plan:
+                if tr.arrival >= deadline:
+                    break
+                delay = tr.arrival - clock()
+                if delay > 0:
+                    gevent.sleep(delay)
+                group.spawn(traveler, tr)
+            group.join(timeout=max(0.0, deadline - clock()) + 10)
+        finally:   # anche se Locust interrompe il task: chi è in corso viene scritto
+            group.kill(block=True, timeout=10)
+            for record in live.values():
+                record["final"] = record.get("final") or "open_%s" % record.get("last_status", "unknown")
+                out.write(json.dumps(record) + "\n")
+            out.close()
         self.environment.runner.quit()

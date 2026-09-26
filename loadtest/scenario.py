@@ -65,10 +65,11 @@ def travelers(n: int, minutes: float = 10.0, seed: int = 13, funnel: Funnel = Fu
         accepts = rng.random() < funnel.accept
         out.append(Traveler(i, t, text, sport, rejects=rng.random() < funnel.reject,
                             accepts=accepts, pays=rng.random() < funnel.pay, poll=funnel.poll))
-    if sentinels:
+    if sentinels:   # solo se arrivano dentro la finestra degli arrivi (giri brevi di prova)
         text, sport = INTENTS[0]
-        out.append(Traveler(n, 55.0, text, sport, rejects=False, accepts=True, pays=True,
-                            role="marco", accept_at=60.0, poll=(SENTINEL_POLL, SENTINEL_POLL)))
-        out.append(Traveler(n + 1, 360.0, text, sport, rejects=True, accepts=True, pays=True,
-                            role="anna", poll=(SENTINEL_POLL, SENTINEL_POLL)))
+        marco = Traveler(n, 55.0, text, sport, rejects=False, accepts=True, pays=True,
+                         role="marco", accept_at=60.0, poll=(SENTINEL_POLL, SENTINEL_POLL))
+        anna = Traveler(n + 1, 360.0, text, sport, rejects=True, accepts=True, pays=True,
+                        role="anna", poll=(SENTINEL_POLL, SENTINEL_POLL))
+        out += [tr for tr in (marco, anna) if tr.arrival < minutes * 60]
     return sorted(out, key=lambda tr: tr.arrival)

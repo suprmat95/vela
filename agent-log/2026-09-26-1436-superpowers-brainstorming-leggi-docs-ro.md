@@ -236,3 +236,105 @@ Mentre il sync gira, scrivo `loadtest/README.md`.
 - 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/README.md
 
 - 🔧 Bash: Check sync progress
+
+Il sync procede (25 prodotti, nessun 429). Intanto committo compose, Dockerfile, `run.py` e README.
+
+- 🔧 Bash: Run full suite and commit compose stack
+
+- 🔧 Bash: Check sync progress again
+
+Il sync è a 50/126 prodotti, senza 429. Quando il monitor segnala la fine del sync lancio un giro di prova breve (50 viaggiatori, 1 minuto di arrivi + 2 di coda), per controllare tutta la catena prima dei giri veri.
+
+## Utente 15:38
+
+<task-notification>
+<task-id>bgjkmocb6</task-id>
+<tool-use-id>toolu_019sc8uJrvBnfQSV97WVNZJf</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m13a/b785a2d9-3eaa-4ad6-b525-98d21d947b4b/tasks/bgjkmocb6.output</output-file>
+<status>completed</status>
+<summary>Monitor "Wait until Vela catalog sync reaches 126 products" stream ended</summary>
+<event>synced</event>
+If this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.
+</task-notification>
+
+## Agente 15:38
+
+- 🔧 Bash: Run a short smoke load test end to end
+
+Sto facendo un **giro di prova breve** del load test (50 viaggiatori, 1 minuto di arrivi + 2 di coda) per verificare tutta la catena prima dei giri veri: Locust → Vela (modo `loadtest`) → finto HofJ → report.
+
+A che punto è M13a:
+- **Fatto e committato (tutto in locale, test verdi, 916+ test OK):**
+  - finto HofJ (`loadtest/fake_hofj/`): finestra di quota ancorata/scorrevole, latenza, guasti, registro JSONL;
+  - modo `VELA_UPSTREAM_MODE=loadtest` in `vela/app.py` (rifiuta host diversi da `fake-hofj`/localhost, pagamenti sempre finti);
+  - scenario a modello aperto con Marco e Anna, `locustfile.py`, `report.py`, `run.py`;
+  - `docker-compose.yml`, stage `loadtest` nel Dockerfile (Render continua a costruire lo stage `app`), `loadtest/README.md`.
+- **Un intoppo risolto:** su Apple M4 Vela moriva con SIGILL dentro Docker. La causa è l'OpenSSL di `cryptography`. L'ho risolto con `OPENSSL_armcap=0` nel compose, senza cambiare dipendenze, e l'ho registrato in `docs/decisions.md`.
+- **Il sync M10 contro il finto funziona:** 126 prodotti, nessun 429.
+
+Non ho fatto nessuna chiamata a HofJ né a Stripe, e non ho toccato `quota.py` né `QuotaStore`.
+
+**Prossimi passi:** controllo il report del giro di prova. Poi lancio i 4 giri (1k, 10k, 50k puliti, 50k con guasti), circa 15-17 minuti l'uno, e compilo `loadtest/RESULTS.md` con la colonna "prima". Ti avviso quando il giro di prova finisce.
+
+## Utente 15:42
+
+Non tocchi mai il vero HofJ vero, cosa stai usando?
+
+## Agente 15:42
+
+- 🔧 Bash: Show Vela container upstream config and fake HofJ stats
+
+No, il vero HofJ non lo tocco mai. Uso un **finto HofJ** scritto in questa task (`loadtest/fake_hofj/`), che gira in locale come container Docker `fake-hofj` sulla porta 8001.
+
+Ecco cosa gira dentro il container di Vela in questo momento:
+
+```
+VELA_UPSTREAM_MODE=loadtest
+HOFJ_BASE_URL=http://fake-hofj:8001
+HOFJ_API_KEY=loadtest-key     ← chiave finta, accettata solo dal finto
+```
+
+Nessuna variabile Stripe è impostata.
+
+Le protezioni sono tre:
+1. **`docker-compose.yml`**: Vela punta a `http://fake-hofj:8001`, e un test (`tests/test_docker_files.py`) fallisce se nel compose compare un host `hofj.com` o `STRIPE_SECRET_KEY`.
+2. **Modo `loadtest` in `vela/app.py`**: se `HOFJ_BASE_URL` non è `fake-hofj`, `localhost` o `127.0.0.1`, Vela non parte. È coperto da test, incluso `https://staging.api.hofj.com`.
+3. **Chiave**: la chiave è finta. Anche per errore contro HofJ vero riceverebbe un 401.
+
+Il finto riproduce le regole di HofJ: quota 120/min con finestra ancorata, latenza 2-6 s su `POST /v1/itineraries`, forme delle risposte ed errori come osservati su staging. Serve il catalogo dalle fixture già nel repo (`fixtures/catalog*.json`). Il pagamento è finto: si paga visitando `/replay/checkout/{id}` su Vela.
+
+Il suo registro conferma che tutte le chiamate di Vela sono arrivate lì. Finora sono 210: 130 del sync del catalogo e 80 del giro di prova (14 carrelli, 10 prenotazioni), senza nessun 429.
+
+Il giro di prova da 50 viaggiatori sta finendo; poi guardo il report e passo ai 4 giri veri.
+
+## Utente 15:43
+
+ok continua con il test
+
+## Agente 15:43
+
+- 🔧 Bash: Read smoke run output
+
+- 🔧 Bash: Check smoke run output files and containers
+
+- 🔧 Bash: Show locust run container logs
+
+- 🔧 Monitor
+
+- 🔧 Bash: Summarize smoke traveler events and Locust stats
+
+- 🔧 Bash: Keep sentinels inside the arrival window and guard spawner
+
+- 🔧 Bash: Check whether the smoke run finished
+
+- 🔧 Bash: Check locust container status
+
+- 🔧 Monitor
+
+Mentre esce, rendo la chiusura del giro robusta: se Locust interrompe il task (limite di tempo), i viaggiatori ancora in corso vanno comunque scritti. Uso un `try/finally`.
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/locustfile.py
+
+- 🔧 Bash: Make the Locust scenario flush on interruption; read smoke output
+
+- 🔧 Bash: Commit fixes and write the four-run script

@@ -40,6 +40,10 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(len(travelers(100)), 102)
         self.assertEqual(len(travelers(100, sentinels=False)), 100)
 
+    def test_sentinels_outside_a_short_window_are_left_out(self):
+        self.assertEqual([t.role for t in travelers(10, minutes=3) if t.role], ["marco"])
+        self.assertEqual([t.role for t in travelers(10, minutes=0.5) if t.role], [])
+
 
 class IntentsTest(unittest.TestCase):
     """Le frasi devono dare una proposta e, dopo "troppo caro", un'altra: altrimenti l'imbuto
