@@ -91,8 +91,8 @@ In `render.yaml`, stesso blueprint:
   - type: web
     name: vela-landing
     runtime: static
-    buildCommand: ""
-    staticPublishPath: landing
+    buildCommand: echo "Landing statica, nessun build"
+    staticPublishPath: ./landing
     buildFilter:
       paths:
         - landing/**
@@ -116,7 +116,7 @@ custom.
 - Ogni `href` o `src` relativo di `index.html` punta a un file esistente sotto `landing/`.
 - L'URL MCP scritto in `index.html` è uguale a `mcpUrl` di `config.js`.
 - `render.yaml` contiene il servizio `vela-landing` con `runtime: static`,
-  `staticPublishPath: landing` e `landing/**` nel `buildFilter`; il servizio `vela` ignora
+  `staticPublishPath: ./landing` e `landing/**` nel `buildFilter`; il servizio `vela` ignora
   `landing/**`.
 - `.dockerignore` contiene `landing`.
 - Guardia "no homepage": `index.html` non contiene `<table>` e `main.js` non contiene `fetch(`

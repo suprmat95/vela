@@ -15,6 +15,15 @@ def read(name):
         return f.read()
 
 
+def service_block(text, name):
+    """Il blocco YAML del servizio `name` in `services:` (testuale, senza dipendenze)."""
+    services = text.split("\ndatabases:")[0]
+    for block in services.split("\n  - type: ")[1:]:
+        if re.search(r"^\s+name: %s$" % re.escape(name), block, re.M):
+            return block
+    return None
+
+
 class RenderYamlTest(unittest.TestCase):
     def setUp(self):
         self.text = read("render.yaml")
@@ -45,6 +54,23 @@ class RenderYamlTest(unittest.TestCase):
         """M7: Render gira contro HofJ staging; il valore sta nel Blueprint perché una
         sincronizzazione non lo riporti a replay."""
         self.assertRegex(self.text, r"key: VELA_UPSTREAM_MODE\n\s+value: live")
+
+
+class LandingServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.text = read("render.yaml")
+
+    def test_landing_is_a_static_site(self):
+        block = service_block(self.text, "vela-landing")
+        self.assertIsNotNone(block)
+        self.assertIn("runtime: static", block)
+        self.assertIn("staticPublishPath: ./landing", block)
+        self.assertRegex(block, r"buildFilter:\n\s+paths:\n\s+- landing/\*\*")
+
+    def test_api_ignores_landing_changes(self):
+        block = service_block(self.text, "vela")
+        self.assertIn("runtime: docker", block)
+        self.assertRegex(block, r"buildFilter:\n\s+ignoredPaths:\n\s+- landing/\*\*")
 
 
 class ReadmeTest(unittest.TestCase):

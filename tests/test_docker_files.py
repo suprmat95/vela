@@ -45,3 +45,6 @@ class DockerignoreTest(unittest.TestCase):
         lines = read(".dockerignore").splitlines()
         for needed in ("alembic", "alembic.ini", "pyproject.toml", "uv.lock", "vela"):
             self.assertNotIn(needed, lines)
+
+    def test_excludes_the_landing(self):
+        self.assertIn("landing", read(".dockerignore").splitlines())

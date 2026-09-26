@@ -645,3 +645,4 @@ Origine: brainstorming di `task/landingpage`. Design in
 | Canali mostrati | Claude via MCP, widget ElevenLabs, numero di telefono. REST escluso | Il token REST non è pubblico; la pagina è per il viaggiatore |
 | Agent id e numero | Placeholder vuoti in `landing/config.js`; finché sono vuoti le sezioni mostrano "In arrivo" e lo script ElevenLabs non viene caricato. La creazione resta in M12 | M12 non è fatta; attivarli poi costa una riga |
 | Lingua | Solo italiano | Scelta dell'utente |
+| Comandi del servizio statico | `buildCommand: echo "Landing statica, nessun build"` e `staticPublishPath: ./landing` | Non è certo che il Blueprint accetti un `buildCommand` vuoto; `./` segue gli esempi della documentazione Render |

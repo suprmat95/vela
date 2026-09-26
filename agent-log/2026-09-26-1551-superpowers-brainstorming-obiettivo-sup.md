@@ -333,3 +333,15 @@ Con JavaScript disattivato `--dump-dom` non restituisce nulla, perché per legge
 - 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/nojs.png
 
 - 🔧 Bash: Commit task 2 and record completion
+
+Task 3: deploy su Render. Scrivo prima i test.
+
+- 🔧 Bash: Start task 3 and add failing deploy tests
+
+I tre test falliscono come previsto. Ora modifico `render.yaml` e `.dockerignore`.
+
+- 🔧 Bash: Edit render.yaml and dockerignore, run tests
+
+Test verdi. Aggiorno anche il commento in testa a `render.yaml`, che nominava solo Docker e Postgres, poi allineo spec e decisioni.
+
+- 🔧 Bash: Align spec, decisions and render.yaml header; run suite
