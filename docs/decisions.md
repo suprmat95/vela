@@ -579,3 +579,18 @@ Chiude le "Decisioni aperte sul parser" del contratto agente-tool. Piano in
 | `say` del rifiuto | Ordine annullato (RF-49), campi scartati, motivo non traducibile (solo se il motivo non è vuoto e nessun criterio cambia), "Ho capito: …", proposta o `no_match` | RF-54 |
 | Frasi di `no_match` | "prova a riformulare la richiesta" → "dimmi cosa vuoi cambiare" | RF-09: non spingere l'agente verso un nuovo `create_intent` |
 | Interprete dei test | `uv run python -m unittest discover -s tests` (3.12); il `python3` di sistema è 3.7 e non ha le dipendenze | Come da M0; base di partenza 773 test, 42 saltati |
+
+## 2026-09-26 — M17: decisioni prese durante l'esecuzione
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Test aggiornati (RF-04, RF-03) | In `tests/test_intent.py`: `test_missing_sport_and_period_asks_sport_or_period` → `test_missing_sport_asks_sport`; `test_only_period_is_enough` → `test_period_without_sport_asks_sport`; `FallbackTest.test_not_called_when_period_found` → `test_called_when_sport_missing_even_with_period`; `test_called_when_both_missing_and_overrides` → `test_fills_only_missing_criteria` (area e pax restano quelli del parser); `QUESTION_SPORT_OR_PERIOD(_EN)` → `QUESTION_SPORT(_EN)` negli altri test. Nessun test di casi d'uso, MCP o REST dipendeva da "periodo senza sport" | Fissavano la vecchia RF-04 "sport oppure periodo" e il fallback che sovrascriveva il parser |
+| "troppo caldo" / "troppo freddo" | Anche "troppo caldo", "too hot" → north e "troppo freddo", "too cold" → south in `refine.py` | È la frase letterale del caso osservato |
+| "either" | Vale `any` solo in "either is/one/sport/will do/way"; "both of us" non è "both sports" | "either Spain or Portugal" e "for both of us" non parlano dello sport |
+| Frase dell'area scartata | "Non conosco il luogo X." senza "cerco ovunque" | Vale anche nel rifiuto, dove l'area di prima resta; la riga "Ho capito" che segue dice quale area si usa |
+| Campi scartati e domanda | Le frasi dei campi scartati precedono anche la domanda "Padel o tennis?" (es. `sport=golf`) | Il viaggiatore sente perché gli si chiede lo sport |
+| `pax` MCP | L'argomento va sia nel profilo (come prima) sia nei campi strutturati | Il test esistente sul profilo resta valido; nei criteri vince il campo |
+| `say` del rifiuto | La riga "Ho capito: …" precede anche un `no_match` | RF-54: i criteri capiti si ripetono sempre |
+| Secondo rifiuto della stessa proposta | Il motivo del secondo rifiuto non viene salvato (resta il primo, vincolo invariato). Un "troppo caro" detto al secondo rifiuto abbassa il budget ma non crea il tetto di prezzo della decisione M7 | Nessun cambio di schema; caso raro, da rivedere se capita |
+| Conflitto `direction` / luogo nel testo | Se il campo `direction` sostituisce un luogo esplicito del motivo, il conflitto non va nei log (va solo quello `area` / `direction`) | Caso raro; il `say` ripete comunque l'area risultante |
+| Suite finale | 848 test, 42 saltati (Postgres), verde con `uv run python` (erano 773 a inizio M17). Nessuna chiamata ad Anthropic | — |
