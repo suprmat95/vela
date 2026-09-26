@@ -709,3 +709,21 @@ Limite 120/min per chiave (padel e tennis insieme). Margine 10% per gli altri us
 
 Cosa si sacrifica, in ordine: 1) il sync; 2) l'attesa degli acquisti, che cresce, dichiarata,
 senza tetto; 3) mai le prenotazioni degli ordini pagati.
+
+## 2026-09-26 — M13a: banco di prova
+
+Piano in `docs/plans/2026-09-26-m13a-banco-di-prova.md`. Intervista del 2026-09-26.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Durata di un giro | 10 min di arrivi + 5 min di coda; chi è ancora in coda alla fine è contato, non atteso | A 50k la coda (~10.000 accettazioni) si smaltisce in ore: il confine sulla quota si vede già a regime |
+| Catalogo in modo `loadtest` | Sync M10 vero contro il finto; lo scenario parte a sync finito | Stesso percorso del live; il sync resta nel registro del finto (M10 entra nel budget) |
+| Lancio di Locust | Servizio compose `locust` (profilo `loadtest`) da uno stage del Dockerfile con le dipendenze dev; lo stage finale resta l'immagine di oggi | Al valutatore basta Docker; Render continua a costruire lo stesso stage |
+| Giri della colonna "prima" | 1k, 10k, 50k puliti (finestra ancorata, latenza standard, `--background-rpm 12`, nessun guasto) + un 50k con guasti e latenza `pessimistic` | I giri puliti mostrano il confine sulla quota; quello con guasti conta 429, orfani e prenotazioni per itinerario |
+| Sentinella Marco | Accetta a 60 s come scritto; il report dice se è confermato entro il minuto 7 e in che posizione era | A 50k ha ~1.000 accettazioni davanti: se fallisce è una previsione della seconda lettura (§6) smentita, da scrivere, non da aggiustare |
+| Latenza del finto | `POST /v1/itineraries` 2-6 s, altri endpoint 0,3-1,5 s **[previsto]**; `pessimistic` = 2-6 s ovunque | `docs/acceptance.md` ha solo il totale "accept → link" (53 s), non il dettaglio per endpoint; misurarlo richiederebbe chiamate a HofJ |
+| 429 nel finto | La chiamata respinta conta nella finestra | Ipotesi pessimista: il comportamento di HofJ non è noto |
+| `POST /v1/bookings` nel finto | `{data: "<itineraryId>"}`, upsert per `itineraryId` | È la forma osservata su staging in due sonde (`docs/api/internal-checkout.md`), non quella di OAS |
+| Test di contratto | Il vero `HofJHttp` contro il finto con il transport sincrono del `TestClient` di Starlette | `HofJHttp` usa httpx sincrono; `httpx.ASGITransport` è solo asincrono |
+| Modello aperto | Scheduler degli arrivi in `test_start`, un greenlet per viaggiatore con `FastHttpSession` | `LoadTestShape` è a modello chiuso (numero di utenti), non ad arrivi |
+| Locale in modo `loadtest` | Quello della fixture registrata per il brand, su qualunque host | Il finto non è un host con fixture registrate |
