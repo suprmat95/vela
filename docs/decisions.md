@@ -631,3 +631,17 @@ Decisioni prese durante l'implementazione; il design aggiornato è in
 | Registrazione delle fixture tennis | 2026-09-26: `catalog-tennis.json` 51 chiamate (1 quota, 1 pagina, 49 dettagli; 80 prodotti, 49 attivi), `catalog-staging-tennis.json` 15 chiamate (1 quota, 1 pagina, 13 dettagli; 36 prodotti, 13 attivi). Nessun 429 | Numeri uguali a quelli dichiarati prima delle chiamate |
 | Rebase su M17 | 2026-09-26: `task/m10` riportato su `master` dopo il merge di M17 (unico conflitto: le sezioni in coda a questo file). Annotazione di `hofj` in `usecases.py` e `orders.py` corretta in `HofJRouter`; MB5 testato anche con `sport="any"` vero. Suite 916 test | I file di M17 si toccano solo dopo il suo merge |
 | Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |
+
+## 2026-09-26 — Landing: design
+
+Origine: brainstorming di `task/landingpage`. Design in
+`docs/superpowers/specs/2026-09-26-landing-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Scopo della landing | Guida ai canali ("come si usa Vela"): nessun viaggio, prezzo, lista o tabella | Il brief dice "In 2029 Vela has no homepage"; la pagina spiega come arrivare a Vela dove il viaggiatore è già. Scartate: vetrina per i valutatori, pagina marketing |
+| Stack | HTML, CSS e JS a mano in `landing/`, nessun build e nessuna dipendenza | Una sola pagina; Render la pubblica così com'è. Scartati: static site generator (Node, `package.json`, build), Tailwind da CDN |
+| Deploy | Servizio `vela-landing` (`runtime: static`, `staticPublishPath: landing`) nello stesso `render.yaml`; `buildFilter` separati tra landing e API; `landing` in `.dockerignore` | Configurazione versionata; un cambio alla landing non ridistribuisce l'API e viceversa. Scartati: servizio creato a mano in dashboard, secondo blueprint |
+| Canali mostrati | Claude via MCP, widget ElevenLabs, numero di telefono. REST escluso | Il token REST non è pubblico; la pagina è per il viaggiatore |
+| Agent id e numero | Placeholder vuoti in `landing/config.js`; finché sono vuoti le sezioni mostrano "In arrivo" e lo script ElevenLabs non viene caricato. La creazione resta in M12 | M12 non è fatta; attivarli poi costa una riga |
+| Lingua | Solo italiano | Scelta dell'utente |
