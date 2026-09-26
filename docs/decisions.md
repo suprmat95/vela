@@ -631,3 +631,16 @@ Decisioni prese durante l'implementazione; il design aggiornato è in
 | Registrazione delle fixture tennis | 2026-09-26: `catalog-tennis.json` 51 chiamate (1 quota, 1 pagina, 49 dettagli; 80 prodotti, 49 attivi), `catalog-staging-tennis.json` 15 chiamate (1 quota, 1 pagina, 13 dettagli; 36 prodotti, 13 attivi). Nessun 429 | Numeri uguali a quelli dichiarati prima delle chiamate |
 | Rebase su M17 | 2026-09-26: `task/m10` riportato su `master` dopo il merge di M17 (unico conflitto: le sezioni in coda a questo file). Annotazione di `hofj` in `usecases.py` e `orders.py` corretta in `HofJRouter`; MB5 testato anche con `sport="any"` vero. Suite 916 test | I file di M17 si toccano solo dopo il suo merge |
 | Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |
+
+## 2026-09-26 — Accettazione con attesa breve
+
+Origine: discussione sul twist. Con la coda vuota l'accettazione risponde comunque "ti ho
+messo in coda" e l'agente deve chiedere lo stato per avere il link, anche quando il job lo
+prepara in pochi secondi. Roadmap M20.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Strategia | B: un solo percorso; in posizione 1 `accept_proposal` attende fino a `accept_wait_seconds` (default 10 s) il link preparato dal job, poi risponde come oggi | Stesso risultato per chi è solo, costo 1-2 h, nessuna regola cambiata. Scartata A (con budget libero l'accept fa subito le 5 chiamate): rompe RF-45, richiesta di 10-30 s, errori gestiti in due posti, e sotto picco girerebbe il percorso meno usato in demo |
+| RF-45 | Resta: l'accettazione non chiama HofJ né Stripe | La decisione del twist del 2026-09-25 ("un solo percorso da testare") vale ancora |
+| Limite noto | Con HofJ reale le 5 chiamate richiedono 10-20 s: l'attesa di 10 s non sempre basta | Accettato: nel caso peggiore la risposta è quella di oggi, con una frase più adatta |
+

@@ -59,6 +59,7 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M15 | Consegna: ARCHITECTURE.md, README, video | M | tutte | 6 / — |
 | M16 | (opzionale) Superficie A2A | M | M4, M8 | 6 / M15 |
 | M17 | Contratto agente-tool e sinonimi dello sport | M | M3, M4, M9, M11 | 5 / M10, M12, M13, M14 |
+| M20 | Accettazione con attesa breve quando la coda è vuota | S | M5 | 5 / dopo M18 |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
@@ -711,6 +712,63 @@ M14.
 
 ---
 
+## M20 — Accettazione con attesa breve quando la coda è vuota
+
+**Risultato.** Chi accetta una proposta senza nessuno davanti in coda riceve il link di
+pagamento nella stessa risposta, quando HofJ è abbastanza veloce, invece di sentirsi dire "ti
+ho messo in coda" e dover chiedere lo stato. Sotto picco non cambia nulla. Il percorso resta
+uno solo: il carrello lo prepara sempre il job d'acquisto, `accept_proposal` continua a non
+chiamare HofJ né Stripe (RF-45). Decisione del 2026-09-26 in `docs/decisions.md`
+("Accettazione con attesa breve").
+
+**Scope.**
+- `accept_proposal` (`vela/domain/usecases.py`): dopo aver accodato l'ordine, se la posizione
+  è 1 attende fino a `accept_wait_seconds` (campo di `Settings`, default 10, nessuna variabile
+  d'ambiente nuova) rileggendo l'ordine; se nel frattempo è `awaiting_payment` restituisce lo
+  stato dell'ordine con il link (`OrderStatusResponse`, forma già usata per il doppio accept),
+  altrimenti `OrderQueued` come oggi. Con posizione > 1 risponde subito. L'attesa passa da un
+  parametro `sleep` iniettabile, così i test non aspettano davvero.
+- Frase `say` (it/en) per posizione 1 ancora in lavorazione alla fine dell'attesa: "Sto
+  preparando il pagamento con il fornitore, ci vogliono pochi secondi. Chiedimi a che punto è."
+  al posto di "Ti ho messo in coda: tra circa 1 minuto…".
+- Esiti dell'attesa diversi da `awaiting_payment` (`replaced`, `failed`) restituiti come stato
+  dell'ordine con la loro frase, senza attendere oltre.
+- REST: 200 `order_status` quando il link è pronto, 202 `order_queued` come oggi negli altri
+  casi; `docs/rest.md` aggiornato. MCP: descrizione di `accept_proposal` aggiornata ("il link
+  può arrivare subito o con `get_order_status`").
+- Spec: RF-45 e RNF-04 (durata massima dell'accettazione = `accept_wait_seconds`) aggiornati.
+
+**Test di completamento.**
+- Coda vuota, job che finisce durante l'attesa (worker finto) → risposta con `payment_url`.
+- Coda vuota, job lento → dopo `accept_wait_seconds` `OrderQueued` con la frase nuova.
+- Posizione > 1 → risposta immediata, nessuna attesa (sleep finto mai chiamato).
+- Job che sostituisce il prodotto durante l'attesa → stato `replaced` con la proposta nuova.
+- `accept_proposal` non chiama `HofJPort` né `PaymentsPort` (test esistente invariato).
+- Doppio accept durante l'attesa: stesso ordine, un solo job.
+- Scenario di M13: sotto picco nessuna richiesta di accept supera il p95 di M13b.
+
+**Da decidere nel brainstorm.**
+- Durata dell'attesa: **A) 10 s per tutti**; B) più corta per l'agente vocale (M12), dove 10 s
+  sono silenzio; C) nessun default, solo configurazione.
+- Condizione: **A) posizione 1**; B) posizione ≤ acquisti per finestra (anche il quarto in coda
+  potrebbe avere il link in tempo).
+
+**Copre.** RF-45 (aggiornato), RNF-04.
+
+**Taglia.** S (1-2 h). **Dipende da** M5. **Ondata** 5, dopo M18 (le misure di M13b restano
+confrontabili con M13a solo se questa modifica arriva dopo).
+
+**Prompt.**
+> Leggi docs/spec.md (RF-45, RF-48, RNF-04), docs/decisions.md (2026-09-26, "Accettazione con
+> attesa breve"), vela/domain/usecases.py (`accept_proposal`, `get_order_status`),
+> vela/domain/say.py, vela/surfaces/rest.py, vela/surfaces/mcp.py e docs/roadmap.md M20.
+> Obiettivo: con l'ordine in posizione 1, `accept_proposal` attende fino a
+> `accept_wait_seconds` il link preparato dal job e lo restituisce; altrimenti risponde come
+> oggi. Il percorso resta uno solo e l'accettazione non chiama HofJ né Stripe. Prima chiudi le
+> decisioni aperte. Test: M20.
+
+---
+
 ## Matrice dei requisiti
 
 | Requisito | Macro task |
@@ -747,7 +805,7 @@ M14.
 | RF-42 | M2, M17 |
 | RF-43 | M4 (REST), M8 (MCP OAuth) |
 | RF-44 | M15 (documentazione), M16 (opzionale) |
-| RF-45..RF-51 | M5 |
+| RF-45..RF-51 | M5 (RF-45 anche M20) |
 | RF-52..RF-55 | M17 |
 | RF-56 | M10 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
