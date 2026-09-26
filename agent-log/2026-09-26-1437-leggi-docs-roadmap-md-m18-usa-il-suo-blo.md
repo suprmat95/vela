@@ -268,3 +268,53 @@ The interrupted `decisions.md` edit wasn't applied. I'm checking that the code i
 Everything is done and green. Now committing: code and tests in one commit (the pieces depend on each other, so a split would leave broken intermediate commits), documentation in a second.
 
 - 🔧 Bash: Commit code and docs
+
+- 🔧 Bash: Stop the throwaway Postgres
+
+- 🔧 Bash: Check whether the test Postgres is still running
+
+M18 è fatta: due commit su `task/m18`, niente push. La suite è verde (946 test, 56 saltati senza `DATABASE_URL`) e passa anche su un Postgres locale usa e getta, test a 8 thread compreso. Nessuna chiamata esterna.
+
+**Cosa ho fatto**
+- **Branch:** prima ho portato `task/m18` avanti fino a `master` con un fast-forward (nessuna storia riscritta), perché la voce M18 della roadmap e il piano della seconda lettura esistevano solo lì.
+- **Quota a ritmo costante:** la finestra a griglia di 60 s è sostituita da un token bucket condiviso in Postgres, con capienza 8 e 100 gettoni al minuto. In qualunque intervallo di 60 s passano al massimo 108 chiamate, qualunque sia la regola della finestra di HofJ. Il test lo verifica con finestre scorrevoli, ancorate a quattro istanti diversi e a griglia.
+- **Riserva per le prenotazioni (opzione A):** acquisti e sync lasciano sempre 2 gettoni, quindi le prenotazioni passano per prime. L'attesa dichiarata ora usa 16 acquisti al minuto invece di 17,4.
+- **429:**
+  - il bucket va a zero e il job non riparte subito;
+  - la rilettura di `/v1/quota` è una sola per tutte le istanze;
+  - se HofJ dice che la finestra è esaurita, il bucket resta fermo fino a quando la finestra finisce.
+- **Timeout e orfani:**
+  - il client HofJ aspetta 20 s invece di 15;
+  - un timeout, nostro o di HofJ verso il brand, è ora un errore a parte;
+  - un timeout sulla creazione dell'itinerario incrementa `orders.orphan_itineraries` e scrive un log.
+- **Worker e `/health`:**
+  - 10 thread e lease dei job a 180 s;
+  - `/health` mostra lo stato del bucket e un nuovo blocco `queue`, con l'età del più vecchio acquisto in coda e il totale degli orfani.
+- **Migrazione `0007`:** aggiunge al database le colonne del bucket e quella degli orfani.
+- **`decisions.md`:** ho sostituito "[da verificare nel codice]" con la verifica: un solo job di prenotazione attivo per ordine (`_enqueue_booking`), una corsa teorica non atomica resa innocua dall'upsert. Ho aggiunto anche la voce "M18" e aggiornato `README.md` e `docs/api/quota-health.md`.
+
+**Cosa ho deciso da solo** (tutto registrato nella voce M18 di `decisions.md`)
+- **Porta interna della quota cambiata:** due metodi nuovi, `claim_refresh` e `mark_refresh_needed`, per garantire una sola rilettura; `sync_from_snapshot` ora riceve l'ora. Nessuna interfaccia MCP o REST è cambiata; `/health` ha solo campi in più.
+- **Nuovo tentativo dopo un errore di rete non prima di 60 s:** con il bucket, "la finestra successiva" sarebbe diventata "subito", e dopo un timeout sull'itinerario avrebbe creato subito un secondo orfano.
+- **Test aggiornati:** alcuni test fissavano i vecchi numeri (87, 108, 17,4), altri facevano più acquisti di fila senza far avanzare l'orologio. Li ho adattati.
+
+**Dubbi da decidere**
+- **RF-47 nella spec** dice ancora "riserva del 20% della finestra". Non l'ho toccata: vuoi che la allinei alla soglia?
+- **Colonna `quota_window.used`:** resta, scritta sempre a 0. Toglierla è un cambio di schema che non avevamo concordato.
+- **Attesa dichiarata e attesa reale:** senza prenotazioni l'acquisto arriva prima di quanto promesso, fino al 25% prima. Ho cambiato il test in "mai dopo quanto detto e non oltre il 25% prima", al posto del vecchio "±60 s".
+
+## Utente 15:29
+
+sì, allinea RF-47 nella spec alla soglia  poi mergi
+
+## Agente 15:29
+
+- 🔧 Bash: Find RF-47 and where master is checked out
+
+- 🔧 Bash: Read RF-47 and neighbors in spec
+
+- 🔧 Bash: Read RF-36..38, RF-51 and spec header
+
+- 🔧 Bash: Align spec to the bucket threshold and rerun tests
+
+- 🔧 Bash: Commit spec, check master worktree state

@@ -7,7 +7,8 @@ RF-41, RNF-04, RNF-05, RNF-10, RNF-12, RNF-13 e §10.1 aggiornati il 2026-09-25 
 aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). RF-28..32, §6, §7 e RF-56
 aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). RF-36, RF-47, RNF-04,
 RNF-10 aggiornati il 2026-09-26 per la seconda lettura del twist
-(`docs/plans/2026-09-26-twist-seconda-lettura.md`). Origine: `docs/brief.md` e
+(`docs/plans/2026-09-26-twist-seconda-lettura.md`). RF-36..38, RF-47, RF-48 e RF-50 aggiornati il
+2026-09-26 con M18 (token bucket con soglia per le prenotazioni). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -226,16 +227,16 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   di 60 secondi superi il limite effettivo; inizializzato da `GET /v1/quota` all'avvio e
   aggiornato a ogni chiamata (inclusa quella di quota). Nota: la finestra di HofJ misurata è
   fissa e ancorata alla prima chiamata dopo la scadenza (`docs/api/quota-health.md`); il ritmo
-  costante è sicuro anche se fosse scorrevole. Implementazione: roadmap M18 (oggi il codice
-  usa ancora un contatore per finestra).
+  costante è sicuro anche se fosse scorrevole. Implementazione: roadmap M18 (capienza 8,
+  100 gettoni al minuto con il limite di 120).
 - **RF-37** Il guardiano è lo scheduler della quota di RF-47: nessuna chiamata a HofJ parte
-  senza un blocco di budget prenotato nella finestra corrente. Le chiamate di prenotazione
-  degli ordini pagati hanno una riserva garantita per finestra; i job d'acquisto usano il
-  resto in ordine di arrivo; il sync gira solo a coda vuota e sopra la soglia. Nessuna
+  senza i gettoni presi dal token bucket. Le chiamate di prenotazione degli ordini pagati hanno
+  la precedenza (soglia di RF-47); i job d'acquisto usano il resto in ordine di arrivo; il sync
+  gira solo a coda vuota e sopra la soglia. Nessuna
   chiamata del viaggiatore fallisce per quota esaurita: l'ordine aspetta in coda e l'attesa è
   dichiarata (RF-48).
-- **RF-38** Una risposta 429 da HofJ aggiorna il contatore e non viene mai ripetuta
-  immediatamente.
+- **RF-38** Una risposta 429 da HofJ svuota il bucket e non viene mai ripetuta
+  immediatamente; segue una sola rilettura di `GET /v1/quota` per il cluster.
 
 ### 4.9 Superfici: casi d'uso, REST, MCP
 
@@ -301,25 +302,25 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   `failed` con un motivo leggibile. Un errore del prodotto segue RF-17.
 - **RF-47** Lo scheduler della quota è unico per il cluster: un token bucket condiviso
   in Postgres (RF-36), tre classi in ordine di priorità: `booking` (prenotazioni di ordini
-  pagati, riserva garantita del 20% della finestra, configurabile), `purchase` (job
-  d'acquisto, il resto della finestra, in ordine di arrivo), `sync` (solo a coda `purchase`
-  vuota e sopra la soglia di RF-37). Un job prenota atomicamente il blocco di chiamate che gli
-  serve (5 per un acquisto, 1 per una prenotazione) oppure attende la finestra successiva. Una
-  risposta 429 azzera il budget residuo della finestra (RF-38). `GET /v1/quota` si chiama al
-  boot e dopo un 429, mai in ciclo.
-- **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti per finestra, con acquisti
-  per finestra = (limite − riserva `booking`) ÷ 5. Ricalcolata a ogni `get_order_status`. Non
-  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata. (Da rivedere in M18: se
-  il token bucket cambia la formula diventa acquisti per finestra = (ritmo × 60 − riserva
-  `booking`) ÷ 5.)
+  pagati), `purchase` (job d'acquisto, in ordine di arrivo), `sync` (solo a coda `purchase`
+  vuota). La riserva per le prenotazioni è una soglia: `purchase` e `sync` prendono gettoni
+  solo se nel bucket ne restano almeno 2 (configurabile), `booking` può arrivare a zero, quindi
+  una prenotazione non aspetta mai gli acquisti. Un job prende atomicamente i gettoni che gli
+  servono (5 per un acquisto, 1 per una prenotazione) oppure attende che il bucket li abbia.
+  Una risposta 429 svuota il bucket (RF-38). `GET /v1/quota` si chiama al boot e dopo un 429,
+  mai in ciclo.
+- **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti al minuto, con acquisti al
+  minuto = ritmo al minuto × 80% ÷ 5 (16 con il limite di 120): il 20% del ritmo si lascia
+  alle prenotazioni, così la stima è prudente. Ricalcolata a ogni `get_order_status`. Non
+  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
 - **RF-49** `reject_proposal` sulla proposta di un ordine `queued` porta l'ordine a
   `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08).
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
   tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
-  istanza configurabile (default 4). Un job è idempotente e ripartibile (RF-27).
+  istanza configurabile (default 10, M18). Un job è idempotente e ripartibile (RF-27).
 - **RF-51** Un ordine pagato viene prenotato entro la finestra successiva alla verifica del
   pagamento (RF-20), salvo
-  errori di RF-24: la riserva `booking` garantisce che la prenotazione avvenga anche a coda
+  errori di RF-24: la soglia di RF-47 garantisce che la prenotazione avvenga anche a coda
   d'acquisto piena.
 
 ### 4.11 Contratto agente-tool
