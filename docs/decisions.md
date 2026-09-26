@@ -460,7 +460,6 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, T
 | Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
 | Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
 
-
 ## 2026-09-25 — M7: prima prenotazione reale end-to-end
 
 Origine: intervista sulla macro task M7, piano in
@@ -594,3 +593,18 @@ Chiude le "Decisioni aperte sul parser" del contratto agente-tool. Piano in
 | Secondo rifiuto della stessa proposta | Il motivo del secondo rifiuto non viene salvato (resta il primo, vincolo invariato). Un "troppo caro" detto al secondo rifiuto abbassa il budget ma non crea il tetto di prezzo della decisione M7 | Nessun cambio di schema; caso raro, da rivedere se capita |
 | Conflitto `direction` / luogo nel testo | Se il campo `direction` sostituisce un luogo esplicito del motivo, il conflitto non va nei log (va solo quello `area` / `direction`) | Caso raro; il `say` ripete comunque l'area risultante |
 | Suite finale | 848 test, 42 saltati (Postgres), verde con `uv run python` (erano 773 a inizio M17). Nessuna chiamata ad Anthropic | — |
+
+## 2026-09-26 — M10: design del sync
+
+Origine: brainstorming di M10. Design in
+`docs/superpowers/specs/2026-09-26-m10-multibrand-sync-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Test di `sport=any` | M10 verifica il chooser con criteri senza filtro sport (`None`): candidati di entrambi i brand. Il valore letterale `"any"` lo testa M17. Nessun file di M17 (`intent.py`, `usecases.py`, `mcp.py`, `rest.py`, `chooser.py`) toccato | M17 lavora su quei file in parallelo; `None` è già "nessun filtro" nel chooser. Scartate: una riga in `chooser.py` (conflitto con M17), normalizzare `"any"` in `usecases.py` (contraddice `"any"` distinto da "non detto") |
+| Fixture padel | Le due fixture esistenti si adattano offline (rinomina, `brand` e `sport` nei metadati); si registrano solo le due tennis | Nessuna chiamata e nessun cambio ai dati attesi dai test. Scartata: registrare di nuovo tutte e quattro (~136 chiamate in più) |
+| Lettura del catalogo | Porta nuova `CatalogSource` (`list_page`, `detail`), implementata da `HofJHttp` e dalle fixture; `HofJPort` invariata | Il sync e la registrazione delle fixture usano lo stesso codice; i test del sync non fanno chiamate |
+| Registrazione fixture | `python -m vela.sync --record` sostituisce `scripts/record_catalog.py` | Un solo codice per sync e fixture (RF-32) |
+| Righe con `brand` NULL | Al primo sync, se `updatedAt` è invariato si scrivono solo `brand` e sport, senza dettaglio | Circa 77 chiamate in meno sul primo sync in produzione |
+| Metadati delle fixture | Ogni fixture porta `brand` e `sport`; il replay non ha bisogno di `HOFJ_BRANDS` | Il replay resta senza configurazione HofJ |
+| Annotazione in `usecases.py` | `Vela` riceve il router nell'argomento `hofj`; l'annotazione `HofJPort` resta fino al merge di M17 | Non toccare i file di M17; l'attributo è solo passato ai job |
