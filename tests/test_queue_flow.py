@@ -87,7 +87,8 @@ class LaunchBurstTest(unittest.TestCase):
         def watch():
             peak.append(w.hofj._used)
 
-        w.run(lambda: all(s == OrderStatus.AWAITING_PAYMENT for s in w.statuses(orders)), watch=watch)
+        # tutte le chiamate HofJ dell'acquisto sono fatte al prezzo effettivo (2026-09-26)
+        w.run(lambda: all(s == OrderStatus.AWAITING_CONFIRMATION for s in w.statuses(orders)), watch=watch)
         self.assertLessEqual(max(peak), 108)
         errors = [j.last_error for j in w.repos.jobs._jobs.values() if j.last_error]
         self.assertEqual([e for e in errors if "QuotaError" in e], [])
@@ -100,7 +101,7 @@ class LaunchBurstTest(unittest.TestCase):
         w = Launch()
         orders = w.accept(100)
         last = orders[-1]
-        w.run(lambda: w.repos.orders.get(last.order_id).status == OrderStatus.AWAITING_PAYMENT)
+        w.run(lambda: w.repos.orders.get(last.order_id).status == OrderStatus.AWAITING_CONFIRMATION)
         real = (w.clock() - NOW).total_seconds()
         self.assertLessEqual(real, last.wait_seconds)
         self.assertGreaterEqual(real, 0.75 * last.wait_seconds)
@@ -109,6 +110,8 @@ class LaunchBurstTest(unittest.TestCase):
         """RF-51: con 150 acquisti in coda la prenotazione usa la riserva e non aspetta la coda."""
         w = Launch()
         first = w.accept(1)[0]
+        w.run(lambda: w.repos.orders.get(first.order_id).status == OrderStatus.AWAITING_CONFIRMATION)
+        w.vela.accept_proposal(w.repos.orders.get(first.order_id).proposal_id)   # la conferma
         w.run(lambda: w.repos.orders.get(first.order_id).status == OrderStatus.AWAITING_PAYMENT)
         w.accept(150)
         order = w.repos.orders.get(first.order_id)
@@ -134,7 +137,7 @@ class EndToEndTest(unittest.TestCase):
         w.clock.advance(5)                                     # il bucket si riempie di nuovo
         w.worker.drain()
         final = w.vela.get_order_status(again.order_id)
-        self.assertEqual(final.status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(final.status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertNotEqual(final.order_id, first.order_id)
 
     def test_restart_mid_job_resumes_without_new_itinerary(self):
@@ -148,7 +151,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual((job.status, job.step), (JobStatus.RUNNING, 2))
         restarted = Launch(hofj=hofj, repos=w.repos, clock=Clock(w.clock() + timedelta(minutes=3)))
         restarted.worker.drain()
-        self.assertEqual(restarted.repos.orders.get(order.order_id).status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(restarted.repos.orders.get(order.order_id).status, OrderStatus.AWAITING_CONFIRMATION)
         created = [c for c in hofj.calls if c[0] == "create_itinerary"]
         self.assertEqual(len(created), 1)
 

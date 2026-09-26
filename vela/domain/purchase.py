@@ -6,6 +6,9 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
   1 cliente (`set_customer`)                                    1
   2 passeggeri (`get_pax` + `set_pax`, un'unica unità di ripresa) 2
   3 importo da pagare (`get_itinerary`, salva `total`)          1
+    → l'ordine passa a `awaiting_confirmation` e il job si chiude qui (decisione 2026-09-26):
+      il viaggiatore sente il prezzo effettivo e solo la sua conferma accoda un nuovo job
+      d'acquisto che riparte dal passo 4
   4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
 
@@ -116,7 +119,8 @@ class PurchaseJob:
             hofj.set_pax(order.itinerary_id, filled)
         elif job.step == STEP_TOTAL:
             itinerary = hofj.get_itinerary(order.itinerary_id)
-            self._save_order(replace(order, total=itinerary.total, currency=itinerary.currency))
+            self._save_order(replace(order, total=itinerary.total, currency=itinerary.currency,
+                                     status=OrderStatus.AWAITING_CONFIRMATION))
         elif job.step == STEP_LINK:
             link = self.payments.create_payment_link(order, product.title)
             self._save_order(replace(order, status=OrderStatus.AWAITING_PAYMENT,

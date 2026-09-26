@@ -36,14 +36,18 @@ _INSTRUCTIONS_BASE = (
     "payment link, tell the user it is in the chat. Call get_proposal right after create_intent "
     "returns an intent_id. Once a proposal exists, every change the user asks for (place, dates, "
     "sport, budget, people, somewhere cooler or warmer) goes through reject_proposal on that "
-    "proposal, never through a new create_intent. Accepting a proposal puts the order in a "
-    "queue: "
+    "proposal, never through a new create_intent. Accepting a proposal puts the order in a queue "
+    "and Vela gets the actual price from the supplier: the answer is `awaiting_confirmation` with the real "
+    "`total`. Speak it and ask the user to confirm; if they say yes call accept_proposal again "
+    "on the same proposal, if they say no or it is too expensive call reject_proposal. Only "
+    "after that confirmation "
 )
 # Senza Twilio configurato nessun SMS parte: restano i testi di prima degli SMS (C1).
-INSTRUCTIONS = _INSTRUCTIONS_BASE + "the payment link comes later from get_order_status."
+INSTRUCTIONS = _INSTRUCTIONS_BASE + (
+    "the payment link comes in the answer, or later from get_order_status.")
 INSTRUCTIONS_SMS = _INSTRUCTIONS_BASE + (
-    "Vela texts the payment link and later the booking confirmation to the traveler's "
-    "phone, so do not poll get_order_status on your own: call it whenever the user asks how it "
+    "Vela texts the payment link and later the booking confirmation to the traveler's phone, "
+    "so do not poll get_order_status on your own: call it whenever the user asks how it "
     "is going or says they paid, and once if the user says the text has not arrived.")
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
@@ -54,12 +58,18 @@ _ACCEPT = (
     "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
     "first and last name of every other participant. If the result has `missing`, ask the "
     "user only for those details and call accept_proposal again with everything you have: "
-    "calling it again never creates a second order. On success the answer is a wait, not a "
-    "link: the order is `queued` with `order_id`, `position` and `wait_seconds`.")
+    "calling it again never creates a second order. The call can take up to about a minute and "
+    "a half: Vela waits for the supplier. The answer is usually `awaiting_confirmation` with "
+    "the actual `total`: speak `say` and wait for the user. If the user confirms the price, call "
+    "accept_proposal again on the same proposal: that is the confirmation, and the answer is "
+    "`awaiting_payment` with `payment_url`. If the user does not accept the price, call "
+    "reject_proposal with their reason. If the supplier is slow the answer is `queued` with "
+    "`order_id`, `position` and `wait_seconds`.")
 _STATES = (
-    " Returns `status`: queued (with `position` and `wait_seconds`), "
-    "awaiting_payment (with `payment_url` and the real `total`: show the link in the chat, "
-    "never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
+    " Returns `status`: queued (with `position` and `wait_seconds`), awaiting_confirmation "
+    "(with the actual `total`: speak `say`, then call accept_proposal again on the same proposal "
+    "if the user confirms, reject_proposal if not), awaiting_payment (with `payment_url` and "
+    "the real `total`: show the link in the chat, never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
     "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "
     "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired."
     + _VOICE)
@@ -93,8 +103,8 @@ DESCRIPTIONS = {
         "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
         "reject_proposal again on `rejected_proposal_id` with the updated fields." + _VOICE),
     "accept_proposal": _ACCEPT + (
-        " Get the payment link with get_order_status after the stated wait, or whenever the user "
-        "asks." + _VOICE),
+        " If the answer is `queued`, check with get_order_status after the stated wait, or "
+        "whenever the user asks." + _VOICE),
     "get_order_status": (
         "Check an order after the wait stated by accept_proposal, when the user says they paid or "
         "asks how it is going." + _STATES),
@@ -102,8 +112,8 @@ DESCRIPTIONS = {
 
 DESCRIPTIONS_SMS = dict(DESCRIPTIONS, **{
     "accept_proposal": _ACCEPT + (
-        " Vela texts the payment link to the traveler's phone when it is ready and texts again "
-        "when the booking is confirmed. Do not poll get_order_status on your own: call it "
+        " After the price confirmation Vela texts the payment link to the traveler's phone and "
+        "texts again when the booking is confirmed. Do not poll get_order_status on your own: call it "
         "whenever the user asks how it is going, and once if the user says the text has not "
         "arrived." + _VOICE),
     "get_order_status": (

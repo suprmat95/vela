@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 
-from support import NOW, inline_worker, make_product
+from support import NOW, drain_to_link, inline_worker, make_product
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -57,11 +57,11 @@ def staging_fixtures_dir(locale="en"):
 
 
 def ready_order(app, vela):
-    """Ordine accettato e passato dal job d'acquisto: lo stato ha il link di pagamento."""
+    """Ordine accettato, prezzo confermato e passato dal job d'acquisto: lo stato ha il link."""
     iid = vela.create_intent(INTENT, FULL).intent_id
     proposal = vela.get_proposal(iid)
     oid = vela.accept_proposal(proposal.proposal.id).order_id
-    app.state.worker.drain()
+    drain_to_link(vela, app.state.worker, proposal.proposal.id)
     return vela.get_order_status(oid)
 
 
@@ -331,6 +331,10 @@ class ModeTest(unittest.TestCase):
         self.assertIsNone(app.state.vela)
         with TestClient(app) as c:
             self.assertEqual(c.get("/replay/checkout/x").status_code, 503)
+
+    def test_accept_waits_for_the_price_outside_the_load_test(self):
+        app = create_app(Settings(database_url="sqlite://"))
+        self.assertEqual((app.state.vela.accept_wait_seconds, app.state.vela.accept_poll_seconds), (100, 1.0))
 
     def test_no_stripe_key_keeps_fake_payments(self):
         app = create_app(Settings(database_url="sqlite://"))

@@ -94,7 +94,7 @@ class TennisOrderTest(unittest.TestCase):
     def test_every_cart_call_goes_to_terrarossa(self):
         r, weebora, terrarossa = router()
         self.purchase(r)
-        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual([c[0] for c in terrarossa.calls],
                          ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
         self.assertEqual(weebora.calls, [])

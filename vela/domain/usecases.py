@@ -4,6 +4,7 @@ Dipende solo dalle porte: repository, HofJ e pagamenti sono iniettati. `now` e `
 iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodotto (RF-10).
 """
 import logging
+import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
                                 ProposalMade, Rejection, StructuredFields, TravelerDefaults,
                                 TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
+from vela.domain.purchase import STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
 from vela.domain.refine import Refinement, is_price_reason, refine
 from vela.ports.hofj import HofJRouter
@@ -47,8 +49,15 @@ class Vela:
     def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
                  defaults=None, now: Optional[Callable[[], datetime]] = None,
                  new_id: Optional[Callable[[], str]] = None,
-                 extractor: Optional[IntentExtractor] = None, sms_enabled: bool = False):
+                 extractor: Optional[IntentExtractor] = None, sms_enabled: bool = False,
+                 accept_wait_seconds: float = 0, accept_poll_seconds: float = 1.0,
+                 sleep: Optional[Callable[[float], None]] = None):
         self.repos = repos
+        # Decisione 2026-09-26: `accept_proposal` aspetta il prezzo effettivo (e dopo la conferma
+        # il link) fino a questo tetto, rileggendo l'ordine; 0 = risponde subito `queued`
+        self.accept_wait_seconds = accept_wait_seconds
+        self.accept_poll_seconds = accept_poll_seconds
+        self.sleep = sleep or time.sleep
         # RF-19, RF-57: le frasi annunciano gli SMS solo se partono davvero (Twilio configurato)
         self.sms_enabled = sms_enabled
         self.hofj = hofj
@@ -118,7 +127,8 @@ class Vela:
         """RF-49: un ordine in coda, in lavorazione o da pagare diventa `cancelled`; il job si
         ferma al passo successivo. Dopo il pagamento l'ordine non si tocca."""
         order = self.repos.orders.get_by_proposal(proposal_id)
-        if order is None or order.status not in (OrderStatus.QUEUED, OrderStatus.AWAITING_PAYMENT):
+        if order is None or order.status not in (OrderStatus.QUEUED, OrderStatus.AWAITING_CONFIRMATION,
+                                                 OrderStatus.AWAITING_PAYMENT):
             return False
         self.repos.orders.save(replace(order, status=OrderStatus.CANCELLED, updated_at=self.now()))
         return True
@@ -157,12 +167,17 @@ class Vela:
 
     def _price_ceiling(self, intent_id: str) -> Optional[Decimal]:
         """Decisione M7 (§10.1): dopo un rifiuto per prezzo si propone solo qualcosa che costa
-        meno; il tetto è il totale più basso tra le proposte rifiutate per prezzo."""
+        meno; il tetto è il totale più basso tra le proposte rifiutate per prezzo. Se l'ordine
+        aveva già il prezzo effettivo, il rifiuto è su quello (decisione 2026-09-26)."""
         by_price = {r.proposal_id for r in self.repos.rejections.list_for_intent(intent_id)
                     if is_price_reason(r.reason)}
-        totals = [p.total_from for p in self.repos.proposals.list_for_intent(intent_id)
+        totals = [self._rejected_total(p) for p in self.repos.proposals.list_for_intent(intent_id)
                   if p.id in by_price]
         return min(totals) if totals else None
+
+    def _rejected_total(self, proposal: Proposal) -> Decimal:
+        order = self.repos.orders.get_by_proposal(proposal.id)
+        return order.total if order is not None and order.total is not None else proposal.total_from
 
     def _made(self, proposal: Proposal, product: Optional[Product] = None,
               lang: str = "it") -> ProposalMade:
@@ -174,14 +189,18 @@ class Vela:
 
     def accept_proposal(self, proposal_id: str, traveler: Optional[TravelerProfile] = None
                         ) -> Union[OrderQueued, OrderStatusResponse, MissingTravelerData]:
-        """RF-45: mette l'ordine in coda e risponde subito, senza chiamare HofJ né il pagamento.
-        Il carrello e il link li prepara il job d'acquisto (RF-46)."""
+        """RF-45: mette l'ordine in coda, senza chiamare HofJ né il pagamento: il carrello e il
+        link li prepara il job d'acquisto (RF-46). Decisione 2026-09-26: il job si ferma al
+        prezzo effettivo (`awaiting_confirmation`); una nuova chiamata sulla stessa proposta è
+        la conferma e accoda il link. In entrambi i casi aspetta l'esito fino al tetto."""
         proposal = self.repos.proposals.get(proposal_id)
         if proposal is None:
             raise NotFound("proposal", proposal_id)
         intent = self.repos.intents.get(proposal.intent_id)
         lang = intent.criteria.language
         existing = self.repos.orders.get_by_proposal(proposal_id)
+        if existing is not None and existing.status == OrderStatus.AWAITING_CONFIRMATION:
+            return self._confirm(existing)
         if existing is not None:
             return self.get_order_status(existing.id)
         replaced = self.repos.orders.get_by_replacement(proposal_id)
@@ -201,9 +220,39 @@ class Vela:
             return self.get_order_status(self.repos.orders.get_by_proposal(proposal_id).id)
         self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
                                     enqueued_at, now))
+        return self._await_progress(order.id)
+
+    def _confirm(self, order: Order) -> Union[OrderQueued, OrderStatusResponse]:
+        """Il sì al prezzo effettivo: l'ordine torna in coda e il job riparte dal link."""
+        now = self.now()
+        self.repos.orders.save(replace(order, status=OrderStatus.QUEUED, updated_at=now))
+        if self.repos.jobs.active_for_order(order.id, JobKind.PURCHASE) is None:
+            self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
+                                        now, now, step=STEP_LINK))
+        return self._await_progress(order.id)
+
+    def _await_progress(self, order_id: str) -> Union[OrderQueued, OrderStatusResponse]:
+        """Rilegge l'ordine finché esce da `queued` o scade il tetto: nessuna chiamata a HofJ,
+        il lavoro lo fa il worker."""
+        waited = 0.0
+        while waited < self.accept_wait_seconds:
+            self.sleep(self.accept_poll_seconds)
+            waited += self.accept_poll_seconds
+            if self.repos.orders.get(order_id).status != OrderStatus.QUEUED:
+                return self.get_order_status(order_id)
+        order = self.repos.orders.get(order_id)
+        if order.status != OrderStatus.QUEUED:
+            return self.get_order_status(order_id)
+        lang = self._lang(order)
         position, wait = self._queue_position(order.id)
-        return OrderQueued(order.id, OrderStatus.QUEUED, position, wait,
-                           say.say_queued(wait_minutes(wait or 0), lang, self._phone_tail(order)))
+        minutes = wait_minutes(wait or 0)
+        sentence = (say.say_queued(minutes, lang, self._phone_tail(order)) if order.total is not None
+                    else say.say_queued_for_price(minutes, lang))
+        return OrderQueued(order.id, OrderStatus.QUEUED, position, wait, sentence)
+
+    def _lang(self, order: Order) -> str:
+        intent = self.repos.intents.get(order.intent_id)
+        return intent.criteria.language if intent is not None else "it"
 
     def _phone_tail(self, order: Order) -> Optional[str]:
         """Ultime cifre da dire solo se l'SMS parte davvero; `None` lascia le frasi senza SMS."""
@@ -229,6 +278,7 @@ class Vela:
             position, wait = self._queue_position(order.id)
             minutes = None if wait is None else wait_minutes(wait)
             return OrderStatusResponse(order.id, status, say.say_status(status, None, None, lang,
+                                                                        total=order.total,
                                                                         minutes=minutes, phone_tail=tail),
                                        position=position, wait_seconds=wait)
         if status == OrderStatus.REPLACED and order.replacement_proposal_id:
@@ -244,7 +294,7 @@ class Vela:
         return OrderStatusResponse(
             order.id, status,
             say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
-                           price_from_total=estimate, phone_tail=tail),
+                           price_from_total=estimate, phone_tail=tail, pax=order.pax),
             total=order.total, currency=order.currency if order.total is not None else None,
             price_from_total=estimate if order.total is not None else None, total_differs=differs,
             payment_url=order.payment_url if payable else None, booking_code=order.booking_code,

@@ -65,7 +65,7 @@ class ProposalTest(unittest.TestCase):
 class OrderStatusTest(unittest.TestCase):
     def test_values_are_rf25(self):
         self.assertEqual([s.value for s in OrderStatus],
-                         ["queued", "awaiting_payment", "paid_pending_booking", "confirmed",
+                         ["queued", "awaiting_confirmation", "awaiting_payment", "paid_pending_booking", "confirmed",
                           "replaced", "cancelled", "failed", "booking_failed", "expired"])
 
     def test_order_is_frozen(self):

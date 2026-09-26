@@ -216,6 +216,7 @@ class Proposal:
 class OrderStatus(str, Enum):
     """Stati dell'ordine nell'ordine di RF-25."""
     QUEUED = "queued"                  # RF-45: accettato, in attesa del job d'acquisto
+    AWAITING_CONFIRMATION = "awaiting_confirmation"   # prezzo effettivo letto, link solo dopo il sì
     AWAITING_PAYMENT = "awaiting_payment"
     PAID_PENDING_BOOKING = "paid_pending_booking"
     CONFIRMED = "confirmed"

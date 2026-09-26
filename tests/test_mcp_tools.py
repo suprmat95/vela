@@ -111,7 +111,13 @@ class FlowTest(McpCase):
         self.assertEqual(again["order_id"], accepted["order_id"])
 
         worker = inline_worker(self.vela)
-        worker.drain()                                   # job d'acquisto
+        worker.drain()                                   # job d'acquisto: prezzo effettivo
+        priced = await self.ok("get_order_status", order_id=accepted["order_id"])
+        self.assertEqual((priced["status"], priced["payment_url"]), ("awaiting_confirmation", None))
+        self.assertIn("Confermi?", priced["say"])
+        confirmed = await self.ok("accept_proposal", proposal_id=second["proposal_id"])   # il sì
+        self.assertEqual(confirmed["order_id"], accepted["order_id"])
+        worker.drain()                                   # link
         awaiting = await self.ok("get_order_status", order_id=accepted["order_id"])
         self.assertEqual(awaiting["status"], "awaiting_payment")
         self.assertTrue(awaiting["payment_url"].startswith("http://pay.test/"))
@@ -155,7 +161,8 @@ class DescriptionsM5Test(unittest.TestCase):
 
     def test_accept_description_says_wait_not_link(self):
         text = DESCRIPTIONS["accept_proposal"]
-        self.assertIn("a wait, not a link", text)
+        self.assertIn("awaiting_confirmation", text)             # prima il prezzo effettivo
+        self.assertIn("call accept_proposal again on the same proposal", text)
         self.assertIn("get_order_status", text)
         self.assertNotIn("show `payment_url`", text)
 
@@ -164,19 +171,20 @@ class DescriptionsM5Test(unittest.TestCase):
         for state in ("queued", "awaiting_payment", "paid_pending_booking", "confirmed", "replaced",
                       "cancelled", "failed", "booking_failed", "expired", "proposal_changed"):
             self.assertIn(state, text)
+        self.assertIn("awaiting_confirmation", text)
 
     def test_instructions_mention_the_queue(self):
         self.assertIn("queue", INSTRUCTIONS)
 
 
 
-# Testi di prima degli SMS (e106b9c): restano identici quando Twilio non è configurato.
+# Testi senza SMS: quelli di prima degli SMS (e106b9c) con la conferma del prezzo (2026-09-26).
 PRE_SMS_INSTRUCTIONS_END = (
-    "Accepting a proposal puts the order in a queue: the payment link comes later from "
+    "Only after that confirmation the payment link comes in the answer, or later from "
     "get_order_status.")
 PRE_SMS_ACCEPT_END = (
-    "the order is `queued` with `order_id`, `position` and `wait_seconds`. Get the payment link "
-    "with get_order_status after the stated wait, or whenever the user asks.")
+    "the answer is `queued` with `order_id`, `position` and `wait_seconds`. If the answer is "
+    "`queued`, check with get_order_status after the stated wait, or whenever the user asks.")
 PRE_SMS_STATUS_START = (
     "Check an order after the wait stated by accept_proposal, when the user says they paid or "
     "asks how it is going. Returns `status`: queued (with `position` and `wait_seconds`), ")

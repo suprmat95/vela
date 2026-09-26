@@ -8,7 +8,7 @@ import os
 import unittest
 from datetime import date
 
-from support import NOW, TODAY, FakeHofJ, StubPayments, make_product
+from support import NOW, TODAY, FakeHofJ, StubPayments, drain_to_link, make_product
 from test_usecases import Clock
 from vela.adapters.hofj_router import BrandRouter
 from vela.adapters.repo_memory import MemoryRepositories
@@ -63,8 +63,9 @@ class MultiBrand:
         return self.vela.get_proposal(created.intent_id)
 
     def buy(self, proposal):
+        """Accettazione, prezzo effettivo, conferma e link."""
         order_id = self.vela.accept_proposal(proposal.proposal.id).order_id
-        self.worker.drain()
+        drain_to_link(self.vela, self.worker, proposal.proposal.id)
         return self.vela.get_order_status(order_id)
 
     def product(self, proposal):

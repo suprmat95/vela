@@ -190,8 +190,11 @@ def build_vela(settings: Settings, engine: Engine,
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
                                  booking_reserve=settings.booking_reserve,
                                  quota_burst=settings.quota_burst, quota_floor=settings.quota_floor)
+    # Sotto carico nessuna attesa dentro la richiesta: i viaggiatori finti interrogano lo stato
+    wait = 0 if settings.vela_upstream_mode == LOADTEST else settings.accept_wait_seconds
     vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor,
-                sms_enabled=isinstance(notifier, TwilioSms))
+                sms_enabled=isinstance(notifier, TwilioSms), accept_wait_seconds=wait,
+                accept_poll_seconds=settings.accept_poll_seconds)
     return vela, upstream
 
 
