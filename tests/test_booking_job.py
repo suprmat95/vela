@@ -5,6 +5,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from support import NOW, FakeHofJ
+from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
 from vela.domain.booking import BookingJob
@@ -21,7 +22,7 @@ class Setup:
                                     "EUR", TravelerProfile(), NOW, NOW, itinerary_id="it-1",
                                     payment_ref="pi_123"))
         self.hofj = hofj or FakeHofJ(code="R-123456")
-        self.job = BookingJob(self.repos, self.hofj, now=lambda: NOW, max_attempts=5,
+        self.job = BookingJob(self.repos, SingleClientRouter(self.hofj), now=lambda: NOW, max_attempts=5,
                               backoff=(5, 10, 20, 40))
         self.repos.jobs.enqueue(Job("b1", JobKind.BOOKING, "o1", JobStatus.PENDING, NOW, NOW))
 

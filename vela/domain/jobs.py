@@ -15,7 +15,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 from vela.domain.models import Job, JobKind, JobStatus, QuotaClass
 from vela.domain.purchase import calls_needed
-from vela.ports.hofj import HofJError, HofJPort, QuotaError
+from vela.ports.hofj import HofJError, HofJRouter, QuotaError
 from vela.ports.repositories import Repositories
 
 
@@ -28,7 +28,7 @@ def quota_needs(job: Job) -> Tuple[Optional[QuotaClass], int]:
 
 
 class JobProcessor:
-    def __init__(self, repos: Repositories, hofj: HofJPort, handlers: Dict[JobKind, object],
+    def __init__(self, repos: Repositories, hofj: HofJRouter, handlers: Dict[JobKind, object],
                  now: Callable[[], datetime], lease_seconds: int = 120):
         self.repos, self.hofj, self.handlers = repos, hofj, handlers
         self.now, self.lease_seconds = now, lease_seconds

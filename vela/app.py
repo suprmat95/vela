@@ -19,6 +19,7 @@ from typing import Callable, List, Optional, Tuple
 from fastapi import FastAPI
 from sqlalchemy.engine import Engine
 
+from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.db import make_engine
 from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import FIXTURE_PATH, ReplayHofJ
@@ -99,14 +100,15 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]
 
 def build_worker(vela: Vela, settings: Settings) -> Worker:
     """Job d'acquisto, prenotazione e verifica del pagamento sotto un solo processore (RF-50)."""
-    purchase = PurchaseJob(vela.repos, vela.hofj, vela.payments, vela._propose, vela.defaults,
+    router = SingleClientRouter(vela.hofj)
+    purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
                            new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
-    booking = BookingJob(vela.repos, vela.hofj, now=vela.now,
+    booking = BookingJob(vela.repos, router, now=vela.now,
                          max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff)
     check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
                             poll_seconds=settings.payment_poll_seconds)
-    processor = JobProcessor(vela.repos, vela.hofj, {JobKind.PURCHASE: purchase,
+    processor = JobProcessor(vela.repos, router, {JobKind.PURCHASE: purchase,
                                                      JobKind.BOOKING: booking,
                                                      JobKind.PAYMENT_CHECK: check},
                              now=vela.now, lease_seconds=settings.job_lease_seconds)

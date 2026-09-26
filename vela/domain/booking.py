@@ -13,14 +13,14 @@ from typing import Callable, Sequence
 from vela.domain import say
 from vela.domain.models import Job, JobStatus, Order, OrderStatus
 from vela.domain.purchase import JobResult
-from vela.ports.hofj import HofJPort, PaymentProof, QuotaError, UpstreamError, HofJError
+from vela.ports.hofj import HofJRouter, PaymentProof, QuotaError, UpstreamError, HofJError
 from vela.ports.repositories import Repositories
 
 BOOKING_CALLS = 1
 
 
 class BookingJob:
-    def __init__(self, repos: Repositories, hofj: HofJPort, now: Callable[[], datetime],
+    def __init__(self, repos: Repositories, hofj: HofJRouter, now: Callable[[], datetime],
                  max_attempts: int = 5, backoff: Sequence[int] = (5, 10, 20, 40)):
         self.repos, self.hofj, self.now = repos, hofj, now
         self.max_attempts, self.backoff = max_attempts, tuple(backoff)
@@ -30,8 +30,9 @@ class BookingJob:
         if order is None or order.status != OrderStatus.PAID_PENDING_BOOKING:
             return self._close(job, JobStatus.DONE)
         proof = PaymentProof(order.payment_ref or "", "succeeded")
-        try:
-            code = self.hofj.create_booking(order.itinerary_id, proof)
+        try:   # RF-56: brand del prodotto dell'ordine, riletto a ogni esecuzione
+            hofj = self.hofj.client_for(self.repos.products.get(order.product_id))
+            code = hofj.create_booking(order.itinerary_id, proof)
         except QuotaError as exc:
             return JobResult(self._pending(job, next_window, exc, job.attempts), hit_429=True)
         except UpstreamError as exc:

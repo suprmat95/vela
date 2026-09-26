@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, FakeHofJ, StubPayments, make_product
+from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
@@ -44,12 +45,13 @@ class World:
         self.repos.intents.add(Intent("i1", "padel", CRITERIA, PROFILE, NOW))
         self.hofj = hofj or FakeHofJ(quota=quota or QuotaSnapshot(120, 1, NOW, NOW + timedelta(seconds=60)))
         payments = StubPayments()
-        purchase = PurchaseJob(self.repos, self.hofj, payments, lambda intent: NoMatch("i1", "x", "x"),
+        router = SingleClientRouter(self.hofj)
+        purchase = PurchaseJob(self.repos, router, payments, lambda intent: NoMatch("i1", "x", "x"),
                                DEFAULT_TRAVELER, now=self.clock, max_attempts=3)
-        booking = BookingJob(self.repos, self.hofj, now=self.clock)
+        booking = BookingJob(self.repos, router, now=self.clock)
         orders = OrderService(self.repos, self.hofj, now=self.clock)
         check = PaymentCheckJob(self.repos, payments, orders, now=self.clock)
-        self.processor = JobProcessor(self.repos, self.hofj, {JobKind.PURCHASE: purchase,
+        self.processor = JobProcessor(self.repos, router, {JobKind.PURCHASE: purchase,
                                                               JobKind.BOOKING: booking,
                                                               JobKind.PAYMENT_CHECK: check},
                                       now=self.clock, lease_seconds=120)
