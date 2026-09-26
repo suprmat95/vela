@@ -75,5 +75,31 @@ class CatalogFixtureTest(unittest.TestCase):
         self.assertLess(os.path.getsize(FIXTURE), MAX_BYTES)
 
 
+class EveryFixtureTest(unittest.TestCase):
+    """Regole comuni a tutte le fixture, una per host e brand (M10, RF-32)."""
+
+    FOLDER = os.path.dirname(FIXTURE)
+
+    def fixtures(self):
+        return sorted(os.path.join(self.FOLDER, n) for n in os.listdir(self.FOLDER)
+                      if n.startswith("catalog") and n.endswith(".json"))
+
+    def test_size_within_budget(self):
+        for path in self.fixtures():
+            with self.subTest(os.path.basename(path)):
+                self.assertLess(os.path.getsize(path), MAX_BYTES)
+
+    def test_header_has_brand_and_sport_and_no_media(self):
+        for path in self.fixtures():
+            with self.subTest(os.path.basename(path)), open(path, encoding="utf-8") as fh:
+                catalog = json.load(fh)
+                self.assertTrue(catalog["brand"])
+                self.assertIn(catalog["sport"], ("padel", "tennis"))
+                for key in MEDIA_KEYS:
+                    self.assertFalse(has_key(catalog["details"], key), key)
+                active = sorted(str(p["id"]) for p in catalog["products"] if not p.get("archived"))
+                self.assertEqual(active, sorted(catalog["details"]))
+
+
 if __name__ == "__main__":
     unittest.main()
