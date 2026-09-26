@@ -1,5 +1,6 @@
 """Repository in memoria: test del dominio (RNF-09) e app nei test delle superfici."""
 import threading
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
@@ -191,7 +192,17 @@ class MemoryJobs:
 class MemoryRepositories:
     def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20):
         self.quota_margin, self.booking_reserve = quota_margin, booking_reserve
+        self._catalog_lock = threading.Lock()
         self.clear()
+
+    @contextmanager
+    def catalog_lock(self):
+        acquired = self._catalog_lock.acquire(blocking=False)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._catalog_lock.release()
 
     def clear(self) -> None:
         self.products = MemoryProducts()

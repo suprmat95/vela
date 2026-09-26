@@ -111,6 +111,21 @@ class RepositoryContract:
         self.assertEqual(self.repos.products.last_fetched_at(), later)
         self.repos.products.mark_seen([], "t.com", "tennis", later)
 
+    def test_catalog_lock_admits_one_sync_at_a_time(self):
+        with self.repos.catalog_lock() as first:
+            self.assertTrue(first)
+            with self.repos.catalog_lock() as second:
+                self.assertFalse(second)
+        with self.repos.catalog_lock() as again:
+            self.assertTrue(again)
+
+    def test_catalog_lock_is_released_on_error(self):
+        with self.assertRaises(RuntimeError):
+            with self.repos.catalog_lock():
+                raise RuntimeError("sync fallito")
+        with self.repos.catalog_lock() as again:
+            self.assertTrue(again)
+
     # intenti
     def test_intents_round_trip(self):
         self.repos.intents.add(intent())

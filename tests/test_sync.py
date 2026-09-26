@@ -90,6 +90,21 @@ class SyncTest(unittest.TestCase):
     def products(self):
         return {p.id: p for p in self.repos.products.list_all()}
 
+    # --- lock --------------------------------------------------------------------------------
+
+    def test_skips_when_another_sync_holds_the_lock(self):
+        source = two_brands()
+        with self.repos.catalog_lock():
+            report = self.sync(source).run()
+        self.assertTrue(report.skipped)
+        self.assertFalse(report.ok)
+        self.assertEqual((source.calls, self.products()), ([], {}))
+
+    def test_releases_the_lock_after_a_run(self):
+        self.sync(two_brands()).run()
+        with self.repos.catalog_lock() as free:
+            self.assertTrue(free)
+
     # --- scrittura --------------------------------------------------------------------------
 
     def test_writes_both_brands_with_brand_and_sport_from_the_map(self):
@@ -277,7 +292,8 @@ class SyncTest(unittest.TestCase):
     def test_config_error_stops_the_whole_run(self):
         source = two_brands()
         source.fail[("list", "weebora.com")] = ConfigError("401")
-        report = self.sync(source).run()
+        with self.assertLogs("vela.sync", level="ERROR"):
+            report = self.sync(source).run()
         self.assertEqual(len(report.brands), 1)
         self.assertIn("401", report.brands[0].error)
         self.assertEqual(self.products(), {})

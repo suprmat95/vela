@@ -8,13 +8,14 @@ spariti si archiviano tra quelli del brand; un brand con errori non archivia nul
 altri, e una lista senza prodotti attivi è un errore. Un id già presente con un altro brand
 ferma quel brand (decisione M10 sulla chiave).
 
-Ogni chiamata prende uno slot `SYNC` della quota condivisa (§4.8): cede il passo agli acquisti
+Un solo sync alla volta fra tutte le istanze (advisory lock, RF-30). Ogni chiamata prende uno slot `SYNC` della quota condivisa (§4.8): cede il passo agli acquisti
 in attesa e aspetta la finestra successiva; un 429 marca la finestra e non si ripete subito.
 """
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 
 from vela.domain.catalog import product_from_entry, project_detail, strip_media
@@ -25,6 +26,8 @@ from vela.ports.hofj import ConfigError, HofJError, QuotaError
 log = logging.getLogger(__name__)
 
 BATCH_SIZE = 25
+SYNC_INTERVAL = timedelta(hours=6)     # RF-30: al boot se più vecchio, poi ogni 6 h
+RETRY_AFTER = timedelta(minutes=15)    # giro fallito o saltato: si riprova prima
 
 
 class BrandConflict(Exception):
@@ -66,6 +69,14 @@ class CatalogSync:
         self.now, self.sleep, self.batch_size = now, sleep, batch_size
 
     def run(self) -> SyncReport:
+        """Un giro su tutti i brand, sotto l'advisory lock: se un altro sync lo tiene, niente."""
+        with self.repos.catalog_lock() as acquired:
+            if not acquired:
+                log.info("sync saltato: un altro sync del catalogo è in corso")
+                return SyncReport(skipped=True)
+            return self._run()
+
+    def _run(self) -> SyncReport:
         report = SyncReport()
         for sport, brand in self.brands.items():
             brand_report = BrandReport(sport, brand)
@@ -161,3 +172,43 @@ class CatalogSync:
     def _wait(self, now: datetime) -> None:
         seconds = (self.repos.quota.next_window_start(now) - now).total_seconds()
         self.sleep(max(seconds, 1.0))
+
+
+class SyncScheduler:
+    """Thread in background del live (RF-30). A ogni `tick`: se il catalogo è vuoto o più
+    vecchio di `interval` esegue un giro, poi dice quanti secondi aspettare. Ogni istanza ha il
+    suo scheduler; l'advisory lock del sync fa girare una sola istanza alla volta."""
+
+    def __init__(self, sync, repos, now: Callable[[], datetime] = _utcnow,
+                 interval: timedelta = SYNC_INTERVAL, retry_after: timedelta = RETRY_AFTER):
+        self.sync, self.repos, self.now = sync, repos, now
+        self.interval, self.retry_after = interval, retry_after
+        self._stop = threading.Event()
+        self.wait = self._stop.wait
+
+    def tick(self) -> float:
+        last = self.repos.products.last_fetched_at()
+        if last is not None:
+            age = self.now() - last
+            if age < self.interval:
+                return (self.interval - age).total_seconds()
+        try:
+            report = self.sync.run()
+        except Exception:   # il thread non deve morire: si logga e si riprova
+            log.exception("sync del catalogo fallito")
+            return self.retry_after.total_seconds()
+        if not report.ok:
+            return self.retry_after.total_seconds()
+        return self.interval.total_seconds()
+
+    def run_forever(self) -> None:
+        while not self._stop.is_set():
+            self.wait(self.tick())
+
+    def start(self) -> threading.Thread:
+        thread = threading.Thread(target=self.run_forever, name="vela-catalog-sync", daemon=True)
+        thread.start()
+        return thread
+
+    def stop(self) -> None:
+        self._stop.set()

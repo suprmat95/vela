@@ -1,8 +1,10 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
+import threading
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Set
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -419,9 +421,14 @@ class PostgresQuota:
         return rolled(w, now).window_end
 
 
+# chiave dell'advisory lock del sync del catalogo (RF-30): costante, unica per tutti i brand
+CATALOG_LOCK_KEY = 7_646_512_010
+
+
 class PostgresRepositories:
     def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20):
         self.engine = engine
+        self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock
         self.products = PostgresProducts(engine)
         self.intents = PostgresIntents(engine)
         self.proposals = PostgresProposals(engine)
@@ -429,3 +436,26 @@ class PostgresRepositories:
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
         self.quota = PostgresQuota(engine, margin=quota_margin, reserve=booking_reserve)
+
+    @contextmanager
+    def catalog_lock(self):
+        """`pg_try_advisory_lock` su una connessione tenuta per tutto il sync: il lock è di
+        sessione, quindi cade anche se il processo muore (RF-30)."""
+        if self.engine.dialect.name != "postgresql":
+            acquired = self._local_lock.acquire(blocking=False)
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    self._local_lock.release()
+            return
+        with self.engine.connect() as conn:
+            acquired = conn.execute(text("SELECT pg_try_advisory_lock(:k)"),
+                                    {"k": CATALOG_LOCK_KEY}).scalar_one()
+            conn.commit()
+            try:
+                yield bool(acquired)
+            finally:
+                if acquired:
+                    conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": CATALOG_LOCK_KEY})
+                    conn.commit()

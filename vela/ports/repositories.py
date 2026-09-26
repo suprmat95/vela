@@ -1,6 +1,6 @@
 """Repository del dominio (RNF-01): intenti, proposte, ordini, rifiuti e catalogo stanno fuori dal processo."""
 from datetime import datetime
-from typing import Dict, Iterable, List, NamedTuple, Optional, Protocol, Set
+from typing import ContextManager, Dict, Iterable, List, NamedTuple, Optional, Protocol, Set
 
 from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
                                 Rejection)
@@ -67,3 +67,8 @@ class Repositories(Protocol):
     rejections: RejectionRepository
     jobs: JobRepository
     quota: QuotaStore
+
+    def catalog_lock(self) -> ContextManager[bool]:
+        """Un solo sync del catalogo alla volta fra tutte le istanze (RF-30): True se preso,
+        False se un altro sync lo tiene già; mai bloccante."""
+        ...
