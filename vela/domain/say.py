@@ -30,6 +30,41 @@ def on_date(d: date, lang: str = "it") -> str:
     return ("l'%s" if d.day in (8, 11) else "il %s") % fmt_date(d)
 
 
+def fmt_span(start: date, end: date, lang: str = "it") -> str:
+    """"dal 9 al 14 ottobre", "dall'8 all'11 ottobre", "from 9 to 14 October"; l'anno solo se
+    le due date cadono in anni diversi."""
+    months = MONTHS_EN if lang == "en" else MONTHS_IT
+    if start.year != end.year:
+        first, last = fmt_date(start, lang), fmt_date(end, lang)
+    elif start.month != end.month:
+        first = "%d %s" % (start.day, months[start.month - 1])
+        last = "%d %s" % (end.day, months[end.month - 1])
+    else:
+        first, last = str(start.day), "%d %s" % (end.day, months[end.month - 1])
+    if lang == "en":
+        return "from %s to %s" % (first, last)
+    return "%s%s %s%s" % ("dall'" if start.day in (8, 11) else "dal ", first,
+                          "all'" if end.day in (8, 11) else "al ", last)
+
+
+def fmt_nights(n: int, lang: str = "it") -> str:
+    if lang == "en":
+        return "1 night" if n == 1 else "%d nights" % n
+    return "1 notte" if n == 1 else "%d notti" % n
+
+
+def nights_range(low: Optional[int], high: Optional[int], lang: str = "it") -> str:
+    """Durata chiesta (M21, RF-58): "3 notti", "da 1 a 3 notti", "almeno 3 notti"."""
+    en = lang == "en"
+    if low is not None and low == high:
+        return fmt_nights(low, lang)
+    if low is not None and high is not None:
+        return ("%d to %s" if en else "da %d a %s") % (low, fmt_nights(high, lang))
+    if low is not None:
+        return ("at least %s" if en else "almeno %s") % fmt_nights(low, lang)
+    return ("at most %s" if en else "al massimo %s") % fmt_nights(high, lang)
+
+
 def fmt_money(value: Decimal, lang: str = "it") -> str:
     q = value.quantize(Decimal("0.01"))
     unit = "euros" if lang == "en" else "euro"

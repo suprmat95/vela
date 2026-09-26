@@ -169,3 +169,29 @@ Now `intent.py`: `parse_duration`, weekend with an article no longer a period, "
 Parser green. Full suite and lint before the first commit:
 
 - 🔧 Bash: Run full test suite and ruff
+
+- 🔧 Bash: Commit parser and criteria changes
+
+Step 2: chooser. Let me look at the helpers in the existing tests.
+
+- 🔧 Bash: Read chooser tests and Product model
+
+- 🔧 Bash: Read make_product helper and reason tests
+
+- 🔧 Bash: Read say.py date helpers and reason tests
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/m21-durata/tests/test_chooser_duration.py
+
+- 🔧 Bash: Run chooser duration tests expecting failures
+
+- 🔧 Bash: Show the import error
+
+Parser committed; I'm on the chooser tests now (the error was just how the module is launched: `support` only resolves with `discover -s tests`).
+
+- 🔧 Bash: Run chooser duration tests via discover
+
+RED for the right reasons. Implementing: date/night formatting in `say.py` (where the date helpers already live), preference and reason sentence in `chooser.py`.
+
+- 🔧 Bash: Implement duration preference and reason in chooser
+
+- 🔧 Bash: Fix wording in test, simplify label, run suite
