@@ -330,11 +330,13 @@ class SmsPhrasesTest(unittest.TestCase):
         self.assertEqual(say.say_queued(1, phone_tail="4567"),
                          "Ti ho messo in coda: tra circa un minuto il link di pagamento sarà pronto e "
                          "te lo mando per SMS al numero che finisce con 4567. Ti scrivo di nuovo "
-                         "quando la prenotazione è confermata.")
+                         "quando la prenotazione è confermata. Se vuoi sapere a che punto è, o se "
+                         "l'SMS non arriva entro qualche minuto, chiedimi pure.")
         self.assertEqual(say.say_queued(12, "en", "4567"),
                          "You're in the queue: the payment link will be ready in about 12 minutes and "
                          "I'll text it to the number ending in 4567. I'll text you again when the "
-                         "booking is confirmed.")
+                         "booking is confirmed. If you want to know how it's going, or the text "
+                         "hasn't arrived in a few minutes, just ask me.")
 
     def test_queued_without_valid_phone_is_unchanged(self):
         self.assertIn("Chiedimi a che punto è", say.say_queued(1))

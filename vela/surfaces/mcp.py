@@ -43,7 +43,8 @@ _INSTRUCTIONS_BASE = (
 INSTRUCTIONS = _INSTRUCTIONS_BASE + "the payment link comes later from get_order_status."
 INSTRUCTIONS_SMS = _INSTRUCTIONS_BASE + (
     "Vela texts the payment link and later the booking confirmation to the traveler's "
-    "phone, so do not poll get_order_status: call it only when the user asks.")
+    "phone, so do not poll get_order_status on your own: call it whenever the user asks how it "
+    "is going or says they paid, and once if the user says the text has not arrived.")
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
           "never mention other trips.")
@@ -102,10 +103,13 @@ DESCRIPTIONS = {
 DESCRIPTIONS_SMS = dict(DESCRIPTIONS, **{
     "accept_proposal": _ACCEPT + (
         " Vela texts the payment link to the traveler's phone when it is ready and texts again "
-        "when the booking is confirmed; call get_order_status only when the user asks." + _VOICE),
+        "when the booking is confirmed. Do not poll get_order_status on your own: call it "
+        "whenever the user asks how it is going, and once if the user says the text has not "
+        "arrived." + _VOICE),
     "get_order_status": (
-        "Check an order only when the user asks how it is going or says they paid: Vela already "
-        "texts the payment link and the confirmation." + _STATES),
+        "Vela already texts the payment link and the confirmation, so do not poll: check an "
+        "order whenever the user asks how it is going or says they paid, and once if the user "
+        "says the text has not arrived." + _STATES),
 })
 
 

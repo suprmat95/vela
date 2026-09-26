@@ -201,6 +201,18 @@ class SmsTextsTest(unittest.TestCase):
         for name in ("create_intent", "get_proposal", "reject_proposal"):
             self.assertEqual(DESCRIPTIONS_SMS[name], DESCRIPTIONS[name])
 
+    def test_sms_texts_forbid_polling_but_always_answer_the_user(self):
+        # I1 (decisione dell'utente 2026-09-26): mai interrogare di propria iniziativa, sempre
+        # quando l'utente chiede, e una volta se dice che l'SMS non è arrivato
+        for name, text in (("instructions", INSTRUCTIONS_SMS),
+                           ("accept_proposal", DESCRIPTIONS_SMS["accept_proposal"]),
+                           ("get_order_status", DESCRIPTIONS_SMS["get_order_status"])):
+            with self.subTest(name=name):
+                self.assertIn("poll", text)
+                self.assertIn("whenever the user asks how it is going", text)
+                self.assertIn("once if the user says the text has not arrived", text)
+                self.assertNotIn("only when", text)
+
 
 class SmsServerTest(unittest.IsolatedAsyncioTestCase):
     async def served(self, get_vela):
