@@ -707,3 +707,130 @@ Il branch resta da chiudere: merge in `master`, pull request, oppure lo lasciamo
 
 Cambia "Tre passaggi.
 Un solo viaggio." in "Un viaggio, in soli tre passaggi"
+
+## Agente 16:44
+
+- 🔧 Bash: Change the heading, run tests, commit
+
+Ho cambiato il titolo in "Un viaggio, in soli tre passaggi" e l'ho committato in `a3b74b8`; i test della landing passano. Ricarica http://127.0.0.1:8080 per vederlo.
+
+Ho mandato a capo dopo la virgola, come era il titolo nel design:
+
+```
+Un viaggio,
+in soli tre passaggi
+```
+
+Non ho aggiunto il punto finale perché nel tuo testo non c'era, mentre gli altri titoli della pagina lo hanno. Se lo vuoi, o se preferisci il titolo su una riga sola, dimmelo.
+
+## Utente 16:45
+
+ok mergia
+
+## Agente 16:46
+
+Faccio il merge in `master`. Prima controllo lo stato del checkout principale, dove `master` è attivo.
+
+- 🔧 Bash: Check main checkout branch, status and worktrees
+
+- 🔧 Bash: Check whether master is checked out in any worktree
+
+- 🔧 Bash: Inspect the master worktree status and recent commits
+
+Il worktree di `master` è pulito; l'ultimo commit è il merge di `task/m13a`. Faccio il merge lì.
+
+- 🔧 Bash: Merge task/landingpage into master in its worktree
+
+Tre conflitti. Li guardo uno per uno.
+
+- 🔧 Bash: Show the conflict hunks
+
+I conflitti sono solo aggiunte fatte in punti vicini: da una parte M13a, dall'altra la landing. Li risolvo tenendo tutte e due. Guardo quello di `tests/test_docker_files.py`.
+
+- 🔧 Bash: Show the test_docker_files conflict and dockerignore
+
+- 🔧 Bash: Resolve the three conflicts keeping both sides
+
+Aggiungo la riga vuota mancante prima di `ComposeTest`, controllo il `render.yaml` risultante dal merge e lancio la suite sul risultato.
+
+- 🔧 Bash: Fix spacing, inspect merged render.yaml, run suite on merge
+
+Suite verde sul risultato del merge: 1014 test OK, 47 saltati. Chiudo il commit di merge.
+
+- 🔧 Bash: Commit the merge in the master worktree
+
+Ho unito `task/landingpage` in `master` in locale: il commit di merge è `b2c7e39`, fatto nel worktree `workspaces/vela/master`. Sul risultato del merge la suite passa (1014 test OK, 47 saltati).
+
+C'erano tre conflitti, nati perché nel frattempo in `master` era entrato `task/m13a`. Erano solo aggiunte fatte in punti vicini, e le ho tenute tutte e due:
+- **`README.md`**: nella struttura del progetto restano sia la riga aggiornata di `loadtest/` che la nuova riga `landing/`.
+- **`docs/decisions.md`**: prima le sezioni di M13a e della seconda lettura del twist, poi le due della landing.
+- **`tests/test_docker_files.py`**: restano sia il test su `landing` in `.dockerignore` che i nuovi test del compose.
+
+`render.yaml` si è unito senza conflitti e contiene sia il servizio `vela-landing` sia il filtro sul servizio `vela`.
+
+**Cosa non ho fatto:**
+- **Push:** niente è stato pushato. Anche il `master` locale era già avanti rispetto a `origin/master` con altri merge, e Render si aggiorna solo da quello che è su GitHub.
+- **Branch e worktree:** non ho cancellato `task/landingpage` né il worktree, perché il worktree lo gestisce orca e il CLAUDE.md vuole che te lo chieda prima di cancellare un branch.
+- **`index_1.html`:** è ancora non tracciato nel worktree della landing.
+
+Il server di anteprima su http://127.0.0.1:8080 è ancora attivo.
+
+Vuoi che faccia il push di `master` su `origin`? Dopo quello, il "Sync" del blueprint nella dashboard Render crea `vela-landing`, e quel passo è tuo.
+
+## Utente 16:48
+
+si
+
+## Agente 16:48
+
+- 🔧 Bash: Fetch and push master to origin
+
+L'output del push è contraddittorio: due "remote end hung up" e poi "Everything up-to-date". Controllo cosa c'è davvero su `origin`.
+
+- 🔧 Bash: Compare remote master with local master
+
+- 🔧 Bash: Retry the push with a larger HTTP buffer
+
+Ho pushato `master` su GitHub: `origin/master` ora è `b2c7e39` e contiene la landing, più gli altri merge che erano solo in locale (M13a, doc/accept-wait-2 e i precedenti), 30 commit in tutto.
+
+Il primo tentativo è fallito con "remote end hung up", probabilmente per la dimensione dei file in `agent-log/`. Il secondo è passato alzando il buffer HTTP solo per quel comando; la configurazione di git non è cambiata.
+
+**Cosa devi fare tu su Render**
+1. Nella dashboard apri il Blueprint del repo e fai **Sync**: viene creato lo static site `vela-landing`.
+2. Controlla che il suo URL `*.onrender.com` risponda con la pagina.
+3. Questo push contiene anche codice dell'API (M13a), quindi il servizio `vela` verrà ridistribuito. Il filtro che ignora `landing/**` conta solo per i commit futuri che toccano solo la landing.
+
+Restano in sospeso:
+- il branch `task/landingpage` e il suo worktree, che non ho cancellato;
+- `index_1.html`, ancora non tracciato nel worktree;
+- il server di anteprima sulla porta 8080, ancora attivo.
+
+Dimmi se vuoi che fermi il server o faccia pulizia.
+
+## Utente 16:51
+
+riusciresti ad aggiungere il widget di elevenlabs con agenti id agent_6201m3ex2qykf5e8d35653z5jfa5 e inserire il numero di telefono+17197454407
+
+## Agente 16:51
+
+Sì, basta modificare `landing/config.js`. Lavoro sul branch `task/landingpage` del worktree e scrivo il numero con gli spazi (`+1 719 745 4407`) per renderlo leggibile; il link chiamerà comunque `tel:+17197454407`.
+
+- 🔧 Bash: Set agent id and phone number in config.js, run tests
+
+Per controllare il widget vero apro la pagina una volta in Chrome headless. Questo carica lo script da unpkg e la configurazione dell'agente da ElevenLabs; non parte nessuna conversazione.
+
+- 🔧 Bash: Load the page with the real widget and dump key elements
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/voice-top.png
+
+Lo screenshot è bianco, probabilmente per lo scroll animato verso `#voce`. Rifaccio lo screenshot dell'intera pagina, senza àncora.
+
+- 🔧 Bash: Full-page screenshot with the real widget
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/full-voice.png
+
+- 🔧 Bash: Viewport screenshot to look for the floating widget
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/vp.png
+
+- 🔧 Bash: Commit the voice and phone config
