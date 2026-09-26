@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, FakeHofJ, StubPayments, make_product
+from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
@@ -60,9 +61,10 @@ class World:
         self.payments = payments
         self.check = PaymentCheckJob(self.repos, payments, self.orders, now=self.clock, poll_seconds=60)
         self.hofj = FakeHofJ()
-        self.processor = JobProcessor(self.repos, self.hofj, {
+        router = SingleClientRouter(self.hofj)
+        self.processor = JobProcessor(self.repos, router, {
             JobKind.PAYMENT_CHECK: self.check,
-            JobKind.BOOKING: BookingJob(self.repos, self.hofj, now=self.clock)},
+            JobKind.BOOKING: BookingJob(self.repos, router, now=self.clock)},
             now=self.clock)
         self.repos.quota.acquire(QuotaClass.BOOKING, 1, NOW)       # finestra già aperta
 
@@ -154,7 +156,7 @@ class PurchaseEnqueuesCheckTest(unittest.TestCase):
                                "EUR", TravelerProfile(), NOW, NOW, itinerary_id="it-1"))
         job = Job("j1", JobKind.PURCHASE, "o1", JobStatus.RUNNING, NOW, NOW, step=4, locked_at=NOW)
         repos.jobs.enqueue(job)
-        purchase = PurchaseJob(repos, FakeHofJ(), StubPayments(), lambda i: NoMatch("i1", "x", "x"),
+        purchase = PurchaseJob(repos, SingleClientRouter(FakeHofJ()), StubPayments(), lambda i: NoMatch("i1", "x", "x"),
                                DEFAULT_TRAVELER, now=lambda: NOW, max_attempts=3,
                                new_id=lambda: "chk1", poll_seconds=60)
         purchase.run(job, NOW + timedelta(seconds=60))

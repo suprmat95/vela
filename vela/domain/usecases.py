@@ -21,7 +21,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
 from vela.domain.orders import NotFound, OrderService
 from vela.domain.quota import estimated_wait_seconds, purchases_per_window, wait_minutes
 from vela.domain.refine import Refinement, is_price_reason, refine
-from vela.ports.hofj import HofJPort
+from vela.ports.hofj import HofJRouter
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
 from vela.ports.repositories import DuplicateOrder, Repositories
@@ -44,7 +44,7 @@ def summary_of(product: Product) -> ProductSummary:
 
 
 class Vela:
-    def __init__(self, repos: Repositories, hofj: HofJPort, payments: PaymentsPort,
+    def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
                  defaults=None, now: Optional[Callable[[], datetime]] = None,
                  new_id: Optional[Callable[[], str]] = None,
                  extractor: Optional[IntentExtractor] = None):

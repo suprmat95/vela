@@ -1,7 +1,8 @@
 """Adapter HTTP verso House of Journeys (RF-14, RF-23, RF-36, RNF-04).
 
 httpx sincrono, timeout di 15 s, `?brand=&locale=` su ogni chiamata del carrello, `Bearer` in
-intestazione. Risposte `{data, meta}` con `meta` facoltativo; errori RFC 7807 letti senza
+intestazione. Implementa anche `CatalogSource` per il sync (M10, RF-29): lista paginata e
+dettaglio esteso con il brand passato alla chiamata, non quello del client. Risposte `{data, meta}` con `meta` facoltativo; errori RFC 7807 letti senza
 guardare il content-type (HofJ usa `application/json` anche per i problemi). Forme verificate su
 staging nel Task 1 di M5 (`docs/api/internal-checkout.md`).
 
@@ -18,7 +19,7 @@ I messaggi degli errori non contengono mai la chiave né il corpo delle richiest
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 import httpx
 
@@ -27,6 +28,7 @@ from vela.ports.hofj import (ConfigError, Customer, HofJError, Itinerary, Pax, P
                              ProductError, QuotaError, QuotaSnapshot, UpstreamError)
 
 TIMEOUT_SECONDS = 15.0
+PAGE_LIMIT = 100   # RF-29
 _PRODUCT_502 = re.compile(r"(returned|failed:)\s*(4\d\d|500)\b", re.IGNORECASE)
 
 
@@ -85,10 +87,28 @@ class HofJHttp:
         return QuotaSnapshot(int(data["limitPerMinute"]), int(data["usedInWindow"]),
                              _instant(data["windowStartedAt"]), _instant(data["windowEndsAt"]))
 
+    # --- catalogo (RF-29, M10) -------------------------------------------------------------------
+
+    def list_page(self, brand: str, cursor: Optional[str]) -> Tuple[List[dict], Optional[str]]:
+        query = {"limit": PAGE_LIMIT}
+        if cursor:
+            query["cursor"] = cursor
+        body = self._request("GET", "/v1/products", brand=brand, extra=query)
+        return body["data"], (body.get("meta") or {}).get("nextCursor") or None
+
+    def detail(self, brand: str, product_id: str) -> dict:
+        return self._request("GET", "/v1/products/%s" % product_id, brand=brand,
+                             extra={"extended": "true"})["data"]
+
     # --- trasporto ------------------------------------------------------------------------------
 
     def _call(self, method: str, path: str, json=None, itinerary: bool = False, params: bool = True):
-        query = {"brand": self.brand, "locale": self.locale} if params else None
+        return self._request(method, path, json=json, itinerary=itinerary, params=params)["data"]
+
+    def _request(self, method: str, path: str, json=None, itinerary: bool = False,
+                 params: bool = True, brand: Optional[str] = None, extra: Optional[dict] = None) -> dict:
+        """Il corpo `{data, meta}` della risposta; errori mappati come da docstring del modulo."""
+        query = {"brand": brand or self.brand, "locale": self.locale, **(extra or {})} if params else None
         try:
             response = self.client.request(method, path, params=query, json=json)
         except httpx.TimeoutException as exc:
@@ -103,7 +123,7 @@ class HofJHttp:
             raise _error(method, path, response, body, itinerary)
         if not isinstance(body, dict) or "data" not in body:
             raise UpstreamError("HofJ %s %s: risposta senza data" % (method, path))
-        return body["data"]
+        return body
 
 
 def _error(method: str, path: str, response: httpx.Response, body, itinerary: bool) -> HofJError:

@@ -1,5 +1,6 @@
 """Repository in memoria: test del dominio (RNF-09) e app nei test delle superfici."""
 import threading
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 from typing import Dict, Iterable, List, Optional, Set
@@ -10,7 +11,7 @@ from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, f
                                rolled, try_acquire)
 from vela.ports.hofj import QuotaSnapshot
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 
 class MemoryProducts:
@@ -38,12 +39,23 @@ class MemoryProducts:
         if p is not None:
             self._items[product_id] = replace(p, bookable=bookable, bookable_checked_at=checked_at)
 
-    def archive_missing(self, keep_ids: Iterable[str]) -> int:
+    def archive_missing(self, keep_ids: Iterable[str], brand: Optional[str] = None) -> int:
         keep = set(keep_ids)
-        gone = [p for p in self._items.values() if not p.archived and p.id not in keep]
+        gone = [p for p in self._items.values() if not p.archived and p.id not in keep
+                and (brand is None or p.brand == brand)]
         for p in gone:
             self._items[p.id] = replace(p, archived=True)
         return len(gone)
+
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, SyncState]:
+        found = (self._items.get(i) for i in ids)
+        return {p.id: SyncState(p.brand, p.hofj_updated_at, p.archived) for p in found if p is not None}
+
+    def mark_seen(self, ids: Iterable[str], brand: str, sport: str, seen_at: datetime) -> None:
+        for i in ids:
+            p = self._items.get(i)
+            if p is not None:
+                self._items[i] = replace(p, brand=brand, sport=sport, fetched_at=seen_at)
 
 
 class MemoryIntents:
@@ -180,7 +192,17 @@ class MemoryJobs:
 class MemoryRepositories:
     def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20):
         self.quota_margin, self.booking_reserve = quota_margin, booking_reserve
+        self._catalog_lock = threading.Lock()
         self.clear()
+
+    @contextmanager
+    def catalog_lock(self):
+        acquired = self._catalog_lock.acquire(blocking=False)
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._catalog_lock.release()
 
     def clear(self) -> None:
         self.products = MemoryProducts()

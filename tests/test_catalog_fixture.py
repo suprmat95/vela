@@ -1,4 +1,4 @@
-"""Verifica fixtures/catalog.json registrato da scripts/record_catalog.py.
+"""Verifica fixtures/catalog.json, la fixture padel di produzione (`python -m vela.sync --record`).
 
 Si salta se il file non esiste (RNF-09: la suite non richiede servizi esterni).
 """
@@ -20,7 +20,7 @@ def has_key(value, key):
 
 
 @unittest.skipUnless(os.path.exists(FIXTURE),
-                     "fixtures/catalog.json assente: eseguire scripts/record_catalog.py")
+                     "fixtures/catalog.json assente: eseguire python -m vela.sync --record")
 class CatalogFixtureTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -33,7 +33,7 @@ class CatalogFixtureTest(unittest.TestCase):
     def test_header(self):
         self.assertEqual(self.catalog["locale"], "it")
         self.assertRegex(self.catalog["recorded_at"], r"^\d{4}-\d{2}-\d{2}T")
-        self.assertIn(type(self.catalog["brand"]), (str, type(None)))
+        self.assertEqual((self.catalog["brand"], self.catalog["sport"]), ("weebora.com", "padel"))
         self.assertTrue(self.catalog["base_url"].startswith("https://"))
 
     def test_every_active_product_has_a_detail_and_vice_versa(self):
@@ -73,6 +73,32 @@ class CatalogFixtureTest(unittest.TestCase):
 
     def test_size_within_budget(self):
         self.assertLess(os.path.getsize(FIXTURE), MAX_BYTES)
+
+
+class EveryFixtureTest(unittest.TestCase):
+    """Regole comuni a tutte le fixture, una per host e brand (M10, RF-32)."""
+
+    FOLDER = os.path.dirname(FIXTURE)
+
+    def fixtures(self):
+        return sorted(os.path.join(self.FOLDER, n) for n in os.listdir(self.FOLDER)
+                      if n.startswith("catalog") and n.endswith(".json"))
+
+    def test_size_within_budget(self):
+        for path in self.fixtures():
+            with self.subTest(os.path.basename(path)):
+                self.assertLess(os.path.getsize(path), MAX_BYTES)
+
+    def test_header_has_brand_and_sport_and_no_media(self):
+        for path in self.fixtures():
+            with self.subTest(os.path.basename(path)), open(path, encoding="utf-8") as fh:
+                catalog = json.load(fh)
+                self.assertTrue(catalog["brand"])
+                self.assertIn(catalog["sport"], ("padel", "tennis"))
+                for key in MEDIA_KEYS:
+                    self.assertFalse(has_key(catalog["details"], key), key)
+                active = sorted(str(p["id"]) for p in catalog["products"] if not p.get("archived"))
+                self.assertEqual(active, sorted(catalog["details"]))
 
 
 if __name__ == "__main__":

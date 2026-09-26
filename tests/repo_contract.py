@@ -7,7 +7,7 @@ from support import NOW, make_product
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
                                 OrderStatus, Participant, Period, Proposal, Rejection,
                                 TravelerProfile)
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
                     pax=2, budget=Decimal("800"))
@@ -55,7 +55,8 @@ class RepositoryContract:
     def test_products_fields_round_trip(self):
         p = make_product(7, min_pax=2, max_pax=0, hotel=None, windows=(("2026-10-01", "2026-10-04"),
                                                                         ("2026-11-05", "2026-11-08")))
-        p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW)
+        p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW,
+                    brand="terrarossa.com")
         self.repos.products.upsert_many([p])
         got = self.repos.products.get("7")
         self.assertEqual(got, p)
@@ -84,6 +85,46 @@ class RepositoryContract:
         self.assertEqual(self.repos.products.archive_missing([]), 2)
         self.assertEqual(self.repos.products.archive_missing([]), 0)
         self.assertEqual(self.repos.products.count(), 2)
+
+    def test_products_archive_missing_by_brand_touches_only_that_brand(self):
+        self.repos.products.upsert_many([make_product(1, brand="a.com"), make_product(2, brand="a.com"),
+                                         make_product(3, brand="b.com"), make_product(4)])
+        self.assertEqual(self.repos.products.archive_missing(["1"], brand="a.com"), 1)
+        archived = {p.id: p.archived for p in self.repos.products.list_all()}
+        self.assertEqual(archived, {"1": False, "2": True, "3": False, "4": False})
+
+    def test_products_sync_state(self):
+        self.repos.products.upsert_many([make_product(1, brand="a.com", updated_at="u1"),
+                                         make_product(2, updated_at="u2", archived=True)])
+        self.assertEqual(self.repos.products.sync_state(["1", "2", "9"]),
+                         {"1": SyncState("a.com", "u1", False), "2": SyncState(None, "u2", True)})
+        self.assertEqual(self.repos.products.sync_state([]), {})
+
+    def test_products_mark_seen_sets_brand_sport_and_fetched_at(self):
+        later = NOW + timedelta(hours=6)
+        self.repos.products.upsert_many([make_product(1), make_product(2), make_product(3)])
+        self.repos.products.mark_seen(["1", "2"], "t.com", "tennis", later)
+        got = {p.id: (p.brand, p.sport, p.fetched_at) for p in self.repos.products.list_all()}
+        self.assertEqual(got, {"1": ("t.com", "tennis", later), "2": ("t.com", "tennis", later),
+                               "3": (None, "padel", NOW)})
+        self.assertEqual(self.repos.products.get("1").price, Decimal("500"))
+        self.assertEqual(self.repos.products.last_fetched_at(), later)
+        self.repos.products.mark_seen([], "t.com", "tennis", later)
+
+    def test_catalog_lock_admits_one_sync_at_a_time(self):
+        with self.repos.catalog_lock() as first:
+            self.assertTrue(first)
+            with self.repos.catalog_lock() as second:
+                self.assertFalse(second)
+        with self.repos.catalog_lock() as again:
+            self.assertTrue(again)
+
+    def test_catalog_lock_is_released_on_error(self):
+        with self.assertRaises(RuntimeError):
+            with self.repos.catalog_lock():
+                raise RuntimeError("sync fallito")
+        with self.repos.catalog_lock() as again:
+            self.assertTrue(again)
 
     # intenti
     def test_intents_round_trip(self):

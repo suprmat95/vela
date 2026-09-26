@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, FakeHofJ, FlakyPayments, StubPayments, make_product
+from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.config import DEFAULT_TRAVELER
 from vela.domain import say
@@ -46,7 +47,7 @@ class Setup:
         self.payments = payments or StubPayments()
         self.proposed = []
         ids = iter("new%d" % i for i in range(1, 100))
-        self.job = PurchaseJob(self.repos, self.hofj, self.payments, self.propose, DEFAULT_TRAVELER,
+        self.job = PurchaseJob(self.repos, SingleClientRouter(self.hofj), self.payments, self.propose, DEFAULT_TRAVELER,
                                now=fixed_now, max_attempts=3)
         self.new_id = lambda: next(ids)
         self.repos.jobs.enqueue(Job("j1", JobKind.PURCHASE, "o1", JobStatus.PENDING, NOW, NOW))

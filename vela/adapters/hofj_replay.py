@@ -1,6 +1,7 @@
 """Adapter replay di House of Journeys (RNF-08): nessuna chiamata esterna.
 
-Catalogo da `fixtures/catalog.json`; itinerario sintetico con importo = prezzo × adulti;
+Catalogo da tutte le fixture di produzione (`fixtures/catalog*.json` registrate su
+`api.hofj.com`, una per brand, M10) o dalle fixture passate; itinerario sintetico con importo = prezzo × adulti;
 customer e pax tenuti in memoria del processo; prenotazione con codice `R-<6 cifre>`.
 `create_booking` accetta qualunque id di itinerario replay, anche dopo un riavvio, così la
 ripresa di RF-27 funziona in replay.
@@ -15,9 +16,9 @@ import threading
 import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from vela.domain.catalog import load_fixture
+from vela.domain.catalog import load_fixture, select_fixtures
 from vela.domain.models import Product
 from vela.ports.hofj import (Customer, Itinerary, Pax, PaymentProof, QuotaError, QuotaSnapshot,
                              UpstreamError)
@@ -25,6 +26,8 @@ from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 
 FIXTURE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "fixtures", "catalog.json")
+FIXTURES_DIR = os.path.dirname(FIXTURE_PATH)
+PRODUCTION_URL = "https://api.hofj.com"   # host del catalogo replay di default
 ITINERARY_PREFIX = "it-replay-"
 
 
@@ -36,10 +39,13 @@ def _utcnow() -> datetime:
 
 
 class ReplayHofJ:
-    def __init__(self, catalog_path: str = FIXTURE_PATH, rng: Optional[random.Random] = None,
+    def __init__(self, catalog_path: Union[str, Sequence[str], None] = None,
+                 rng: Optional[random.Random] = None,
                  latency: Tuple[float, float] = (0.0, 0.0), limit: Optional[int] = None,
                  now: Callable[[], datetime] = _utcnow, sleep: Callable[[float], None] = time.sleep):
-        self.catalog_path = catalog_path
+        if catalog_path is None:
+            catalog_path = select_fixtures(FIXTURES_DIR, PRODUCTION_URL)
+        self.catalog_paths = [catalog_path] if isinstance(catalog_path, str) else list(catalog_path)
         self.rng = rng or random.Random()
         self.latency, self.limit, self.now, self.sleep = latency, limit, now, sleep
         self._itineraries: Dict[str, dict] = {}
@@ -49,7 +55,7 @@ class ReplayHofJ:
         self._used = 0
 
     def load_catalog(self) -> List[Product]:
-        return load_fixture(self.catalog_path)
+        return [p for path in self.catalog_paths for p in load_fixture(path)]
 
     def _call(self) -> None:
         """Una chiamata HofJ simulata: conta nella finestra, poi attende la latenza."""

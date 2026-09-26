@@ -1,8 +1,10 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
+import threading
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
-from typing import Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +18,7 @@ from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, f
                                rolled, try_acquire)
 from vela.ports.hofj import QuotaSnapshot
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 
 def _product_row(p: Product) -> dict:
@@ -31,7 +33,7 @@ def _product_row(p: Product) -> dict:
         "duration_days": p.duration_days, "hofj_updated_at": p.hofj_updated_at, "raw": p.raw,
         "fetched_at": p.fetched_at, "bookable": p.bookable,
         "bookable_checked_at": p.bookable_checked_at, "archived": p.archived,
-        "provider_id": p.provider_id,
+        "provider_id": p.provider_id, "brand": p.brand,
     }
 
 
@@ -47,7 +49,7 @@ def _product(m, raw: Optional[dict]) -> Product:
         duration_days=m["duration_days"], hofj_updated_at=m["hofj_updated_at"],
         raw=raw if raw is not None else {}, fetched_at=m["fetched_at"], bookable=m["bookable"],
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
-        provider_id=m["provider_id"])
+        provider_id=m["provider_id"], brand=m["brand"])
 
 
 class PostgresProducts:
@@ -89,14 +91,36 @@ class PostgresProducts:
             conn.execute(update(products_t).where(products_t.c.id == product_id)
                          .values(bookable=bookable, bookable_checked_at=checked_at))
 
-    def archive_missing(self, keep_ids: Iterable[str]) -> int:
-        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`."""
+    def archive_missing(self, keep_ids: Iterable[str], brand: Optional[str] = None) -> int:
+        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`;
+        con `brand` solo tra i prodotti di quel brand (M10)."""
         stmt = update(products_t).where(products_t.c.archived.is_(False))
+        if brand is not None:
+            stmt = stmt.where(products_t.c.brand == brand)
         keep = list(keep_ids)
         if keep:
             stmt = stmt.where(products_t.c.id.notin_(keep))
         with self.engine.begin() as conn:
             return conn.execute(stmt.values(archived=True)).rowcount
+
+
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, SyncState]:
+        wanted = list(ids)
+        if not wanted:
+            return {}
+        stmt = (select(products_t.c.id, products_t.c.brand, products_t.c.hofj_updated_at,
+                       products_t.c.archived)
+                .where(products_t.c.id.in_(wanted)))
+        with self.engine.connect() as conn:
+            return {r.id: SyncState(r.brand, r.hofj_updated_at, r.archived) for r in conn.execute(stmt)}
+
+    def mark_seen(self, ids: Iterable[str], brand: str, sport: str, seen_at: datetime) -> None:
+        wanted = list(ids)
+        if not wanted:
+            return
+        with self.engine.begin() as conn:
+            conn.execute(update(products_t).where(products_t.c.id.in_(wanted))
+                         .values(brand=brand, sport=sport, fetched_at=seen_at))
 
 
 class PostgresIntents:
@@ -397,9 +421,14 @@ class PostgresQuota:
         return rolled(w, now).window_end
 
 
+# chiave dell'advisory lock del sync del catalogo (RF-30): costante, unica per tutti i brand
+CATALOG_LOCK_KEY = 7_646_512_010
+
+
 class PostgresRepositories:
     def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20):
         self.engine = engine
+        self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock
         self.products = PostgresProducts(engine)
         self.intents = PostgresIntents(engine)
         self.proposals = PostgresProposals(engine)
@@ -407,3 +436,26 @@ class PostgresRepositories:
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
         self.quota = PostgresQuota(engine, margin=quota_margin, reserve=booking_reserve)
+
+    @contextmanager
+    def catalog_lock(self):
+        """`pg_try_advisory_lock` su una connessione tenuta per tutto il sync: il lock è di
+        sessione, quindi cade anche se il processo muore (RF-30)."""
+        if self.engine.dialect.name != "postgresql":
+            acquired = self._local_lock.acquire(blocking=False)
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    self._local_lock.release()
+            return
+        with self.engine.connect() as conn:
+            acquired = conn.execute(text("SELECT pg_try_advisory_lock(:k)"),
+                                    {"k": CATALOG_LOCK_KEY}).scalar_one()
+            conn.commit()
+            try:
+                yield bool(acquired)
+            finally:
+                if acquired:
+                    conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": CATALOG_LOCK_KEY})
+                    conn.commit()

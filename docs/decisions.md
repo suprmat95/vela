@@ -594,3 +594,40 @@ Chiude le "Decisioni aperte sul parser" del contratto agente-tool. Piano in
 | Secondo rifiuto della stessa proposta | Il motivo del secondo rifiuto non viene salvato (resta il primo, vincolo invariato). Un "troppo caro" detto al secondo rifiuto abbassa il budget ma non crea il tetto di prezzo della decisione M7 | Nessun cambio di schema; caso raro, da rivedere se capita |
 | Conflitto `direction` / luogo nel testo | Se il campo `direction` sostituisce un luogo esplicito del motivo, il conflitto non va nei log (va solo quello `area` / `direction`) | Caso raro; il `say` ripete comunque l'area risultante |
 | Suite finale | 848 test, 42 saltati (Postgres), verde con `uv run python` (erano 773 a inizio M17). Nessuna chiamata ad Anthropic | — |
+
+## 2026-09-26 — M10: design del sync
+
+Origine: brainstorming di M10. Design in
+`docs/superpowers/specs/2026-09-26-m10-multibrand-sync-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Test di `sport=any` | M10 verifica il chooser con criteri senza filtro sport (`None`): candidati di entrambi i brand. Il valore letterale `"any"` lo testa M17. Nessun file di M17 (`intent.py`, `usecases.py`, `mcp.py`, `rest.py`, `chooser.py`) toccato | M17 lavora su quei file in parallelo; `None` è già "nessun filtro" nel chooser. Scartate: una riga in `chooser.py` (conflitto con M17), normalizzare `"any"` in `usecases.py` (contraddice `"any"` distinto da "non detto") |
+| Fixture padel | Le due fixture esistenti si adattano offline (rinomina, `brand` e `sport` nei metadati); si registrano solo le due tennis | Nessuna chiamata e nessun cambio ai dati attesi dai test. Scartata: registrare di nuovo tutte e quattro (~136 chiamate in più) |
+| Lettura del catalogo | Porta nuova `CatalogSource` (`list_page`, `detail`), implementata da `HofJHttp` e dalle fixture; `HofJPort` invariata | Il sync e la registrazione delle fixture usano lo stesso codice; i test del sync non fanno chiamate |
+| Registrazione fixture | `python -m vela.sync --record` sostituisce `scripts/record_catalog.py` | Un solo codice per sync e fixture (RF-32) |
+| Righe con `brand` NULL | Al primo sync, se `updatedAt` è invariato si scrivono solo `brand` e sport, senza dettaglio | Circa 77 chiamate in meno sul primo sync in produzione |
+| Metadati delle fixture | Ogni fixture porta `brand` e `sport`; il replay non ha bisogno di `HOFJ_BRANDS` | Il replay resta senza configurazione HofJ |
+| Annotazione in `usecases.py` | `Vela` riceve il router nell'argomento `hofj`; l'annotazione `HofJPort` resta fino al merge di M17 | Non toccare i file di M17; l'attributo è solo passato ai job |
+
+## 2026-09-26 — M10: esecuzione
+
+Decisioni prese durante l'implementazione; il design aggiornato è in
+`docs/superpowers/specs/2026-09-26-m10-multibrand-sync-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Nomi delle fixture | Restano `catalog.json` e `catalog-staging.json` (padel); le nuove sono `catalog-tennis.json` e `catalog-staging-tennis.json` (`vela.fixtures.fixture_name`) | La rinomina `catalog-<ambiente>-<sport>.json` prevista nel design avrebbe toccato geo, chooser, loadtest e molti test senza benefici |
+| Brand di `catalog.json` | `weebora.com`, aggiunto a mano con `sport: padel` | Registrata senza `?brand=` (brand `null`): il default del server è Weebora. Nessun prodotto cambia sport |
+| Prodotti invariati | Il sync scrive `brand`, `sport` e `fetched_at` anche sui prodotti invariati (`mark_seen`), senza dettaglio | Senza `fetched_at` aggiornato `/health` mostrerebbe un'età vecchia e lo scheduler rifarebbe il sync a ogni avvio; copre anche le righe pre-M10 con brand NULL |
+| Prodotto ricomparso | Un prodotto archiviato nel DB che torna attivo nella lista si riscarica anche con `updatedAt` invariato (`sync_state` riporta `archived`) | Altrimenti resterebbe archiviato per sempre |
+| Lista vuota | Un brand senza prodotti attivi è un errore del brand: niente archiviazione | Una risposta vuota per errore archivierebbe tutto il catalogo del brand |
+| Lotti | 25 prodotti per scrittura; un errore a metà scrive il lotto parziale già scaricato | La spec non fissa il numero; ogni lotto è una transazione coerente |
+| Router | `HofJRouter` ha anche `client_for(product)` (brand del prodotto, o dello sport se NULL); `SingleClientRouter` per replay e test | La regola del brand NULL sta in un posto solo; i test esistenti con un client finto restano validi |
+| Scheduler | Thread daemon per istanza; al boot sincronizza se il catalogo è vuoto o ha più di 6 h, poi ogni 6 h; dopo un giro fallito o saltato riprova dopo 15 minuti | Con l'advisory lock gira una sola istanza; il ritardo breve evita di restare 6 h senza catalogo dopo un errore |
+| Locale in live | Resta quello delle fixture registrate sull'host (`it` in produzione, `en` su staging) | L'elenco delle variabili di §6 resta chiuso; stesso comportamento di M7 |
+| Script di registrazione | `scripts/record_catalog.py` e i suoi test rimossi; `add_trap` (criterio 4) passa in `vela/fixtures.py` con i test | Un solo codice per sync e fixture (RF-32) senza perdere la trappola |
+| Categoria dei pacchetti evento | `is_trip` esclude le categorie di nome "Tornei" (`it`) e "Tournaments" (`en`) **per tutti i brand**, non solo Terrarossa (scelta dell'utente il 2026-09-26). Escono anche 6 prodotti padel di produzione (323, 326, 991 Watch & Stay/Play; 923, 962 viaggi con le finali; 1062 clinic) e 4 di staging (14, 118, 760, 867) | Il nome è lo stesso nei due brand; i pacchetti da spettatore padel sono dello stesso tipo. Cambiano due aspettative: in "ottobre ovunque" la terza scelta è il 210 invece del 323; su staging la frase di §10.1 finisce dopo il 28 (il 867 è escluso) |
+| Registrazione delle fixture tennis | 2026-09-26: `catalog-tennis.json` 51 chiamate (1 quota, 1 pagina, 49 dettagli; 80 prodotti, 49 attivi), `catalog-staging-tennis.json` 15 chiamate (1 quota, 1 pagina, 13 dettagli; 36 prodotti, 13 attivi). Nessun 429 | Numeri uguali a quelli dichiarati prima delle chiamate |
+| Rebase su M17 | 2026-09-26: `task/m10` riportato su `master` dopo il merge di M17 (unico conflitto: le sezioni in coda a questo file). Annotazione di `hofj` in `usecases.py` e `orders.py` corretta in `HofJRouter`; MB5 testato anche con `sport="any"` vero. Suite 916 test | I file di M17 si toccano solo dopo il suo merge |
+| Postgres nei test | Suite eseguita anche su un Postgres 16 usa e getta (container `vela-m10-test-pg`, porta 5439, rimosso a fine task): advisory lock, archiviazione per brand e migrazione `0006` verificati | I container Postgres già presenti sulla macchina sono di altri progetti |

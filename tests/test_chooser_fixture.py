@@ -74,7 +74,7 @@ INTENTS = {
     "ottobre ovunque": (Criteria("padel", None, OCT, 2), [
         ("688", "2026-10-01", "2026-10-02", ELSEWHERE, True),
         ("766", "2026-10-01", "2026-10-01", ELSEWHERE, True),
-        ("323", "2026-10-15", "2026-10-16", ELSEWHERE, True)]),      # senza destinazione
+        ("210", "2026-10-03", "2026-10-03", ELSEWHERE, True)]),      # 323 "Tornei", escluso (M10)
 }
 
 
@@ -122,9 +122,11 @@ class FixtureChooserTest(unittest.TestCase):
         self.assertTrue(firenze.reason.startswith(
             "Non ho partenze compatibili a Firenze: questa è a Pietrasanta, in Toscana."), firenze.reason)
 
-    def test_gift_card_is_never_proposed(self):
+    def test_gift_card_and_event_packages_are_never_proposed(self):
+        """La gift card (M11) e la categoria "Tornei" dei pacchetti evento (M10, tutti i brand)."""
         self.assertFalse(is_trip(self.by_id["282"]))
-        self.assertEqual([p.id for p in self.products if not p.archived and not is_trip(p)], ["282"])
+        self.assertEqual([p.id for p in self.products if not p.archived and not is_trip(p)],
+                         ["282", "323", "326", "923", "962", "991", "1062"])
 
     def test_no_match_on_sport_and_period(self):
         self.assertEqual(choose(self.products, Criteria("tennis", None, None, 1), set(), TODAY),

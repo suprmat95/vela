@@ -26,7 +26,7 @@ from typing import Callable, Union
 from vela.domain import say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
-from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJPort, ProductError, QuotaError)
+from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError)
 from vela.ports.payments import PaymentsError, PaymentsPort
 from vela.ports.repositories import Repositories
 
@@ -47,7 +47,7 @@ class JobResult:
 
 
 class PurchaseJob:
-    def __init__(self, repos: Repositories, hofj: HofJPort, payments: PaymentsPort,
+    def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
                  propose: Callable[..., Union[ProposalMade, NoMatch]], defaults: TravelerDefaults,
                  now: Callable[[], datetime], max_attempts: int = 3,
                  new_id: Callable[[], str] = lambda: str(uuid.uuid4()), poll_seconds: int = 60):
@@ -80,31 +80,32 @@ class PurchaseJob:
     # --- passi -------------------------------------------------------------------------
 
     def _step(self, job: Job, order: Order) -> Job:
+        # RF-56: il brand del prodotto, riletto dal DB a ogni passo (riavvii e retry compresi)
+        product = self.repos.products.get(order.product_id)
+        hofj = self.hofj.client_for(product) if job.step < STEP_LINK else None
         if job.step == STEP_ITINERARY:
-            product = self.repos.products.get(order.product_id)
             proposal = self.repos.proposals.get(order.proposal_id)
-            itinerary_id = self.hofj.create_itinerary(product, proposal.start_date, order.pax, 1,
-                                                      order.currency)
+            itinerary_id = hofj.create_itinerary(product, proposal.start_date, order.pax, 1,
+                                                 order.currency)
             if not product.bookable:
                 self.repos.products.set_bookable(product.id, True, self.now())   # RF-34
             self._save_order(replace(order, itinerary_id=itinerary_id))
         elif job.step == STEP_CUSTOMER:
             t, d = order.traveler, self.defaults
-            self.hofj.set_customer(order.itinerary_id, Customer(
+            hofj.set_customer(order.itinerary_id, Customer(
                 t.first_name, t.last_name, t.email, t.phone,
                 d.street1, d.postal_code, d.city, d.region, d.country_code))
         elif job.step == STEP_PAX:
             t = order.traveler
             names = [(t.first_name, t.last_name)] + [(p.first_name, p.last_name) for p in t.participants]
-            slots = self.hofj.get_pax(order.itinerary_id)
+            slots = hofj.get_pax(order.itinerary_id)
             filled = [replace(slot, first_name=names[i][0], last_name=names[i][1])
                       if i < len(names) else slot for i, slot in enumerate(slots)]
-            self.hofj.set_pax(order.itinerary_id, filled)
+            hofj.set_pax(order.itinerary_id, filled)
         elif job.step == STEP_TOTAL:
-            itinerary = self.hofj.get_itinerary(order.itinerary_id)
+            itinerary = hofj.get_itinerary(order.itinerary_id)
             self._save_order(replace(order, total=itinerary.total, currency=itinerary.currency))
         elif job.step == STEP_LINK:
-            product = self.repos.products.get(order.product_id)
             link = self.payments.create_payment_link(order, product.title)
             self._save_order(replace(order, status=OrderStatus.AWAITING_PAYMENT,
                                      payment_url=link.url, payment_ref=link.reference))

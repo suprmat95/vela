@@ -2,13 +2,13 @@ import inspect
 import unittest
 
 from vela import config
-from vela.config import Settings, normalize_database_url
+from vela.config import Settings, live_brands, normalize_database_url, parse_brands
 
 ALL_VARS = {
     "DATABASE_URL": "postgres://u:p@h:5432/vela",
     "HOFJ_API_KEY": "k",
     "HOFJ_BASE_URL": "https://api.example.test/v1",
-    "HOFJ_BRAND": "brand",
+    "HOFJ_BRANDS": "padel=weebora.com,tennis=terrarossa.com",
     "STRIPE_SECRET_KEY": "sk",
     "STRIPE_WEBHOOK_SECRET": "whsec",
     "VELA_API_TOKEN": "tok",
@@ -24,6 +24,7 @@ class SettingsFromEnvTest(unittest.TestCase):
         self.assertIsNone(s.database_url)
         self.assertIsNone(s.hofj_api_key)
         self.assertIsNone(s.hofj_base_url)
+        self.assertIsNone(s.hofj_brands)
         self.assertIsNone(s.hofj_brand)
         self.assertIsNone(s.stripe_secret_key)
         self.assertIsNone(s.stripe_webhook_secret)
@@ -36,7 +37,7 @@ class SettingsFromEnvTest(unittest.TestCase):
         s = Settings.from_env(ALL_VARS)
         self.assertEqual(s.hofj_api_key, "k")
         self.assertEqual(s.hofj_base_url, "https://api.example.test/v1")
-        self.assertEqual(s.hofj_brand, "brand")
+        self.assertEqual(s.hofj_brands, "padel=weebora.com,tennis=terrarossa.com")
         self.assertEqual(s.stripe_secret_key, "sk")
         self.assertEqual(s.stripe_webhook_secret, "whsec")
         self.assertEqual(s.vela_api_token, "tok")
@@ -83,6 +84,56 @@ class SettingsDefaultsTest(unittest.TestCase):
     def test_m5_parameters_can_be_set_in_code(self):
         s = Settings(worker_concurrency=8, replay_limit=120, replay_latency=(2.0, 6.0))
         self.assertEqual((s.worker_concurrency, s.replay_limit, s.replay_latency), (8, 120, (2.0, 6.0)))
+
+class ParseBrandsTest(unittest.TestCase):
+    """HOFJ_BRANDS: mappa sport → brand (decisione M10)."""
+
+    def test_two_entries(self):
+        self.assertEqual(parse_brands("padel=weebora.com,tennis=terrarossa.com"),
+                         {"padel": "weebora.com", "tennis": "terrarossa.com"})
+
+    def test_spaces_are_tolerated(self):
+        self.assertEqual(parse_brands(" padel = weebora.com , tennis=terrarossa.com "),
+                         {"padel": "weebora.com", "tennis": "terrarossa.com"})
+
+    def test_single_entry_is_valid(self):
+        self.assertEqual(parse_brands("padel=weebora.com"), {"padel": "weebora.com"})
+
+    def test_invalid_values_raise_with_explicit_message(self):
+        cases = {
+            "": "almeno una voce",
+            "padel": "sport=brand",
+            "golf=golf.com": "golf",
+            "padel=": "brand vuoto",
+            "padel=a.com,padel=b.com": "padel",
+            "padel=a.com,tennis=a.com": "a.com",
+        }
+        for raw, fragment in cases.items():
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError) as ctx:
+                    parse_brands(raw)
+                self.assertIn(fragment, str(ctx.exception))
+
+
+class LiveBrandsTest(unittest.TestCase):
+    def test_brands_from_settings(self):
+        s = Settings(hofj_brands="tennis=terrarossa.com")
+        self.assertEqual(live_brands(s), {"tennis": "terrarossa.com"})
+
+    def test_old_variable_alone_asks_to_migrate(self):
+        with self.assertRaises(ValueError) as ctx:
+            live_brands(Settings(hofj_brand="weebora.com"))
+        self.assertIn("HOFJ_BRANDS=padel=weebora.com", str(ctx.exception))
+
+    def test_missing_variable(self):
+        with self.assertRaises(ValueError) as ctx:
+            live_brands(Settings())
+        self.assertIn("HOFJ_BRANDS", str(ctx.exception))
+
+    def test_new_variable_wins_over_old_one(self):
+        s = Settings(hofj_brands="padel=weebora.com", hofj_brand="altro.com")
+        self.assertEqual(live_brands(s), {"padel": "weebora.com"})
+
 
 class NormalizeDatabaseUrlTest(unittest.TestCase):
     def test_postgres_scheme_gets_psycopg_driver(self):

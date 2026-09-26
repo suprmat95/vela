@@ -11,19 +11,20 @@ TODAY = date(2026, 9, 25)
 def make_product(pid, price=500, sport="padel", country="ES", destination="Lanzarote",
                  windows=(("2026-10-01", "2026-10-04"),), min_date="2026-09-25",
                  max_date="2026-12-31", min_pax=None, max_pax=None, archived=False,
-                 bookable=True, hotel="Hotel Sole", title=None):
+                 bookable=True, hotel="Hotel Sole", title=None, brand=None,
+                 updated_at="2026-09-25T10:44:12.537Z", category="Vacanze", slug=None):
     return Product(
-        id=str(pid), title=title or "Padel a %s %s" % (destination, pid), slug="p-%s" % pid,
-        short_description="", sport=sport, category="Vacanze", destination=destination,
+        id=str(pid), title=title or "Padel a %s %s" % (destination, pid), slug=slug or "p-%s" % pid,
+        short_description="", sport=sport, category=category, destination=destination,
         country=country, venue="Club %s" % pid, hotel=hotel, price=Decimal(str(price)),
         currency="EUR", min_pax=min_pax, max_pax=max_pax,
         min_date=date.fromisoformat(min_date) if min_date else None,
         max_date=date.fromisoformat(max_date) if max_date else None,
         availabilities=tuple(Availability(date.fromisoformat(a), date.fromisoformat(b))
                              for a, b in windows),
-        duration_days=4, hofj_updated_at="2026-09-25T10:44:12.537Z", raw={},
+        duration_days=4, hofj_updated_at=updated_at, raw={},
         fetched_at=NOW, bookable=bookable, bookable_checked_at=None, archived=archived,
-        provider_id="t%s" % pid)
+        provider_id="t%s" % pid, brand=brand)
 
 
 def count_products(obj):

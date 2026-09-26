@@ -17,10 +17,13 @@ class ReplayHofJTest(unittest.TestCase):
     def setUp(self):
         self.hofj = ReplayHofJ(rng=random.Random(42))
 
-    def test_load_catalog_reads_the_fixture(self):
+    def test_load_catalog_reads_every_production_fixture(self):
+        """110 padel (77 attivi) di `catalog.json` + 80 tennis (49 attivi) di `catalog-tennis.json`."""
         products = self.hofj.load_catalog()
-        self.assertEqual(len(products), 110)
-        self.assertEqual(len([p for p in products if not p.archived]), 77)
+        self.assertEqual(len(products), 190)
+        self.assertEqual(len([p for p in products if not p.archived]), 77 + 49)
+        self.assertEqual({(p.brand, p.sport) for p in products},
+                         {("weebora.com", "padel"), ("terrarossa.com", "tennis")})
 
     def test_create_itinerary_returns_only_the_id(self):
         iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 2, 1, "EUR")
@@ -164,3 +167,37 @@ class FixturePathTest(unittest.TestCase):
         import os
         self.assertTrue(os.path.isabs(FIXTURE_PATH))
         self.assertTrue(FIXTURE_PATH.endswith(os.path.join("fixtures", "catalog.json")))
+
+
+class ReplayCatalogBrandsTest(unittest.TestCase):
+    """Il replay carica tutti i brand dell'host (M10, RF-32)."""
+
+    def write(self, folder, name, brand, sport, pid):
+        import json
+        import os
+        item = {"id": pid, "title": "Viaggio %s" % pid, "slug": "v-%s" % pid, "price": 100,
+                "currency": "EUR", "availabilities": []}
+        path = os.path.join(folder, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"base_url": "https://api.hofj.com", "locale": "it", "brand": brand,
+                       "sport": sport, "products": [item],
+                       "details": {pid: {"catalog": item, "raw": item}}}, fh)
+        return path
+
+    def test_a_list_of_fixtures_loads_every_brand(self):
+        import tempfile
+        folder = tempfile.mkdtemp()
+        paths = [self.write(folder, "catalog.json", "weebora.com", "padel", "1"),
+                 self.write(folder, "catalog-tennis.json", "terrarossa.com", "tennis", "2")]
+        products = ReplayHofJ(paths).load_catalog()
+        self.assertEqual(sorted((p.id, p.brand, p.sport) for p in products),
+                         [("1", "weebora.com", "padel"), ("2", "terrarossa.com", "tennis")])
+
+    def test_default_loads_every_production_fixture(self):
+        import os
+        from vela.adapters.hofj_replay import FIXTURES_DIR, PRODUCTION_URL
+        from vela.domain.catalog import load_fixture, select_fixtures
+        expected = [p.id for path in select_fixtures(FIXTURES_DIR, PRODUCTION_URL)
+                    for p in load_fixture(path)]
+        self.assertEqual(sorted(p.id for p in ReplayHofJ().load_catalog()), sorted(expected))
+        self.assertEqual(FIXTURES_DIR, os.path.dirname(FIXTURE_PATH))

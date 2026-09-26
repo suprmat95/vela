@@ -1,7 +1,8 @@
 {
  "recorded_at": "2026-09-25T12:53:14.614976+00:00",
  "locale": "it",
- "brand": null,
+ "brand": "weebora.com",
+ "sport": "padel",
  "base_url": "https://api.hofj.com",
  "products": [
   {

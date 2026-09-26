@@ -28,15 +28,27 @@ alembic upgrade head                     # migrazioni
 uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
 ```
 
-A ogni avvio l'app riallinea la tabella `products` alla fixture dell'ambiente
-(`fixtures/catalog.json`, 110 prodotti, in replay): se i prodotti attivi sono diversi carica la
-fixture e archivia gli altri, senza cancellarli; se sono gli stessi non tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
+In replay, a ogni avvio l'app riallinea la tabella `products` alle fixture dell'host di
+produzione (`fixtures/catalog*.json`, una per brand, `docs/fixtures.md`): se i prodotti attivi
+sono diversi carica le fixture e archivia gli altri, senza cancellarli; se sono gli stessi non
+tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
 prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
 
 `VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
-`HOFJ_BRAND` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo è la
-fixture `fixtures/catalog*.json` registrata su `HOFJ_BASE_URL` (senza, l'app non parte), e le
-chiamate del carrello usano il suo locale; resta così finché non c'è il sync (M10).
+`HOFJ_BRANDS` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo viene dal
+sync multi-brand (M10): al boot, dopo la quota, parte un thread che sincronizza subito se il
+catalogo è vuoto o più vecchio di 6 ore e poi ogni 6 ore, un'istanza alla volta (advisory lock
+Postgres). Ogni brand di `HOFJ_BRANDS` ha il suo client HofJ; carrello e prenotazione usano il
+brand del prodotto dell'ordine. Il locale delle chiamate è quello delle fixture registrate su
+`HOFJ_BASE_URL` (senza fixture per l'host l'app non parte).
+
+Sync a mano (stampa prima le chiamate previste; `--dry-run` si ferma lì):
+
+```bash
+uv run python -m vela.sync --dry-run      # piano, nessuna chiamata
+uv run python -m vela.sync                # un giro su tutti i brand, nel DB di DATABASE_URL
+uv run python -m vela.sync --record --sport tennis   # rigenera una fixture (docs/fixtures.md)
+```
 
 `GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
 `503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
@@ -91,7 +103,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. |
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
-| `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
+| `HOFJ_BRANDS` | in `live` | Mappa sport → brand HofJ, es. `padel=weebora.com,tennis=terrarossa.com` (M10). Sport `padel` e `tennis`, brand distinti, almeno una voce. La vecchia `HOFJ_BRAND` da sola blocca l'avvio con l'indicazione di migrare. |
 | `STRIPE_SECRET_KEY` | per Stripe reale | Chiave Stripe di test (una `rk_test` fornita da HofJ). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; richiede `VELA_PUBLIC_URL`. Vedi `docs/stripe.md`. |
 | `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe; il pagamento si verifica leggendo la Checkout Session e si chiude con `POST /v1/bookings` di HofJ (M5). |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
@@ -118,7 +130,7 @@ errore esplicito.
 2. Render crea `vela-db` e il servizio `vela`; `DATABASE_URL` è collegata al database.
 3. Inserire nella dashboard le variabili marcate `sync: false`. Il Blueprint fissa
    `VELA_UPSTREAM_MODE=live` (M7, HofJ staging): servono `HOFJ_API_KEY`,
-   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRAND=staging.weebora.com`,
+   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRANDS=padel=staging.weebora.com,tennis=staging.tennis.weebora.com`,
    `STRIPE_SECRET_KEY`, `VELA_PUBLIC_URL` e `VELA_API_TOKEN`, altrimenti l'app non parte. Per tornare
    in replay si cambia il valore nel file.
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
@@ -156,12 +168,13 @@ serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri rice
 
 ```
 vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2); quota, job d'acquisto, prenotazione e verifica del pagamento, processore (M5)
-vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5)
-vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6)
+vela/sync.py    sync multi-brand del catalogo, scheduler e comando `python -m vela.sync` (M10); vela/fixtures.py registra le fixture
+vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5); HofJRouter, CatalogSource (M10)
+vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6); router per brand, catalogo da fixture (M10)
 vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), checkout_pages.py (M6)
 vela/app.py     factory FastAPI
 alembic/        migrazioni
-fixtures/       catalogo registrato per la modalità replay (M1)
+fixtures/       catalogo registrato per replay e test, una fixture per host e brand (M1, M10)
 loadtest/       Locust (M13)
 tests/          python3 -m unittest discover -s tests
 docs/           brief, spec, roadmap, decisioni, piani
