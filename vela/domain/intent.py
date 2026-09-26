@@ -1,9 +1,10 @@
 """Parser deterministico degli intenti, italiano e inglese (RF-02, RF-04), con fallback LLM
 opzionale (RF-03).
 
-Estrae sport, area (dizionario `geo`), periodo, numero di persone, budget e lingua. Se manca
-sia lo sport che il periodo, oppure il numero di persone (e il profilo non lo dà), produce una
-sola domanda per l'agente. `today` è iniettato per rendere i periodi deterministici.
+Estrae sport, area (dizionario `geo`), periodo, numero di persone, budget e lingua. I campi
+strutturati passati dall'agente (RF-52) vincono sul parser, che vince sul fallback (RF-53). Se
+manca lo sport, oppure il numero di persone (e il profilo non lo dà), produce una sola domanda
+per l'agente, prima lo sport (RF-04). `today` è iniettato per rendere i periodi deterministici.
 """
 import calendar
 import logging
@@ -11,21 +12,20 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Tuple
 
 from vela.domain import geo
-from vela.domain.models import Criteria, Period, TravelerProfile
+from vela.domain.models import Criteria, Period, StructuredFields, TravelerProfile
 from vela.ports.llm import IntentExtractor
 
 log = logging.getLogger(__name__)
 
-QUESTION_SPORT_OR_PERIOD = "Che sport ti interessa, padel o tennis, e in che periodo vuoi partire?"
+QUESTION_SPORT = "Padel o tennis?"
 QUESTION_PAX = "In quante persone siete?"
-QUESTION_SPORT_OR_PERIOD_EN = ("Which sport are you interested in, padel or tennis, and when "
-                               "would you like to go?")
+QUESTION_SPORT_EN = "Padel or tennis?"
 QUESTION_PAX_EN = "How many people are travelling?"
-_QUESTIONS = {"it": (QUESTION_SPORT_OR_PERIOD, QUESTION_PAX),
-              "en": (QUESTION_SPORT_OR_PERIOD_EN, QUESTION_PAX_EN)}
+_QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX),
+              "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN)}
 
 MONTHS = {
     "gennaio": 1, "january": 1, "febbraio": 2, "february": 2, "marzo": 3, "march": 3,
@@ -52,7 +52,9 @@ NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 MAX_PAX = 20
+SPORTS = ("padel", "tennis", "any")
 LLM_PERIOD_LABEL = "llm"
+FIELD_PERIOD_LABEL = "agent"
 
 IT_MARKERS = {"un", "una", "di", "del", "della", "per", "siamo", "con", "massimo", "vorrei",
               "voglio", "noi", "persone", "giorni", "il", "la", "viaggio", "vacanza", "due",
@@ -102,6 +104,8 @@ _PER_PERSON = re.compile(r"\b(?:a testa|a persona|per persona|each|per person|pe
 class ParseResult:
     criteria: Criteria
     question: Optional[str] = None
+    discarded: tuple = ()   # (campo, valore grezzo) dei campi strutturati invalidi (RF-53)
+    conflicts: tuple = ()   # (campo, valore del parser, valore del campo) da loggare (RF-53)
 
 
 def _words(text: str) -> list:
@@ -354,40 +358,89 @@ def is_per_person(text: str) -> bool:
     return _PER_PERSON.search(text.lower()) is not None
 
 
-def _llm_overrides(raw: dict, today: date) -> dict:
-    """Campi validi dell'output del fallback; quelli invalidi o nulli non compaiono."""
-    out = {}
-    sport = raw.get("sport")
-    if isinstance(sport, str) and sport.lower() in ("padel", "tennis"):
-        out["sport"] = sport.lower()
-    area = raw.get("area")
-    if isinstance(area, str):
-        found = geo.find_area(area)
-        if found is not None:
-            out["area"] = found
+def _valid_period(start_raw, end_raw, today: date, label: str) -> Optional[Period]:
     try:
-        start = date.fromisoformat(raw.get("period_start"))
-        end = date.fromisoformat(raw.get("period_end"))
+        start, end = date.fromisoformat(start_raw), date.fromisoformat(end_raw)
     except (TypeError, ValueError):
-        start = end = None
-    if start is not None and start <= end and end >= today:
-        out["period"] = Period(start, end, LLM_PERIOD_LABEL)
+        return None
+    return Period(start, end, label) if start <= end and end >= today else None
+
+
+def _valid_budget(raw) -> Optional[Decimal]:
+    if not isinstance(raw, (int, float, str, Decimal)) or isinstance(raw, bool):
+        return None
+    try:
+        value = Decimal(str(raw))
+    except ArithmeticError:
+        return None
+    return value.quantize(Decimal("0.01")) if value.is_finite() and value > 0 else None
+
+
+def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> Tuple[dict, tuple]:
+    """RF-53: criteri validi tra quelli dati (campi dell'agente o output del fallback) e coppie
+    (campo, valore) di quelli scartati. Un campo assente o nullo non è né valido né scartato."""
+    valid, discarded = {}, []
+    sport = raw.get("sport")
+    if sport is not None:
+        if isinstance(sport, str) and sport.strip().lower() in SPORTS:
+            valid["sport"] = sport.strip().lower()
+        else:
+            discarded.append(("sport", sport))
+    area = raw.get("area")
+    if area is not None:
+        found = geo.find_area(area) if isinstance(area, str) else None
+        if found is not None:
+            valid["area"] = found
+        else:
+            discarded.append(("area", area))
+    start, end = raw.get("period_start"), raw.get("period_end")
+    if start is not None or end is not None:
+        period = _valid_period(start, end, today, label)
+        if period is not None:
+            valid["period"] = period
+        else:
+            discarded.append(("period", (start, end)))
     pax = raw.get("pax")
-    if isinstance(pax, int) and not isinstance(pax, bool) and 1 <= pax <= MAX_PAX:
-        out["pax"] = pax
+    if pax is not None:
+        if isinstance(pax, int) and not isinstance(pax, bool) and 1 <= pax <= MAX_PAX:
+            valid["pax"] = pax
+        else:
+            discarded.append(("pax", pax))
     budget = raw.get("budget")
-    if isinstance(budget, (int, float, str)) and not isinstance(budget, bool):
-        try:
-            value = Decimal(str(budget))
-        except ArithmeticError:
-            value = None
-        if value is not None and value.is_finite() and value > 0:
-            out["budget"] = value.quantize(Decimal("0.01"))
-    return out
+    if budget is not None:
+        value = _valid_budget(budget)
+        if value is not None:
+            valid["budget"] = value
+        else:
+            discarded.append(("budget", budget))
+    return valid, tuple(discarded)
+
+
+def _plain(value):
+    """Valore leggibile nei log dei conflitti."""
+    if isinstance(value, Period):
+        return "%s..%s" % (value.start.isoformat(), value.end.isoformat())
+    if hasattr(value, "name") and hasattr(value, "country_code"):
+        return value.name
+    return value
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, Period) and isinstance(b, Period):
+        return (a.start, a.end) == (b.start, b.end)
+    return a == b
+
+
+def conflicts_between(before: Criteria, given: dict) -> tuple:
+    """(campo, valore precedente, valore del campo) dove un campo valido cambia un valore già letto."""
+    return tuple((name, _plain(getattr(before, name)), _plain(value))
+                 for name, value in given.items()
+                 if getattr(before, name) is not None and not _same(getattr(before, name), value))
 
 
 def _with_fallback(criteria: Criteria, text: str, today: date,
                    extractor: IntentExtractor) -> Criteria:
+    """RF-03, RF-53: il fallback riempie solo i criteri che campi e parser hanno lasciato vuoti."""
     try:
         raw = extractor.extract(text, today)
     except Exception as exc:   # il fallback non deve mai rompere create_intent
@@ -395,19 +448,23 @@ def _with_fallback(criteria: Criteria, text: str, today: date,
         return criteria
     if not isinstance(raw, dict):
         return criteria
-    return replace(criteria, **_llm_overrides(raw, today))
+    valid, _ = validate_fields(raw, today, LLM_PERIOD_LABEL)
+    return replace(criteria, **{k: v for k, v in valid.items() if getattr(criteria, k) is None})
 
 
 def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
                  today: Optional[date] = None,
-                 extractor: Optional[IntentExtractor] = None) -> ParseResult:
+                 extractor: Optional[IntentExtractor] = None,
+                 fields: Optional[StructuredFields] = None) -> ParseResult:
     today = today or date.today()
     profile = profile or TravelerProfile()
-    pax = parse_pax(text) or profile.pax
+    given, discarded = validate_fields(fields.as_dict(), today) if fields else ({}, ())
+    pax = parse_pax(text)
     budget = parse_budget(text)
-    if budget is not None and pax and is_per_person(text):
-        budget = budget * pax
-    criteria = Criteria(
+    group = given.get("pax") or pax or profile.pax
+    if budget is not None and group and is_per_person(text):
+        budget = budget * group
+    parsed = Criteria(
         sport=parse_sport(text),
         area=geo.find_area(text),
         period=parse_period(text, today),
@@ -415,12 +472,15 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         budget=budget,
         language=detect_language(text),
     )
-    if criteria.sport is None and criteria.period is None and extractor is not None:
+    criteria = replace(parsed, **given)
+    if criteria.sport is None and extractor is not None:
         criteria = _with_fallback(criteria, text, today, extractor)
-    ask_sport_or_period, ask_pax = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
+    if criteria.pax is None and profile.pax:
+        criteria = replace(criteria, pax=profile.pax)
+    ask_sport, ask_pax = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
     question = None
-    if criteria.sport is None and criteria.period is None:
-        question = ask_sport_or_period
+    if criteria.sport is None:
+        question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
-    return ParseResult(criteria, question)
+    return ParseResult(criteria, question, discarded, conflicts_between(parsed, given))

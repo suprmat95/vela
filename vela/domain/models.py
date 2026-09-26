@@ -43,6 +43,23 @@ class Criteria:
     language: str = "it"
 
 
+@dataclass(frozen=True)
+class StructuredFields:
+    """RF-52: criteri già capiti dall'agente, grezzi come arrivano dalla superficie. La
+    validazione (RF-53) è in `intent.validate_fields`; `direction` vale solo sul rifiuto."""
+    sport: Optional[str] = None
+    area: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    pax: Optional[int] = None
+    budget: Optional[object] = None
+    direction: Optional[str] = None
+
+    def as_dict(self) -> dict:
+        return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
+                "period_end": self.period_end, "pax": self.pax, "budget": self.budget}
+
+
 def criteria_to_dict(c: Criteria) -> dict:
     return {
         "sport": c.sport,
