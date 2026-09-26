@@ -19,12 +19,12 @@ locale con Docker: **mai contro HofJ vero, mai contro Render, mai Stripe**. Cont
 
 ```sh
 docker compose up -d --build
-docker compose run --rm locust --travelers 1000 --label 1k
+docker compose run --rm locust --travelers 1000 --label 1k --duration 10
 docker compose down -v        # ogni giro parte da DB, coda e quota pulite
 ```
 
 `run.py` aspetta che `/health` di Vela abbia tutto il catalogo (126 prodotti, caricati al boot),
-lancia Locust per 10 minuti di arrivi + 5 di coda, poi scrive in
+lancia Locust per `--duration` minuti (default 10: 2/3 di arrivi, 1/3 di coda), poi scrive in
 `loadtest/out/<label>/` (ignorata da git):
 
 - `report.md`, `report.json`: le misure del giro;
@@ -33,8 +33,9 @@ lancia Locust per 10 minuti di arrivi + 5 di coda, poi scrive in
   pagamento, conferma, esito);
 - `locust_stats.csv` e compagni: p50/p95/p99 dei casi d'uso.
 
-Opzioni di `run.py`: `--travelers`, `--label`, `--arrival-minutes` (10), `--tail-minutes` (5),
-`--seed` (13). Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
+Opzioni di `run.py`: `--travelers`, `--label`, `--duration` (minuti dell'intero giro, default 10),
+`--arrival-minutes` e `--tail-minutes` per dividerlo a mano (la somma non supera `--duration`),
+`--seed` (13). Anna arriva al 60% della finestra degli arrivi, Marco a 55 s. Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
 
 ## Scenario (modello aperto)
 

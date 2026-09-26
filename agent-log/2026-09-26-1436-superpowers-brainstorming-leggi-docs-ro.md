@@ -495,3 +495,29 @@ Il giro da 1k in 10 minuti gira da ~5 minuti.
 - 🔧 Bash: Place Anna at 60% of arrival window and test
 
 - 🔧 Bash: Record reduced-runs decision and commit
+
+- 🔧 Bash: Run the four reduced load test runs
+
+- 🔧 Bash: Add projection model with tests
+
+## Utente 15:55
+
+[Request interrupted by user for tool use]
+
+aspetta voglio che il load test sia configurabile, tipo massimo 10 minuti
+
+## Agente 15:56
+
+- 🔧 AskUserQuestion
+
+- 🔧 TaskStop
+
+- 🔧 Bash: Stop running load tests and the stack
+
+Giri fermati, stack spento. Aggiungo `--duration` a `run.py`, test prima.
+
+- 🔧 Bash: Write failing tests for duration resolution
+
+- 🔧 Bash: Implement --duration in run.py and test
+
+- 🔧 Bash: Update docs, commit duration option, adjust run script

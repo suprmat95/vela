@@ -4,7 +4,10 @@
 2. lancia Locust headless (`loadtest/locustfile.py`) contro Vela;
 3. copia il registro del finto e le sue statistiche nella cartella del giro e scrive il report.
 
-  docker compose run --rm locust --travelers 10000 --label 10k
+  docker compose run --rm locust --travelers 10000 --label 10k --duration 10
+
+`--duration` (minuti, default 10) è la durata dell'intero giro: 2/3 di arrivi e 1/3 di coda, oppure
+la divisione data con `--arrival-minutes`/`--tail-minutes`, che insieme non la superano.
 
 Solo reti del compose (`vela`, `fake-hofj`): nessuna chiamata a HofJ né a Stripe.
 """
@@ -15,7 +18,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 import httpx
 
@@ -62,11 +65,32 @@ def wait_for_catalog(get: Callable[[str], dict], expected: int, timeout: float =
         sleep(10)
 
 
+def durations(duration: float, arrival: Optional[float],
+              tail: Optional[float]) -> Tuple[float, float]:
+    """(minuti di arrivi, minuti di coda) dentro `duration`. Senza indicazioni 2/3 e 1/3; con una
+    sola parte l'altra riempie il giro; con entrambe la somma non supera `duration`."""
+    if duration <= 0:
+        raise ValueError("--duration deve essere positiva")
+    if arrival is None and tail is None:
+        arrival, tail = duration * 2 / 3, duration / 3
+    elif tail is None:
+        tail = duration - arrival
+    elif arrival is None:
+        arrival = duration - tail
+    if arrival <= 0 or tail < 0:
+        raise ValueError("arrivi %g e coda %g minuti non validi per un giro di %g"
+                         % (arrival, tail, duration))
+    if arrival + tail > duration + 1e-9:
+        raise ValueError("arrivi %g + coda %g minuti superano --duration %g"
+                         % (arrival, tail, duration))
+    return arrival, tail
+
+
 def locust_command(args, run_dir: str) -> List[str]:
     minutes = args.arrival_minutes + args.tail_minutes
     return ["locust", "-f", os.path.join(ROOT, "loadtest", "locustfile.py"), "--headless",
             "-u", "1", "-r", "1", "--host", args.vela, "--only-summary",
-            "--run-time", "%ds" % int(minutes * 60 + 120), "--stop-timeout", "30",
+            "--run-time", "%ds" % int(minutes * 60 + 60), "--stop-timeout", "30",
             "--csv", os.path.join(run_dir, "locust"),
             "--travelers", str(args.travelers), "--arrival-minutes", str(args.arrival_minutes),
             "--tail-minutes", str(args.tail_minutes), "--scenario-seed", str(args.seed),
@@ -77,8 +101,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--travelers", type=int, default=1000)
     ap.add_argument("--label", help="nome del giro e della sua cartella (default: <N>)")
-    ap.add_argument("--arrival-minutes", type=float, default=10.0)
-    ap.add_argument("--tail-minutes", type=float, default=5.0)
+    ap.add_argument("--duration", type=float, default=10.0,
+                    help="minuti dell'intero giro, arrivi + coda (default 10)")
+    ap.add_argument("--arrival-minutes", type=float, help="default: 2/3 di --duration")
+    ap.add_argument("--tail-minutes", type=float, help="default: il resto di --duration")
     ap.add_argument("--seed", type=int, default=13)
     ap.add_argument("--vela", default=os.environ.get("VELA_URL", "http://vela:8000"))
     ap.add_argument("--fake", default=os.environ.get("FAKE_HOFJ_URL", "http://fake-hofj:8001"))
@@ -87,6 +113,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--brands", default=DEFAULT_BRANDS)
     ap.add_argument("--out", default=os.path.join(ROOT, "loadtest", "out"))
     args = ap.parse_args(argv)
+    try:
+        args.arrival_minutes, args.tail_minutes = durations(args.duration, args.arrival_minutes,
+                                                            args.tail_minutes)
+    except ValueError as exc:
+        ap.error(str(exc))
     label = args.label or str(args.travelers)
     run_dir = os.path.join(args.out, label)
     os.makedirs(run_dir, exist_ok=True)

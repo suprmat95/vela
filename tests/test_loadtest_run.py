@@ -2,7 +2,7 @@
 import argparse
 import unittest
 
-from loadtest.run import expected_products, locust_command, wait_for_catalog
+from loadtest.run import durations, expected_products, locust_command, wait_for_catalog
 
 
 class RunTest(unittest.TestCase):
@@ -36,10 +36,30 @@ class RunTest(unittest.TestCase):
         args = argparse.Namespace(arrival_minutes=10.0, tail_minutes=5.0, vela="http://vela:8000",
                                   travelers=50000, seed=13)
         cmd = locust_command(args, "/out/50k")
-        self.assertEqual(cmd[cmd.index("--run-time") + 1], "1020s")
+        self.assertEqual(cmd[cmd.index("--run-time") + 1], "960s")   # giro + 60 s per chiudere
         self.assertEqual(cmd[cmd.index("--travelers") + 1], "50000")
         self.assertIn("--headless", cmd)
         self.assertEqual(cmd[cmd.index("--events-out") + 1], "/out/50k/travelers.jsonl")
+
+
+
+class DurationTest(unittest.TestCase):
+    def test_default_is_ten_minutes_two_thirds_arrivals(self):
+        self.assertEqual(durations(10, None, None), (20 / 3, 10 / 3))
+
+    def test_one_part_given_the_other_fills_the_duration(self):
+        self.assertEqual(durations(10, 7, None), (7, 3))
+        self.assertEqual(durations(8, None, 3), (5, 3))
+
+    def test_both_parts_must_fit_the_duration(self):
+        self.assertEqual(durations(10, 5, 3), (5, 3))
+        with self.assertRaises(ValueError):
+            durations(10, 8, 3)
+
+    def test_invalid_values(self):
+        for args in ((0, None, None), (10, 0, None), (10, None, 10), (10, None, -1)):
+            with self.subTest(args), self.assertRaises(ValueError):
+                durations(*args)
 
 
 if __name__ == "__main__":
