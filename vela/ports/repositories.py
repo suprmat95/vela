@@ -1,6 +1,6 @@
 """Repository del dominio (RNF-01): intenti, proposte, ordini, rifiuti e catalogo stanno fuori dal processo."""
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Protocol, Set, Tuple
+from typing import Dict, Iterable, List, NamedTuple, Optional, Protocol, Set
 
 from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
                                 Rejection)
@@ -12,6 +12,13 @@ class DuplicateOrder(Exception):
     """Esiste già un ordine per la proposta (RNF-03)."""
 
 
+class SyncState(NamedTuple):
+    """Quanto serve al sync (M10) per decidere se scaricare il dettaglio di un prodotto."""
+    brand: Optional[str]
+    updated_at: Optional[str]
+    archived: bool
+
+
 class ProductRepository(Protocol):
     def upsert_many(self, products: Iterable[Product]) -> None: ...
     def count(self) -> int: ...
@@ -20,8 +27,8 @@ class ProductRepository(Protocol):
     def last_fetched_at(self) -> Optional[datetime]: ...
     def set_bookable(self, product_id: str, bookable: bool, checked_at: datetime) -> None: ...
     def archive_missing(self, keep_ids: Iterable[str], brand: Optional[str] = None) -> int: ...
-    def sync_state(self, ids: Iterable[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]: ...
-    def set_brand(self, ids: Iterable[str], brand: str, sport: str) -> None: ...
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, SyncState]: ...
+    def mark_seen(self, ids: Iterable[str], brand: str, sport: str, seen_at: datetime) -> None: ...
 
 
 class IntentRepository(Protocol):

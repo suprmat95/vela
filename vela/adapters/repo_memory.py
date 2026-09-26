@@ -2,7 +2,7 @@
 import threading
 from dataclasses import replace
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
                                 Product, Proposal, QuotaClass, Rejection)
@@ -10,7 +10,7 @@ from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, f
                                rolled, try_acquire)
 from vela.ports.hofj import QuotaSnapshot
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 
 class MemoryProducts:
@@ -46,15 +46,15 @@ class MemoryProducts:
             self._items[p.id] = replace(p, archived=True)
         return len(gone)
 
-    def sync_state(self, ids: Iterable[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, SyncState]:
         found = (self._items.get(i) for i in ids)
-        return {p.id: (p.brand, p.hofj_updated_at) for p in found if p is not None}
+        return {p.id: SyncState(p.brand, p.hofj_updated_at, p.archived) for p in found if p is not None}
 
-    def set_brand(self, ids: Iterable[str], brand: str, sport: str) -> None:
+    def mark_seen(self, ids: Iterable[str], brand: str, sport: str, seen_at: datetime) -> None:
         for i in ids:
             p = self._items.get(i)
             if p is not None:
-                self._items[i] = replace(p, brand=brand, sport=sport)
+                self._items[i] = replace(p, brand=brand, sport=sport, fetched_at=seen_at)
 
 
 class MemoryIntents:

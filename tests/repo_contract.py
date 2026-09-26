@@ -7,7 +7,7 @@ from support import NOW, make_product
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
                                 OrderStatus, Participant, Period, Proposal, Rejection,
                                 TravelerProfile)
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
                     pax=2, budget=Decimal("800"))
@@ -95,19 +95,21 @@ class RepositoryContract:
 
     def test_products_sync_state(self):
         self.repos.products.upsert_many([make_product(1, brand="a.com", updated_at="u1"),
-                                         make_product(2, updated_at="u2")])
+                                         make_product(2, updated_at="u2", archived=True)])
         self.assertEqual(self.repos.products.sync_state(["1", "2", "9"]),
-                         {"1": ("a.com", "u1"), "2": (None, "u2")})
+                         {"1": SyncState("a.com", "u1", False), "2": SyncState(None, "u2", True)})
         self.assertEqual(self.repos.products.sync_state([]), {})
 
-    def test_products_set_brand(self):
+    def test_products_mark_seen_sets_brand_sport_and_fetched_at(self):
+        later = NOW + timedelta(hours=6)
         self.repos.products.upsert_many([make_product(1), make_product(2), make_product(3)])
-        self.repos.products.set_brand(["1", "2"], "t.com", "tennis")
-        got = {p.id: (p.brand, p.sport) for p in self.repos.products.list_all()}
-        self.assertEqual(got, {"1": ("t.com", "tennis"), "2": ("t.com", "tennis"),
-                               "3": (None, "padel")})
+        self.repos.products.mark_seen(["1", "2"], "t.com", "tennis", later)
+        got = {p.id: (p.brand, p.sport, p.fetched_at) for p in self.repos.products.list_all()}
+        self.assertEqual(got, {"1": ("t.com", "tennis", later), "2": ("t.com", "tennis", later),
+                               "3": (None, "padel", NOW)})
         self.assertEqual(self.repos.products.get("1").price, Decimal("500"))
-        self.repos.products.set_brand([], "t.com", "tennis")
+        self.assertEqual(self.repos.products.last_fetched_at(), later)
+        self.repos.products.mark_seen([], "t.com", "tennis", later)
 
     # intenti
     def test_intents_round_trip(self):

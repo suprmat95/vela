@@ -1,6 +1,6 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
 from datetime import date, datetime, timedelta
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set
 
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -16,7 +16,7 @@ from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, f
                                rolled, try_acquire)
 from vela.ports.hofj import QuotaSnapshot
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
-from vela.ports.repositories import DuplicateOrder
+from vela.ports.repositories import DuplicateOrder, SyncState
 
 
 def _product_row(p: Product) -> dict:
@@ -102,22 +102,23 @@ class PostgresProducts:
             return conn.execute(stmt.values(archived=True)).rowcount
 
 
-    def sync_state(self, ids: Iterable[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, SyncState]:
         wanted = list(ids)
         if not wanted:
             return {}
-        stmt = (select(products_t.c.id, products_t.c.brand, products_t.c.hofj_updated_at)
+        stmt = (select(products_t.c.id, products_t.c.brand, products_t.c.hofj_updated_at,
+                       products_t.c.archived)
                 .where(products_t.c.id.in_(wanted)))
         with self.engine.connect() as conn:
-            return {r.id: (r.brand, r.hofj_updated_at) for r in conn.execute(stmt)}
+            return {r.id: SyncState(r.brand, r.hofj_updated_at, r.archived) for r in conn.execute(stmt)}
 
-    def set_brand(self, ids: Iterable[str], brand: str, sport: str) -> None:
+    def mark_seen(self, ids: Iterable[str], brand: str, sport: str, seen_at: datetime) -> None:
         wanted = list(ids)
         if not wanted:
             return
         with self.engine.begin() as conn:
             conn.execute(update(products_t).where(products_t.c.id.in_(wanted))
-                         .values(brand=brand, sport=sport))
+                         .values(brand=brand, sport=sport, fetched_at=seen_at))
 
 
 class PostgresIntents:
