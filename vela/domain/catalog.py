@@ -9,7 +9,7 @@ import json
 import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
 from vela.domain.models import Availability, Product
 

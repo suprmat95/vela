@@ -26,7 +26,8 @@ class ScenarioTest(unittest.TestCase):
 
     def test_funnel_fractions(self):
         crowd = [t for t in travelers(20_000, seed=2) if t.role is None]
-        share = lambda flag: sum(1 for t in crowd if getattr(t, flag)) / len(crowd)
+        def share(flag):
+            return sum(1 for t in crowd if getattr(t, flag)) / len(crowd)
         self.assertAlmostEqual(share("rejects"), 0.30, delta=0.02)
         self.assertAlmostEqual(share("accepts"), 0.20, delta=0.02)
         self.assertAlmostEqual(share("pays"), 0.60, delta=0.02)
@@ -44,7 +45,8 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual([t.role for t in travelers(10, minutes=0.5) if t.role], ["anna"])
 
     def test_anna_arrives_at_sixty_percent_of_the_window(self):
-        anna = lambda m: next(t for t in travelers(10, minutes=m) if t.role == "anna").arrival
+        def anna(m):
+            return next(t for t in travelers(10, minutes=m) if t.role == "anna").arrival
         self.assertEqual((anna(10), anna(5)), (360.0, 180.0))
 
 

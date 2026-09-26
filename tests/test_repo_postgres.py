@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from repo_contract import RepositoryContract, intent, order, proposal
+from repo_contract import RepositoryContract, order, proposal
 from support import make_product
 
 INI = os.path.join(os.path.dirname(__file__), "..", "alembic.ini")

@@ -41,7 +41,8 @@ def project(travelers: int, rate: float, minutes: float = 10.0, accept: float = 
         raise ValueError("ritmo misurato non positivo")
     lam = accept * travelers / minutes
     excess = max(lam - rate, 0.0)
-    wait = lambda t: round(excess * t / rate, 1)
+    def wait(t):
+        return round(excess * t / rate, 1)
     queue = excess * minutes
     rest = travelers / minutes / 60 * REQUESTS_PER_ARRIVAL + queue / poll_seconds
     return Projection(travelers, minutes, round(lam, 1), rate, lam > rate, round(queue),

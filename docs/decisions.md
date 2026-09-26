@@ -780,3 +780,14 @@ scelte sono state prese con l'utente prima di scrivere codice.
 | Coda in `/health` | `queue.oldest_purchase_age_seconds`: età del più vecchio acquisto `pending` o `running` | Dice quanto aspetta chi è in fondo alla coda |
 | Test aggiornati | Contratto della quota riscritto (`tests/quota_contract.py`), con finestra scorrevole, ancorata e a griglia simulate; `test_quota_rules`, `test_job_processor`, `LaunchBurstTest` (attesa 750 s / 13 minuti, attesa reale ≤ dichiarata e ≥ 75%), `test_usecases` (8 s), `test_health`, `test_config`, `test_hofj_http`, `test_migrations` (head 0007), `test_payment_check`, `test_fixtures_record`, `test_purchase_job` (orfani). In alcuni test l'orologio avanza qualche secondo tra un acquisto e l'altro | Fissavano la finestra a griglia e i numeri 87/108/17,4 |
 | Suite finale | 946 test, 56 saltati senza `DATABASE_URL`; verde anche su un Postgres locale usa e getta. Nessuna chiamata esterna | — |
+
+## 2026-09-26 — Lint con ruff
+
+Origine: riscrittura di `CLAUDE.md`, che deve dire come si fa il lint. Il repository non aveva un
+linter. Scelte prese con l'utente.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Linter | `ruff` nel gruppo `dev` di `pyproject.toml` (0.16.9 in `uv.lock`). Comando: `uv run ruff check .` | Un solo strumento veloce, nessuna config esterna. Resta fuori dall'immagine Docker (`uv sync --no-dev`) |
+| Regole | Fissate a mano in `[tool.ruff.lint]`: `E4`, `E7`, `E9`, `F` (il vecchio default di ruff). Niente E501 (lunghezza righe), niente formatter | Il default di ruff cambia tra le versioni: la 0.16 aggiunge UP, B, RUF e altre, e toccava 118 file. Con E501 a 88 caratteri le violazioni erano 2205, perché il codice usa righe più lunghe: sarebbe stato riformattare il repository |
+| Violazioni esistenti | 36 corrette in un commit: import inutilizzati, import spostati in cima (`tests/support.py`, `tests/test_usecases.py`), lambda assegnate diventate `def`, `l` → `line`, un'istruzione per riga in `scripts/quota_probe.py` | Nessun cambio di comportamento. Suite: 1045 test, 56 saltati senza `DATABASE_URL` |
