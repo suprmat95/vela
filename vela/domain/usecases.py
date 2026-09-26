@@ -3,6 +3,7 @@
 Dipende solo dalle porte: repository, HofJ e pagamenti sono iniettati. `now` e `new_id` sono
 iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodotto (RF-10).
 """
+import logging
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -15,16 +16,19 @@ from vela.domain.intent import parse_intent
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
-                                ProposalMade, Rejection, TravelerDefaults, TravelerProfile)
+                                ProposalMade, Rejection, StructuredFields, TravelerDefaults,
+                                TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
 from vela.domain.quota import estimated_wait_seconds, purchases_per_window, wait_minutes
-from vela.domain.refine import is_price_reason, refine
+from vela.domain.refine import Refinement, is_price_reason, refine
 from vela.ports.hofj import HofJPort
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
 from vela.ports.repositories import DuplicateOrder, Repositories
 
 __all__ = ["Vela", "NotFound", "utcnow", "random_id", "summary_of"]
+
+log = logging.getLogger(__name__)
 
 
 def utcnow() -> datetime:
@@ -55,15 +59,23 @@ class Vela:
 
     # --- RF-01..05 -----------------------------------------------------------
 
-    def create_intent(self, text: str, profile: Optional[TravelerProfile] = None
+    def create_intent(self, text: str, profile: Optional[TravelerProfile] = None,
+                      fields: Optional[StructuredFields] = None
                       ) -> Union[IntentCreated, IntentQuestion]:
+        """RF-01..04, RF-52..54: campi strutturati > parser > fallback; i campi invalidi sono
+        scartati e detti nel `say`, i conflitti con il testo vanno nei log."""
         profile = profile or TravelerProfile()
-        result = parse_intent(text, profile, today=self.now().date(), extractor=self.extractor)
+        result = parse_intent(text, profile, today=self.now().date(), extractor=self.extractor,
+                              fields=fields)
+        lang = result.criteria.language
         if result.question:
-            return IntentQuestion(result.question, result.question)
+            return IntentQuestion(result.question, say.prefixed(
+                say.say_discarded(result.discarded, lang), result.question))
         intent = Intent(self.new_id(), text, result.criteria, profile, self.now())
         self.repos.intents.add(intent)
-        return IntentCreated(intent.id, intent.criteria, say.say_intent_created(intent.criteria))
+        _log_conflicts(intent.id, result.conflicts)
+        return IntentCreated(intent.id, intent.criteria,
+                             say.say_intent_created(intent.criteria, result.discarded))
 
     # --- RF-06..11 -----------------------------------------------------------
 
@@ -73,7 +85,11 @@ class Vela:
             raise NotFound("intent", intent_id)
         return self._propose(intent)
 
-    def reject_proposal(self, proposal_id: str, reason: str) -> Union[ProposalMade, NoMatch]:
+    def reject_proposal(self, proposal_id: str, reason: str,
+                        fields: Optional[StructuredFields] = None) -> Union[ProposalMade, NoMatch]:
+        """RF-08, RF-53..55. Un secondo rifiuto della stessa proposta (dopo un "niente di
+        compatibile") aggiorna i criteri senza registrare un nuovo rifiuto: il repository ignora
+        il duplicato (`uq_rejections_proposal_id`)."""
         proposal = self.repos.proposals.get(proposal_id)
         if proposal is None:
             raise NotFound("proposal", proposal_id)
@@ -81,10 +97,20 @@ class Vela:
         cancelled = self._cancel_unpaid_order(proposal.id)
         self.repos.rejections.add(Rejection(intent.id, proposal.id, proposal.product_id,
                                             reason or "", self.now()))
-        result = self._propose(self._refined(intent, proposal, reason or ""))
+        intent, refinement = self._refined(intent, proposal, reason or "", fields)
+        _log_conflicts(intent.id, refinement.conflicts)
+        result = self._propose(intent)
+        if isinstance(result, NoMatch):
+            result = replace(result, rejected_proposal_id=proposal.id)
+        lang = intent.criteria.language
+        lead = [say.say_discarded(refinement.discarded, lang)]
+        if (reason or "").strip() and not refinement.understood:
+            lead.append(say.say_untranslatable(lang))
+        lead.append(say.say_understood(intent.criteria))
+        sentence = say.prefixed(" ".join(p for p in lead if p), result.say)
         if cancelled:   # RF-49
-            return replace(result, say=say.say_cancelled_then(result.say, intent.criteria.language))
-        return result
+            sentence = say.say_cancelled_then(sentence, lang)
+        return replace(result, say=sentence)
 
     def _cancel_unpaid_order(self, proposal_id: str) -> bool:
         """RF-49: un ordine in coda, in lavorazione o da pagare diventa `cancelled`; il job si
@@ -95,15 +121,17 @@ class Vela:
         self.repos.orders.save(replace(order, status=OrderStatus.CANCELLED, updated_at=self.now()))
         return True
 
-    def _refined(self, intent: Intent, proposal: Proposal, reason: str) -> Intent:
-        """RF-08: il motivo aggiorna i criteri dell'intento, persistiti prima della nuova scelta."""
+    def _refined(self, intent: Intent, proposal: Proposal, reason: str,
+                 fields: Optional[StructuredFields]) -> Tuple[Intent, Refinement]:
+        """RF-08: motivo e campi aggiornano i criteri dell'intento, persistiti prima della nuova
+        scelta."""
         product = self.repos.products.get(proposal.product_id)
         area = geo.area_of_destination(product.destination, product.country) if product else None
-        criteria = refine(intent.criteria, reason, proposal, area, self.now().date()).criteria
-        if criteria == intent.criteria:
-            return intent
-        self.repos.intents.update_criteria(intent.id, criteria)
-        return replace(intent, criteria=criteria)
+        refinement = refine(intent.criteria, reason, proposal, area, self.now().date(), fields)
+        if refinement.criteria == intent.criteria:
+            return intent, refinement
+        self.repos.intents.update_criteria(intent.id, refinement.criteria)
+        return replace(intent, criteria=refinement.criteria), refinement
 
     def _propose(self, intent: Intent) -> Union[ProposalMade, NoMatch]:
         lang = intent.criteria.language
@@ -223,3 +251,10 @@ class Vela:
         now = self.now()
         if job is not None and job.status == JobStatus.PENDING and job.run_after > now:
             self.repos.jobs.save(replace(job, run_after=now))
+
+
+def _log_conflicts(intent_id: str, conflicts: tuple) -> None:
+    """RF-53, RNF-06: campo e testo in contrasto; vince il campo. Mai il testo dell'intento."""
+    for name, from_text, from_field in conflicts:
+        log.info("conflitto testo/campo intent=%s campo=%s testo=%r campo_strutturato=%r",
+                 intent_id, name, from_text, from_field)

@@ -93,10 +93,10 @@ def say_understood(c: Criteria) -> str:
 def say_intent_created(c: Criteria, discarded: tuple = ()) -> str:
     looking = ("I'm looking for the right proposal." if c.language == "en"
                else "Cerco la proposta giusta.")
-    return _prefixed(say_discarded(discarded, c.language), "%s %s" % (say_understood(c), looking))
+    return prefixed(say_discarded(discarded, c.language), "%s %s" % (say_understood(c), looking))
 
 
-def _prefixed(prefix: str, sentence: str) -> str:
+def prefixed(prefix: str, sentence: str) -> str:
     return "%s %s" % (prefix, sentence) if prefix else sentence
 
 

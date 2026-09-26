@@ -359,10 +359,14 @@ class NoMatch:
     intent_id: str
     failed_criterion: str
     say: str
+    rejected_proposal_id: Optional[str] = None   # RF-55: solo se arriva da un rifiuto
 
     def to_dict(self) -> dict:
-        return {"intent_id": self.intent_id, "failed_criterion": self.failed_criterion,
-                "say": self.say}
+        d = {"intent_id": self.intent_id, "failed_criterion": self.failed_criterion,
+             "say": self.say}
+        if self.rejected_proposal_id is not None:
+            d["rejected_proposal_id"] = self.rejected_proposal_id
+        return d
 
 
 @dataclass(frozen=True)
