@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from loadtest.fake_hofj.log import max_in_window
-from loadtest.report import (booking_measures, build, main, markdown, percentile, quota_measures,
+from loadtest.report import (booking_measures, main, percentile, quota_measures,
                              read_stats, traveler_measures)
 
 S = 1_000_000.0

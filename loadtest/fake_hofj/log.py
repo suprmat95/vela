@@ -3,7 +3,7 @@ di `/_fake/stats`. Le verifiche del load test si fanno su questo registro, non s
 import json
 import threading
 from collections import Counter, deque
-from typing import Deque, Dict, List, Optional
+from typing import Dict, List, Optional
 
 WINDOW = 60.0
 

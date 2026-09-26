@@ -1,6 +1,5 @@
 """Contratto: il vero `HofJHttp` contro il finto HofJ (M13a). Se il finto cambiasse forma o
 errori rispetto a quanto l'adapter si aspetta da HofJ, qui si romperebbe."""
-import asyncio
 import socket
 import threading
 import time

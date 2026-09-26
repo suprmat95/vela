@@ -115,7 +115,8 @@ def build_hofj(settings: Settings) -> Upstream:
                                    locale=locales.get(brand, "it"))
                    for brand in brands.values()}
         paths = brand_fixtures(FIXTURES_DIR, brands.values())
-        loader = lambda: [p for path in paths for p in load_fixture(path)]
+        def loader():
+            return [p for path in paths for p in load_fixture(path)]
         return Upstream(BrandRouter(clients, brands), catalog_loader=loader,
                         catalog_source=next(iter(clients.values())), brands=brands)
     if not settings.stripe_secret_key:

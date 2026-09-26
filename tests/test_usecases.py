@@ -2,14 +2,18 @@ import unittest
 from datetime import date, timedelta
 from decimal import Decimal
 
-from support import (NOW, FakeHofJ, FlakyPayments, StubPayments, assert_single_product,
+from support import (NOW, FakeHofJ, StubPayments, assert_single_product,
                      inline_worker, make_product)
+from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
+from vela.adapters.stripe_fake import FakePayments
+from vela.config import DEFAULT_TRAVELER
 from vela.domain.intent import QUESTION_PAX
-from vela.domain.models import (Area, IntentCreated, IntentQuestion, NoMatch, ProposalMade,
-                                TravelerProfile)
+from vela.domain.models import (Area, IntentCreated, IntentQuestion, JobKind, JobStatus,
+                                MissingTravelerData, NoMatch, OrderQueued, OrderStatus,
+                                OrderStatusResponse, Participant, ProposalMade, TravelerProfile)
 from vela.domain.usecases import NotFound, Vela
-from vela.ports.payments import PaymentsError, to_cents
+from vela.ports.payments import to_cents
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 
@@ -258,12 +262,6 @@ class RejectProposalTest(unittest.TestCase):
         vela.reject_proposal(first.proposal.id, "più vicino")
         self.assertEqual(vela.repos.intents.get(iid).criteria, before)
 
-
-from vela.adapters.hofj_replay import ReplayHofJ
-from vela.adapters.stripe_fake import FakePayments
-from vela.config import DEFAULT_TRAVELER
-from vela.domain.models import (JobKind, JobStatus, MissingTravelerData, OrderQueued, OrderStatus,
-                                OrderStatusResponse, Participant)
 
 FULL = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
 

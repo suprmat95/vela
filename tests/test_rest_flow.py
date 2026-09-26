@@ -5,7 +5,6 @@ L'app vera in replay (repository in memoria, worker senza thread) per i flussi c
 """
 import contextlib
 import io
-import json
 import os
 import random
 import sys

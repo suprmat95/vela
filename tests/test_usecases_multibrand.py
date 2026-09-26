@@ -7,7 +7,6 @@ MB7 è di M17 ed è testata lì.
 import os
 import unittest
 from datetime import date
-from decimal import Decimal
 
 from support import NOW, TODAY, FakeHofJ, StubPayments, make_product
 from test_usecases import Clock
