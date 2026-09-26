@@ -3,62 +3,184 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vela: il tuo viaggio di padel o tennis, da una frase</title>
-  <meta name="description" content="Vela prenota un viaggio di padel o tennis con hotel a partire da quello che dici, dentro l'assistente che usi già.">
+  <title>Vela — Viaggi di padel e tennis con hotel</title>
+  <meta name="description" content="Dì cosa vuoi: Vela prenota il tuo viaggio di padel o tennis con hotel. Una sola proposta, a parole tue.">
   <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="hero">
-    <p class="brand">Vela</p>
-    <h1>Dì cosa vuoi: Vela prenota il tuo viaggio di padel o tennis con hotel.</h1>
-    <p class="lead">Niente siti da girare, niente elenchi da confrontare. Lo chiedi a parole tue all'assistente che usi già, e Vela ti propone un solo viaggio.</p>
-    <blockquote class="intent">«Un weekend di padel a ottobre, in due, al caldo, sotto i 600 euro.»</blockquote>
-  </header>
 
-  <main>
-    <section id="come-funziona">
-      <h2>Come funziona</h2>
-      <ol class="steps">
-        <li><strong>Dici cosa vuoi.</strong> Sport, periodo, persone, budget: come ti viene.</li>
-        <li><strong>Vela propone un viaggio.</strong> Uno solo. Se non ti convince, dici cosa cambiare.</li>
-        <li><strong>Accetti e paghi.</strong> Ricevi il link di pagamento e poi il codice di prenotazione.</li>
-      </ol>
-    </section>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">Vela</a>
+    <nav class="nav-links" aria-label="Sezioni">
+      <a href="#come">Come funziona</a>
+      <a href="#esempi">Esempi</a>
+      <a href="#claude">Con Claude</a>
+      <a href="#voce">A voce</a>
+      <a href="#telefono">Al telefono</a>
+      <a href="#codice">GitHub</a>
+    </nav>
+    <a class="nav-cta" href="#claude">Inizia</a>
+  </div>
+</header>
 
-    <section id="claude">
-      <h2>Con Claude</h2>
-      <ol class="steps">
-        <li>Su claude.ai apri <em>Settings → Connectors</em> e scegli <em>Add custom connector</em>.</li>
-        <li>Come nome scrivi <code>Vela</code>, come URL incolla questo indirizzo. Non serve autenticazione.</li>
-      </ol>
-      <div class="copy">
-        <code id="mcp-url">https://vela-n506.onrender.com/mcp</code>
-        <button type="button" id="copy-mcp" hidden>Copia</button>
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <div class="eyebrow">Vela</div>
+      <h1>Dì cosa vuoi.<br>Vela fa il resto.</h1>
+      <p>Il tuo viaggio di padel o tennis, hotel incluso. Niente siti da girare, niente elenchi da confrontare: lo chiedi a parole tue e ricevi una sola proposta.</p>
+      <div class="hero-ctas">
+        <a class="btn" href="#claude">Aggiungi a Claude</a>
+        <a class="more" href="#come">Scopri come funziona ›</a>
       </div>
-      <p>Poi scrivi a Claude, per esempio: <q>Con Vela, trovami un viaggio di tennis a novembre per due persone.</q></p>
-    </section>
+      <div class="hero-chat" aria-label="Esempio di conversazione">
+        <div class="chat">
+          <div class="b out">Un weekend di padel a ottobre, siamo in due, sotto i 600 euro.</div>
+          <div class="b in">Ti propongo Exclusive Padel Experience: Marina di Pietrasanta, dal 1 al 2 ottobre, per 2 persone: 116 euro in totale. Ti va?</div>
+        </div>
+      </div>
+    </div>
+  </section>
 
-    <section id="voce">
-      <h2>A voce</h2>
-      <p>Parla con l'agente vocale di Vela direttamente da questa pagina.</p>
-      <p class="soon" data-soon="voice">In arrivo</p>
-      <div id="voice-widget"></div>
-    </section>
+  <section id="come" class="alt">
+    <div class="wrap">
+      <h2 class="center">Tre passaggi.<br>Un solo viaggio.</h2>
+      <div class="grid g3 steps">
+        <div class="step"><div class="n">1</div><h3>Dici cosa vuoi.</h3><p>Sport, periodo, persone, budget: come ti viene.</p></div>
+        <div class="step"><div class="n">2</div><h3>Vela propone.</h3><p>Un viaggio solo. Se non ti convince, dici cosa cambiare.</p></div>
+        <div class="step"><div class="n">3</div><h3>Accetti e paghi.</h3><p>Ricevi il link di pagamento e poi il codice di prenotazione.</p></div>
+      </div>
+    </div>
+  </section>
 
-    <section id="telefono">
-      <h2>Al telefono</h2>
-      <p>Chiama Vela e racconta il viaggio che hai in mente.</p>
-      <p class="soon" data-soon="phone">In arrivo</p>
-      <a id="phone-link" class="phone" hidden></a>
-    </section>
-  </main>
+  <section id="esempi">
+    <div class="wrap center">
+      <div class="eyebrow">Esempi</div>
+      <h2>Basta una frase.<br>Anche per cambiare idea.</h2>
+      <p class="lead">Conversazioni con Vela sul catalogo di viaggi reale. Una proposta alla volta, finché non è quella giusta.</p>
+      <div class="grid g2 examples">
 
-  <footer>
-    <p>Codice sorgente: <a href="https://github.com/suprmat95/vela">github.com/suprmat95/vela</a></p>
-  </footer>
+        <article class="card example">
+          <div class="tag">Weekend in coppia</div>
+          <h3>Dalla richiesta al pagamento.</h3>
+          <div class="chat">
+            <div class="b out">Un weekend di padel a ottobre, siamo in due, sotto i 600 euro.</div>
+            <div class="b in">Ti propongo Exclusive Padel Experience: Marina di Pietrasanta, dal 1 al 2 ottobre: 116 euro in totale. Ti va?</div>
+            <div class="b out">Perfetto, prenota.</div>
+            <div class="b in">Fatto. Il link di pagamento è qui in chat; poi ricevi il codice di prenotazione.</div>
+          </div>
+        </article>
 
-  <script src="config.js"></script>
-  <script src="main.js"></script>
+        <article class="card example">
+          <div class="tag">Cambio di rotta</div>
+          <h3>Non ti convince? Dillo.</h3>
+          <div class="chat">
+            <div class="b out">Tennis a novembre, per 2 persone.</div>
+            <div class="b in">Ti propongo Tennis Camp Intensità Moderata – Corralejo Tennis Academy a Fuerteventura, dal 16 al 20 novembre: 300 euro a persona. Ti va?</div>
+            <div class="b out">Preferisco in Italia.</div>
+            <div class="b in">Ecco: Piatti Tennis Center a Bordighera, dal 14 al 15 novembre: 720 euro in totale. Ti va?</div>
+          </div>
+        </article>
+
+        <article class="card example">
+          <div class="tag">In gruppo</div>
+          <h3>Persone e budget per quattro.</h3>
+          <div class="chat">
+            <div class="b out">Siamo in 4: padel a novembre, massimo 400 euro a testa.</div>
+            <div class="b in">Ti propongo Exclusive Padel Experience: Marina di Pietrasanta, dal 1 al 2 novembre: 232 euro in totale per 4. Ti va?</div>
+            <div class="b out">Preferisco in Spagna.</div>
+            <div class="b in">Ecco: Weekend all'insegna del padel a Málaga, a Torre del Mar, dal 5 all'8 novembre: 1.116 euro in totale, dentro il budget.</div>
+          </div>
+        </article>
+
+        <article class="card example">
+          <div class="tag">Calendario</div>
+          <h3>Claude trova la data libera.</h3>
+          <div class="chat">
+            <div class="b out">Tennis il mese prossimo, in un weekend in cui sono libero.</div>
+            <div class="tool">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M9 15l2 2 4-4"/></svg>
+              Claude controlla il tuo calendario…
+            </div>
+            <div class="b in">Il primo weekend libero è il 17–18 ottobre. Vela propone Il Tesoro Nascosto del Lago di Como: 170 euro. Ti va?</div>
+            <div class="b out">Perfetto. Mettilo in calendario.</div>
+            <div class="b in">Fatto: Claude l'ha messo nel tuo calendario, e il link di pagamento è qui in chat.</div>
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="claude" class="alt">
+    <div class="wrap claude-grid">
+      <div>
+        <div class="eyebrow">Con Claude</div>
+        <h2>Nell'assistente<br>che usi già.</h2>
+        <ol>
+          <li>Su claude.ai apri <strong>Settings › Connectors</strong> e scegli <strong>Add custom connector</strong>.</li>
+          <li>Come nome scrivi <strong>Pacchetti Viaggio di Padel Tennis</strong> e incolla l'indirizzo qui accanto. Non serve autenticazione.</li>
+        </ol>
+      </div>
+      <div class="connector">
+        <label for="mcp-url">Indirizzo del connettore</label>
+        <div class="url-row">
+          <input id="mcp-url" readonly value="https://vela-n506.onrender.com/mcp">
+          <button type="button" class="btn" id="copy-mcp" hidden>Copia</button>
+        </div>
+        <div class="sep">
+          <div class="small">Poi scrivi o parla con Claude</div>
+          <div class="b in">Vorrei fare un viaggio di Tennis in Spagna, dal 10 al 17 Ottobre, per 2 persone, massimo 800 Euro!</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="voce">
+    <div class="wrap">
+      <h2 class="center">Anche a voce.</h2>
+      <div class="grid g2 channels">
+        <div class="channel dark">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+          <h3>A voce</h3>
+          <p>Parla con l'agente vocale di Vela direttamente da questa pagina.</p>
+          <span class="soon" data-soon="voice">In arrivo</span>
+          <div id="voice-widget"></div>
+        </div>
+        <div class="channel light" id="telefono">
+          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>
+          <h3>Al telefono</h3>
+          <p>Chiama Vela e racconta il viaggio che hai in mente.</p>
+          <span class="soon" data-soon="phone">In arrivo</span>
+          <a id="phone-link" class="phone" hidden></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="codice" class="alt repo-section">
+    <div class="wrap repo">
+      <div class="repo-info">
+        <div class="repo-icon" aria-hidden="true">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M14 4l-4 16"/></svg>
+        </div>
+        <div>
+          <h2 class="repo-title">Il codice è aperto.</h2>
+          <p>Guarda come funziona Vela, segnala un problema o contribuisci. <code>suprmat95/vela</code></p>
+        </div>
+      </div>
+      <a class="btn btn-dark" href="https://github.com/suprmat95/vela" target="_blank" rel="noopener">Vedi su GitHub ›</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">© 2026 Vela. Viaggi di padel e tennis con hotel.</div>
+</footer>
+
+<script src="config.js"></script>
+<script src="main.js"></script>
 </body>
 </html>

@@ -355,3 +355,333 @@ Task 4: README. Parto dal test.
 - 🔧 Bash: Update README and run full suite
 
 - 🔧 Bash: Commit task 4, record it, build review package
+
+I 4 task sono completati. Il pacchetto di revisione pesa 2,5 MB quasi tutto per `agent-log/`, quindi ne preparo uno che lo esclude per il revisore.
+
+- 🔧 Bash: Build a review diff without agent logs
+
+- 🔧 Agent: Final whole-branch review
+
+I 4 task sono completati e committati, e la suite è verde (925 test OK, 47 saltati). Ora un revisore separato sta controllando tutto il branch; quando finisce ti riporto cosa ha trovato.
+
+**Commit**
+- **`23ac5c8`** Pagina statica, stile, config e test.
+- **`2a88182`** `main.js` con pulsante "Copia", widget vocale e link telefonico.
+- **`7991cb5`** Deploy su Render (`vela-landing` in `render.yaml`) e `landing` escluso dall'immagine Docker.
+- **`ff03e41`** Sezione "Landing" nel README.
+
+**Controllo in Chrome headless** (su copie della landing, il `config.js` del repo non è stato toccato)
+- **Config vuota:** "In arrivo" su voce e telefono, pulsante "Copia" visibile, nessuno script `unpkg` caricato.
+- **Numero `+39 02 1234 5678`:** il link è `tel:+390212345678`, il testo resta come scritto. Con un agent id di soli spazi la voce resta "In arrivo".
+- **Agent id `prova"<x>`:** finisce nell'attributo come testo e non diventa HTML; lo script ElevenLabs viene aggiunto alla pagina.
+- **320 px:** nessuno scroll orizzontale e l'URL MCP va a capo.
+
+**Cosa ho deciso**
+- Ho lanciato la suite con `uv run python -m unittest discover -s tests`, non con `python3`. Il python di sistema è 3.7 e il repo lo rifiuta. Il venv l'ho creato con `uv sync` dal lockfile, senza dipendenze nuove.
+- Ho aggiornato anche il commento in testa a `render.yaml`, che nominava solo Docker e Postgres.
+
+**Cosa resta non verificato**
+- **Pagina senza JavaScript:** Chrome headless non produce né l'HTML finale né lo screenshot quando JavaScript è disattivato. Il caso è coperto solo dal test sul markup statico, non da un controllo visivo.
+- **Richieste di rete:** non ho visto la scheda Network. Ho controllato se il tag dello script `unpkg` c'è nella pagina oppure no.
+
+Nel commit del Task 2 sono entrati anche i file di `agent-log/` generati dall'hook: è il comportamento previsto.
+
+## Utente 16:21
+
+<task-notification>
+<task-id>afff6243b570264a4</task-id>
+<tool-use-id>toolu_01KidbN9KvLmCgf8x6P9bZUj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/tasks/afff6243b570264a4.output</output-file>
+<status>completed</status>
+<summary>Agent "Final whole-branch review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Verdict: ready to merge.** Nothing Critical or Important. The five focus items hold when I read the code. The landing-related tests pass (29 tests across `test_landing`, `test_render_yaml` and `test_docker_files`, run offline with `.venv/bin/python`). I did not re-run the full suite. The diff is small, so I reviewed it in one pass.
+
+### Strengths
+- **JS off or `config.js` missing:** the static markup already carries the MCP URL and both "In arrivo" blocks. "Copia" starts `hidden` and the `[hidden] {display:none !important}` rule keeps it hidden. If only `config.js` fails, `config = {}` and the static URL is kept (`landing/main.js:7,28`); the button still works and copies the static text.
+- **Odd characters in the agent id:** it goes in through `setAttribute`, never as HTML (`main.js:47`). The tests also forbid `innerHTML` and `document.write`.
+- **Phone with spaces or dashes:** `replace(/[^\d+]/g,"")` for the `tel:` link, `textContent` for the number as written (`main.js:57-61`).
+- **Only spaces:** `clean()` trims, so nothing is shown and no request goes to unpkg (`main.js:9-11,45,58`).
+- **Long URL at 320px:** `overflow-wrap: anywhere` plus `flex: 1 1 16rem` inside a wrapping flex row. Nothing else in the page is wider than the screen.
+- **Render Blueprint:** `type: web` + `runtime: static` + `staticPublishPath` + `buildFilter.paths` is valid. Adding `buildFilter.ignoredPaths` to the Docker service is valid and changes nothing else. The `echo` build command is a sensible hedge, and the implementer recorded it in `docs/decisions.md`.
+- **ElevenLabs embed:** the element name `elevenlabs-convai`, the `agent-id` attribute and the `unpkg.com/@elevenlabs/convai-widget-embed` async script match the official snippet. Adding the script after the element is fine.
+- **"No homepage" rule:** respected. The only price on the page is inside the example intent the spec asks for.
+- **Accessibility basics are fine:** `lang="it"`, h1 then h2, ordered lists, visible focus rings, and contrast that looks adequate in light and dark mode.
+- **The implementer's rulings** (uv for tests, headless Chrome, the render.yaml comment) are all reasonable.
+
+### Critical
+None.
+
+### Important
+None.
+
+### Minor
+1. **The voice widget won't sit inside its section** (`landing/main.js:46-48`, `index.html:44-46`).
+   - **Scenario:** by default the ElevenLabs widget is a floating button fixed to the bottom-right corner. Once M12 sets the agent id, "In arrivo" disappears and the "A voce" section shows only "Parla… direttamente da questa pagina" with nothing under it.
+   - **Why it wasn't caught:** the headless check used a fake id, so the widget almost certainly never rendered.
+   - **Fix:** when activating in M12, check with a real id and either reword the sentence (e.g. "usa il pulsante in basso a destra") or use the widget's inline/placement options. Worth a note in the M12 plan.
+2. **Unpinned third-party script, no integrity check** (`main.js:6`).
+   - **Scenario:** unpkg serves whatever the latest version is, so a breaking or compromised release runs on the page with no code change.
+   - **Nuance:** this is the official snippet, and the spec says "script ufficiale" (though it says "CDN di ElevenLabs", while the URL is unpkg).
+   - **Fix:** pin a version (`@elevenlabs/convai-widget-embed@X.Y.Z`) at M12 activation time, or record the choice in `docs/decisions.md`.
+3. **Malformed phone numbers still produce a link** (`main.js:57-58`).
+   - **Scenario:** `phoneNumber: "+"` gives `tel:+`, and `"39+02…"` gives a misplaced `+`. `"+39 (0)2 …"` keeps the `(0)` digit and dials the wrong number.
+   - **Fix:** after stripping, require `/^\+?\d{6,}$/` and keep "In arrivo" otherwise. Optionally drop `(0)` first.
+4. **"Copiato" isn't announced to screen readers** (`main.js:36`).
+   - **Scenario:** changing the button text is not reliably read aloud, and the select-text fallback gives no feedback at all.
+   - **Fix:** add a visually hidden `aria-live="polite"` status element. Clearing any pending timer before a new `setTimeout` would also tidy repeated clicks.
+5. **"Non serve autenticazione" will go stale** (`index.html:33`).
+   - **Scenario:** this is true today, since M8 OAuth isn't built. After M8 the page says the wrong thing, and it lives in static HTML, not `config.js`.
+   - **Fix:** add a line to the M8 plan/roadmap to update the landing, or drop the sentence.
+6. **Some tests are brittle but fail loudly** (`tests/test_landing.py:57,90`).
+   - **Scenario:** the exact-string checks on `&lt;code id="mcp-url"&gt;` and on the `[hidden] { display: none !important; }` rule fail on harmless reformatting.
+   - **Also:** `test_works_without_javascript` checks attributes, not the "In arrivo" text, and nothing covers `main.js` behaviour. That is acceptable with no JS runtime and matches the spec.
+   - **Fix:** optional; parse with `Page` instead of a regex, and assert a CSS regex that ignores whitespace.
+
+### Declined to judge
+- **Security headers / CSP for the static site:** the spec is silent, and a strict CSP would need to allow the unpkg script and whatever the widget then contacts.
+- **Whether Render really skips the `vela` deploy on a `landing/**`-only commit:** this can only be seen after the Blueprint Sync, which is a manual check listed in the spec.
+- **Italian style ("Dì" vs "Di'"):** it follows the spec text.
+- **Whether the widget's own later network calls break "no other network requests":** they only happen once the agent id is set, which the spec allows.
+- **Existing Render behaviour:** changes to `docs/` or `agent-log/` still trigger a `vela` rebuild. That predates this branch and is out of scope.</result>
+<usage><subagent_tokens>60443</subagent_tokens><tool_uses>8</tool_uses><duration_ms>91514</duration_ms></usage>
+</task-notification>
+
+## Agente 16:21
+
+Il revisore non ha trovato nulla di critico o importante. Riclassifico i punti minori in base all'effetto su chi usa la pagina: i punti 1, 2 e 5 contano solo quando M12 o M8 cambieranno la configurazione, e il 3 dipende da un valore che scriviamo noi. Restano tutti minori. Li registro, poi chiudo i server locali.
+
+- 🔧 Bash: Record final review outcome in the ledger
+
+- 🔧 ToolSearch
+
+- 🔧 TaskStop
+
+- 🔧 TaskStop
+
+- 🔧 TaskStop
+
+Revisione chiusa. Cancello la cartella di lavoro del piano (git la ignora e la storia dei commit resta) e passo alla chiusura del branch.
+
+- 🔧 Bash: Delete this plan's git-ignored workspace
+
+- 🔧 Skill superpowers:finishing-a-development-branch
+
+Per chiudere il branch uso la skill finishing-a-development-branch. Prima rilancio la suite e controllo l'ambiente.
+
+- 🔧 Bash: Run suite and detect worktree and base branch
+
+Suite verde: 925 test OK, 47 saltati.
+
+Il branch `task/landingpage` parte da `master`: nel repo non c'è `origin/develop` e i task precedenti sono stati uniti in `master`. Nel frattempo `master` è andato avanti di alcuni commit (ultimo `21db1fa`, "Merge branch 'doc/accept-wait-2'"). Il worktree è gestito da orca, quindi lo lascio dov'è in ogni caso.
+
+L'implementazione è finita. Come vuoi procedere?
+
+1. Merge in `master` in locale
+2. Push e apertura di una Pull Request verso `master`
+3. Lascio il branch così com'è (ci pensi tu dopo)
+
+Quale scegli?
+
+## Utente 16:22
+
+come lo vedo?
+
+## Agente 16:22
+
+Riavvio il server locale e ti apro la pagina nel browser.
+
+- 🔧 Bash: Serve the landing locally on port 8080
+
+- 🔧 Bash: Check the server responds and open it in the browser
+
+Ho avviato un server locale sulla cartella della landing e ho aperto la pagina nel tuo browser: **http://127.0.0.1:8080**. Il server risponde (200).
+
+- **Voce e telefono** mostrano "In arrivo", perché agent id e numero in `landing/config.js` sono vuoti.
+- **Da telefono**: in Chrome premi Cmd+Opt+I, poi Cmd+Shift+M e scegli per esempio 320 o 375 px.
+- **Tema scuro**: la pagina segue quello del sistema.
+
+Se modifichi un file in `landing/` basta ricaricare la pagina, non c'è nessun build. Il server resta attivo finché non mi dici di fermarlo.
+
+Online non c'è ancora. Esisterà dopo che il branch sarà in `master` e avrai fatto "Sync" del blueprint dalla dashboard Render: a quel punto Render crea `vela-landing` con il suo indirizzo `*.onrender.com`.
+
+Quando hai guardato, dimmi se cambiare qualcosa o come chiudere il branch: merge in `master`, pull request, oppure lasciarlo così.
+
+## Utente 16:34
+
+/Users/matteodospina/Downloads/index_1.html segui questo design
+
+## Agente 16:34
+
+- 🔧 Bash: Check size and external resources of the design file
+
+- 🔧 Read /Users/matteodospina/Downloads/index_1.html
+
+Non riesco ad aprire il file: le tue impostazioni bloccano la lettura fuori dalla cartella del progetto (`permissions.blockReadsOutsideWorkingDirectories`). Non provo ad aggirare il blocco. Vedo solo che il file pesa circa 16 KB e contiene uno `<script>` inline, senza risorse esterne.
+
+Hai due modi per farmelo leggere:
+- scrivi `/add-dir /Users/matteodospina/Downloads` in Claude Code, oppure
+- copialo nel progetto: `! cp /Users/matteodospina/Downloads/index_1.html /Users/matteodospina/orca/workspaces/vela/task-landingpage/`. In questo caso lo tratto come file temporaneo e non lo committo.
+
+Appena posso leggerlo ti propongo come adattarlo alla pagina e aspetto il tuo ok prima di modificare qualcosa. Controllerò che resti senza liste di viaggi, senza dipendenze nuove e con agent id, numero e URL MCP ancora in `landing/config.js`.
+
+## Utente 16:34
+
+adesso lo trovi in questa directory, non committarlo
+
+## Agente 16:34
+
+- 🔧 Bash: Locate the copied design file
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/task-landingpage/index_1.html
+
+- 🔧 Bash: Check calendar feature and MCP server name
+
+- 🔧 Bash: Inspect calendar mention and MCP server name
+
+- 🔧 AskUserQuestion
+
+Guardo le fixture per scegliere prodotti reali da usare negli esempi.
+
+- 🔧 Bash: List fixtures and peek at the catalog format
+
+- 🔧 Bash: Inspect the product structure in the fixture
+
+Il modo più fedele è far generare le proposte dal chooser di Vela stesso, in replay sulle fixture: nessuna chiamata esterna. Controllo se c'è un modo semplice per farlo in memoria.
+
+- 🔧 Bash: Read test support helpers and use case signatures
+
+- 🔧 Bash: Check env vars, Haiku config and REST flow script
+
+- 🔧 Bash: List REST endpoints from the contract doc
+
+- 🔧 Bash: Create a local test token and migrate a scratch SQLite DB
+
+- 🔧 Bash: Run Vela locally in replay mode on port 8765
+
+- 🔧 Bash: Write the example-generation script and check server log
+
+- 🔧 Bash: Find the startup error cause
+
+- 🔧 Bash: Read how tests run the chooser on fixtures
+
+- 🔧 Bash: Find a test that runs the Vela use cases on fixtures
+
+- 🔧 Bash: Locate Vela use case construction
+
+- 🔧 Bash: See how the MCP smoke test builds Vela
+
+- 🔧 Bash: Read the in-memory Vela setup and result types
+
+Genero ora le conversazioni con Vela in memoria sulle fixture: stesso codice dei test, nessuna rete.
+
+- 🔧 Bash: Generate example conversations with in-memory Vela
+
+- 🔧 Bash: Try alternative example phrasings
+
+- 🔧 Bash: Test last phrasings and check hotel info of chosen products
+
+Ho i dati. Prima di toccare qualunque file ti propongo l'approccio; aspetto il tuo ok, come chiede il CLAUDE.md del progetto.
+
+## Cosa ho trovato provando le frasi del design
+
+Ho fatto girare le frasi sul Vela vero, in memoria sulle fixture, senza chiamate esterne. Diverse non funzionano:
+
+| Frase del design | Cosa fa Vela oggi |
+|---|---|
+| "…ottobre, **in due**, al caldo…" | Chiede "In quante persone siete?" |
+| "Troppo caldo per noi. **Qualcosa di più fresco?**" | Lo legge come "a Malaga" e ripropone Fuerteventura |
+| "padel a **Pasqua**" | Ignora il periodo e propone un evento a dicembre |
+| "Si può **spostare di una settimana**?" | "Non so scegliere in base a questo" |
+| "**al caldo**" | Ignorato |
+| Frase del connettore, senza persone | Chiede "In quante persone siete?" |
+
+Sono limiti del parser, non della landing, e non li tocco in questo task. Se vuoi ne faccio un task a parte.
+
+## Proposta
+
+**Contenuti**: la struttura e lo stile del design restano. Le frasi cambiano il minimo indispensabile perché le conversazioni siano quelle che Vela fa davvero. Le risposte sono i `say` reali accorciati, con dati delle fixture registrate il 2026-09-25.
+- **Hero e "Weekend in coppia"**: "Un weekend di padel a ottobre, **siamo in due**, sotto i 600 euro." → *Exclusive Padel Experience a Marina di Pietrasanta, 1–2 ottobre, 116 euro in totale. Ti va?* Poi "Perfetto, prenota." → link di pagamento in chat, poi il codice.
+- **"Cambio di rotta"**: "Tennis a novembre, per 2 persone." → *Corralejo Tennis Academy, Fuerteventura, 16–20 novembre, 300 € a persona.* Poi "**Preferisco in Italia.**" → *Piatti Tennis Center a Bordighera, 14–15 novembre, 720 € in totale.*
+- **"In gruppo"**: "Siamo in 4: padel a **novembre**, massimo 400 euro a testa." → *Pietrasanta, 1–2 novembre, 232 € in totale.* Poi "**Preferisco in Spagna.**" → *Weekend di padel a Málaga, Torre del Mar, 5–8 novembre, 1.116 € in totale.*
+- **"Calendario"**, riscritto su Claude: titolo "Claude trova la data libera". L'indicatore dice "Claude controlla il tuo calendario…", poi *Il primo weekend libero è il 17–18 ottobre. Vela propone: Il Tesoro Nascosto del Lago di Como, 170 €.* Alla fine "Fatto: Claude l'ha messo nel tuo calendario, il link di pagamento è qui in chat."
+- **Frase del connettore**: aggiungo "per 2 persone", che con Vela funziona.
+- **Nome del connettore**: "Pacchetti Viaggio di Padel Tennis". Aggiorno anche il passo 3 di "Collegare Claude" nel README.
+
+**Codice**: tengo la struttura attuale. Il CSS del design va in `styles.css` e il markup in `index.html`. `config.js` e `main.js` restano, adattati al campo `<input>` dell'URL:
+- senza JavaScript il pulsante "Copia" resta nascosto;
+- le card voce e telefono mantengono "In arrivo", il widget e il link telefonico;
+- resta la favicon;
+- il design non ha il tema scuro, quindi la pagina diventa solo chiara;
+- `index_1.html` non lo committo.
+
+**Test**:
+- adatto quelli sull'URL MCP e sul CSS;
+- aggiungo un test che nella pagina non restino segnaposto `[MAIUSCOLE]`;
+- aggiungo un test che i titoli dei viaggi citati esistano nelle fixture, così se le fixture cambiano ce ne accorgiamo.
+
+**Documenti**: aggiorno la sezione contenuti della spec e aggiungo in `docs/decisions.md` le tre scelte di oggi: dati dalle fixture, esempio calendario su Claude, nome del connettore.
+
+**Cosa non mi convince**:
+- i prodotti proposti hanno `hotelSelection: false` e nessun hotel nei dati, mentre il design dice "hotel incluso";
+- prezzi e date sono quelli del 2026-09-25 e cambieranno.
+
+Procedo così?
+
+## Utente 16:39
+
+vai
+
+## Agente 16:39
+
+Parto dai test. Per ora falliscono perché la pagina non ha ancora il nuovo design.
+
+- 🔧 Bash: Update landing tests for the new design and run them
+
+Falliscono i quattro test attesi; i due controlli di guardia passano già. Ora scrivo `styles.css` a partire dal CSS del design.
+
+- 🔧 Bash: Port the design CSS into styles.css
+
+Ora `index.html` con il markup del design e le conversazioni reali.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-landingpage/landing/index.html
+
+Adatto `main.js` al campo `<input>`. Già che ci sono, un nuovo clic su "Copia" azzera il timer del precedente.
+
+- 🔧 Bash: Adapt main.js to the input field and run tests
+
+Resta solo il nome del connettore nel README. Aggiorno il passo 3 di "Collegare Claude".
+
+- 🔧 Bash: Update connector name in README and run full suite
+
+Suite verde. Sistemo l'andata a capo del README, poi controllo il risultato visivo.
+
+- 🔧 Bash: Reflow README step and check preview server
+
+Screenshot della pagina a 1280 px (desktop) e dentro un iframe di 375 px (mobile).
+
+- 🔧 Bash: Screenshot the new landing at desktop width
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/desk.png
+
+Il desktop segue il design. Controllo il mobile a 375 px.
+
+- 🔧 Bash: Screenshot the landing in a 375px iframe
+
+Il server sulla porta 8092 l'avevo già fermato, quindi lo screenshot è vuoto. Carico la cornice direttamente da file.
+
+- 🔧 Bash: Screenshot the 375px frame loaded from file
+
+- 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/m375.png
+
+Il mobile è a posto: niente scroll orizzontale e le chat si leggono. Aggiorno la spec e le decisioni.
+
+- 🔧 Bash: Show spec structure and content section
+
+- 🔧 Bash: Update spec content and main.js sections
+
+- 🔧 Bash: Update spec tests list and record decisions; run suite
+
+Suite verde. Faccio due commit, pagina e documenti, lasciando fuori `index_1.html`.
+
+- 🔧 Bash: Commit the restyle and the docs separately

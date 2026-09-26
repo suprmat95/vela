@@ -14,29 +14,23 @@
     document.querySelector('[data-soon="' + name + '"]').hidden = true;
   }
 
-  function selectText(node) {
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
-
   function setUpCopy(url) {
-    const code = document.getElementById("mcp-url");
+    const input = document.getElementById("mcp-url");
     const button = document.getElementById("copy-mcp");
-    if (url) code.textContent = url;
+    let timer;
+    if (url) input.value = url;
     button.hidden = false;
     button.addEventListener("click", function () {
       if (!navigator.clipboard || !window.isSecureContext) {
-        selectText(code);
+        input.select();
         return;
       }
-      navigator.clipboard.writeText(code.textContent).then(function () {
+      navigator.clipboard.writeText(input.value).then(function () {
         button.textContent = "Copiato";
-        setTimeout(function () { button.textContent = "Copia"; }, 2000);
+        clearTimeout(timer);
+        timer = setTimeout(function () { button.textContent = "Copia"; }, 2000);
       }, function () {
-        selectText(code);
+        input.select();
       });
     });
   }

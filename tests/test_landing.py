@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import unittest
@@ -6,6 +7,15 @@ from html.parser import HTMLParser
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 LANDING = os.path.join(ROOT, "landing")
 WIDGET_SRC = "https://unpkg.com/@elevenlabs/convai-widget-embed"
+CONNECTOR_NAME = "Pacchetti Viaggio di Padel Tennis"
+# id del prodotto nelle fixture → nome citato nelle conversazioni d'esempio.
+EXAMPLE_TRIPS = {
+    "688": "Marina di Pietrasanta",
+    "695": "Corralejo Tennis Academy",
+    "369": "Piatti Tennis Center",
+    "1023": "Weekend all'insegna del padel a Málaga",
+    "1044": "Il Tesoro Nascosto del Lago di Como",
+}
 
 
 def read(*parts):
@@ -54,7 +64,7 @@ class IndexHtmlTest(unittest.TestCase):
                 self.assertTrue(os.path.isfile(os.path.join(LANDING, ref)), ref)
 
     def test_mcp_url_matches_config(self):
-        m = re.search(r'<code id="mcp-url">([^<]*)</code>', self.html)
+        m = re.search(r'<input id="mcp-url"[^>]*value="([^"]*)"', self.html)
         self.assertIsNotNone(m)
         self.assertEqual(m.group(1), config_value("mcpUrl"))
         self.assertRegex(m.group(1), r"^https://.+/mcp$")
@@ -71,6 +81,23 @@ class IndexHtmlTest(unittest.TestCase):
     def test_is_not_a_homepage(self):
         self.assertNotIn("<table", self.html.lower())
 
+    def test_has_no_design_placeholders(self):
+        self.assertIsNone(re.search(r"\[[A-ZÀ-Ý ]{3,}\]", self.html))
+
+    def test_connector_name_matches_the_readme(self):
+        self.assertIn(CONNECTOR_NAME, self.html)
+        self.assertIn(CONNECTOR_NAME, read("README.md"))
+
+    def test_example_trips_exist_in_the_fixtures(self):
+        """Le conversazioni d'esempio citano viaggi veri del catalogo registrato."""
+        titles = {}
+        for name in ("catalog.json", "catalog-tennis.json"):
+            for p in json.loads(read("fixtures", name))["products"]:
+                titles[p["id"]] = p["title"]
+        for pid, name in EXAMPLE_TRIPS.items():
+            self.assertIn(name, titles.get(pid, ""), pid)
+            self.assertIn(name, self.html, pid)
+
     def test_does_not_load_the_widget_statically(self):
         self.assertNotIn(WIDGET_SRC, self.html)
         self.assertNotIn("<elevenlabs-convai", self.html)
@@ -83,11 +110,13 @@ class ConfigTest(unittest.TestCase):
 
 
 class StylesTest(unittest.TestCase):
-    def test_long_urls_wrap_on_small_screens(self):
-        self.assertIn("overflow-wrap: anywhere", read("landing", "styles.css"))
+    def test_url_field_fits_small_screens(self):
+        css = read("landing", "styles.css")
+        self.assertRegex(css, r"\.url-row input\{[^}]*min-width:0")
+        self.assertRegex(css, r"@media \(max-width:480px\)\{[^@]*\.url-row\{flex-direction:column")
 
     def test_hidden_wins_over_display_rules(self):
-        self.assertIn("[hidden] { display: none !important; }", read("landing", "styles.css"))
+        self.assertRegex(read("landing", "styles.css"), r"\[hidden\]\s*\{\s*display:\s*none\s*!important")
 
 
 class ScriptsTest(unittest.TestCase):

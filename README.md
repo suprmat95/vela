@@ -155,7 +155,8 @@ serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri rice
    Stripe; lascia un ordine di prova nel DB):
    `uv run python scripts/mcp_smoke.py https://<servizio>.onrender.com/mcp`. In live il flusso si
    prova con `scripts/rest_flow.py` (`docs/rest.md`).
-3. In claude.ai: Settings → Connectors → Add custom connector, nome `Vela`, URL
+3. In claude.ai: Settings → Connectors → Add custom connector, nome
+   `Pacchetti Viaggio di Padel Tennis` (come sulla landing), URL
    `https://<servizio>.onrender.com/mcp`, nessuna autenticazione.
 4. In una chat nuova, con il connector attivo: "Vorrei un weekend di padel in Spagna a ottobre,
    siamo in due, massimo 800 euro". Dopo il sì Vela dichiara un'attesa; il link arriva con la
