@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Callable, List
 
 from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
-from vela.ports.hofj import HofJPort
+from vela.ports.hofj import HofJRouter
 from vela.ports.payments import LinkStatus, to_cents
 from vela.ports.repositories import Repositories
 
@@ -27,7 +27,7 @@ class NotFound(Exception):
 
 
 class OrderService:
-    def __init__(self, repos: Repositories, hofj: HofJPort, now: Callable[[], datetime],
+    def __init__(self, repos: Repositories, hofj: HofJRouter, now: Callable[[], datetime],
                  new_id: Callable[[], str] = lambda: str(uuid.uuid4())):
         self.repos = repos
         self.hofj = hofj

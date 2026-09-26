@@ -1,8 +1,8 @@
 """Casi d'uso MB1-MB9 di `docs/usecases/multi-brand.md` (M10): catalogo di due brand in memoria.
 
-Lo sport arriva dal testo con il parser di oggi; i campi strutturati (`sport=`, `sport="any"`, la
-domanda "Padel o tennis?" di MB6 e MB7) sono di M17 e non si testano qui. MB5 si verifica sul
-chooser con criteri senza filtro sport (`None`), come deciso nel design di M10.
+Lo sport arriva dal testo o, per MB5, dal campo strutturato `sport="any"` di M17; MB5 si verifica
+anche sul chooser con criteri senza filtro sport (`None`). La domanda "Padel o tennis?" di MB6 e
+MB7 è di M17 ed è testata lì.
 """
 import os
 import unittest
@@ -17,7 +17,7 @@ from vela.app import build_worker
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.chooser import Choice, NoChoice, choose
 from vela.domain.models import (Criteria, IntentCreated, NoMatch, OrderStatus, Participant, Period,
-                                ProposalMade, TravelerProfile)
+                                ProposalMade, StructuredFields, TravelerProfile)
 from vela.domain.usecases import Vela
 
 BRANDS = {"padel": "weebora.com", "tennis": "terrarossa.com"}
@@ -58,8 +58,8 @@ class MultiBrand:
                          new_id=lambda: next(ids))
         self.worker = build_worker(self.vela, Settings(worker_concurrency=0), self.router)
 
-    def propose(self, text):
-        created = self.vela.create_intent(text, TRAVELER)
+    def propose(self, text, fields=None):
+        created = self.vela.create_intent(text, TRAVELER, fields)
         assert isinstance(created, IntentCreated), created
         return self.vela.get_proposal(created.intent_id)
 
@@ -120,7 +120,7 @@ class MB4SwitchSportTest(unittest.TestCase):
 
 
 class MB5AnySportTest(unittest.TestCase):
-    """`sport=any` = nessun filtro sport (M17): qui con `Criteria.sport=None`."""
+    """`sport=any` = nessun filtro sport (M17): sul chooser con `None` e dall'agente con "any"."""
 
     NOVEMBER_FOR_TWO = Criteria(sport=None, period=Period(date(2026, 11, 1), date(2026, 11, 30), "novembre"),
                                 pax=2)
@@ -134,6 +134,18 @@ class MB5AnySportTest(unittest.TestCase):
             chosen.append(result.product.brand)
             rejected.add(result.product.id)
         self.assertEqual(sorted(chosen), ["terrarossa.com", "weebora.com"])
+
+    def test_sport_any_from_the_agent_proposes_from_both_brands(self):
+        """Con il campo strutturato di M17: `create_intent(..., sport="any")`."""
+        mb = MultiBrand()
+        result = mb.propose("Padel o tennis mi è indifferente, a novembre, siamo in due.",
+                            StructuredFields(sport="any", period_start="2026-11-01",
+                                             period_end="2026-11-30", pax=2))
+        brands = []
+        while isinstance(result, ProposalMade):
+            brands.append(mb.product(result).brand)
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+        self.assertEqual(sorted(brands), ["terrarossa.com", "weebora.com"])
 
     def test_the_brand_of_the_chosen_product_decides_the_cart(self):
         mb = MultiBrand(products=[padel(2, country="IT", destination="Riccione", windows=NOVEMBER, price=900),
