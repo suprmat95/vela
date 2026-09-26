@@ -6,8 +6,10 @@ Uso:
   VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com --phone <numero>
 
 Flusso (criterio 3): intento → proposta → rifiuto "troppo caro" (la seconda proposta deve costare
-meno) → accept (202 in coda) → stato finché c'è il link → il link si paga a mano (4242 4242 4242
-4242) → stato finché l'ordine è `confirmed` con il codice di prenotazione.
+meno) → accept (il server aspetta il prezzo effettivo, oppure 202 in coda) → stato finché
+l'ordine è `awaiting_confirmation` → secondo accept, la conferma del prezzo → stato finché c'è il
+link → il link si paga a mano (4242 4242 4242 4242) → stato finché l'ordine è `confirmed` con il
+codice di prenotazione.
 `--trap` (criterio 4): intento → proposta (il prodotto trappola della fixture di staging) →
 accept → stato finché l'ordine è `replaced` con una proposta diversa e senza errori tecnici nel
 `say`. Nessun link nasce, quindi non resta niente da pagare né da annullare.
@@ -122,15 +124,17 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
             raise FlowFailure("dopo \"%s\" la proposta non è più economica: %s → %s"
                               % (REASON, first["total_from"], chosen["total_from"]))
         lap("rifiuto")
-    queued = expect(call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"]),
-                    "order_queued", "accept")
+    queued = call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"])
+    if queued.get("outcome") not in ("order_queued", "order_status"):
+        expect(queued, "order_queued", "accept")
     order_id = queued["order_id"]
     lap("accept")
 
     if trap:
-        # il link nasce solo se il carrello è riuscito: allora la trappola non è fallita
+        # il prezzo effettivo (e poi il link) arriva solo se il carrello è riuscito: allora la
+        # trappola non è fallita
         replaced = wait_status(http, order_id, {"replaced"}, clock, sleep, tick, poll, timeout,
-                               stop=frozenset(TERMINAL | {"awaiting_payment"}))
+                               stop=frozenset(TERMINAL | {"awaiting_confirmation", "awaiting_payment"}))
         lap("accept → sostituzione")
         new = replaced.get("proposal") or {}
         trap_product = chosen["product"]["product_id"]
@@ -144,8 +148,11 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
         return {"status": "replaced", "order_id": order_id, "trap_product": trap_product,
                 "replacement_product": new_product, "say": said, "timings": timings}
 
+    priced = wait_status(http, order_id, {"awaiting_confirmation"}, clock, sleep, tick, poll, timeout)
+    lap("accept → prezzo effettivo")
+    call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"])   # la conferma del prezzo
     ready = wait_status(http, order_id, {"awaiting_payment"}, clock, sleep, tick, poll, timeout)
-    lap("accept → link")
+    lap("conferma → link")
     open_url(ready["payment_url"])
     done = wait_status(http, order_id, {"confirmed"}, clock, sleep, tick, poll, timeout)
     lap("link → confirmed")
@@ -153,7 +160,8 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
     return {"status": "confirmed", "order_id": order_id, "booking_code": done["booking_code"],
             "first_product": first["product"]["product_id"], "first_total": first["total_from"],
             "second_product": chosen["product"]["product_id"], "second_total": chosen["total_from"],
-            "total": ready.get("total"), "timings": timings}
+            "estimate": priced.get("price_from_total"), "total": ready.get("total"),
+            "timings": timings}
 
 
 def format_table(timings: Timings) -> str:

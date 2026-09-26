@@ -67,7 +67,10 @@ def _journey(tr: Traveler, call: Call, clock, sleep, deadline: float, record: di
             continue
         last = order.get("status")
         record["last_status"] = last
-        if last == "awaiting_payment" and "t_link" not in record:
+        if last == "awaiting_confirmation" and "t_priced" not in record:
+            record["t_priced"] = round(clock(), 3)   # il viaggiatore conferma il prezzo effettivo
+            call("POST", "/v1/proposals/%s/accept" % proposal_id, "accept_proposal")
+        elif last == "awaiting_payment" and "t_link" not in record:
             record["t_link"] = round(clock(), 3)
             if not tr.pays:
                 return _end(record, "link_unpaid")
