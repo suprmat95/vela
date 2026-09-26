@@ -46,6 +46,15 @@ class Flow:
         iid = self.vela.create_intent(INTENT, self.traveler).intent_id
         return self.vela.accept_proposal(self.vela.get_proposal(iid).proposal.id)
 
+    def confirm(self, order_id):
+        """Prezzo effettivo pronto, poi il sì del viaggiatore (decisione 2026-09-26)."""
+        order = self.run_until(order_id, OrderStatus.AWAITING_CONFIRMATION)
+        return self.vela.accept_proposal(order.proposal_id)
+
+    def to_link(self, order_id):
+        self.confirm(order_id)
+        return self.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+
     def run_until(self, order_id, status, max_seconds=900):
         for _ in range(max_seconds):
             self.worker.drain()
@@ -73,7 +82,7 @@ class SmsFlowTest(unittest.TestCase):
     def test_link_then_confirmation_exactly_once(self):
         f = Flow()
         order_id = f.accept().order_id
-        order = f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        order = f.to_link(order_id)
         self.assertEqual(len(f.sms.sent), 1)
         to, body = f.sms.sent[0]
         self.assertEqual(to, "+393331234567")
@@ -92,7 +101,7 @@ class SmsFlowTest(unittest.TestCase):
         # M4: il nuovo tentativo di prenotazione non duplica né perde gli SMS
         f = Flow(hofj_class=BookingFailsOnceHofJ)
         order_id = f.accept().order_id
-        order = f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        order = f.to_link(order_id)
         f.payments.pay(order)
         order = f.run_until(order_id, OrderStatus.CONFIRMED)
         for _ in range(5):
@@ -106,21 +115,24 @@ class SmsFlowTest(unittest.TestCase):
         f = Flow(TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000",
                                  participants=(Participant("Bo", "Bi"),)))
         order_id = f.accept().order_id
-        order = f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        order = f.to_link(order_id)
         f.payments.pay(order)
         f.run_until(order_id, OrderStatus.CONFIRMED)
         self.assertEqual(f.sms.sent, [])
 
 
 class AgentPhraseTest(unittest.TestCase):
-    def test_accept_announces_the_sms_with_the_last_digits(self):
-        queued = Flow().accept()
-        self.assertIn("SMS al numero che finisce con 4567", queued.say)
+    def test_confirmation_announces_the_sms_with_the_last_digits(self):
+        f = Flow()
+        queued = f.accept()
+        self.assertNotIn("SMS", queued.say)                  # prima c'è il prezzo effettivo
+        confirmed = f.confirm(queued.order_id)
+        self.assertIn("SMS al numero che finisce con 4567", confirmed.say)
 
     def test_status_while_awaiting_payment_mentions_the_sms(self):
         f = Flow()
         order_id = f.accept().order_id
-        f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        f.to_link(order_id)
         self.assertIn("anche per SMS", f.vela.get_order_status(order_id).say)
 
     def test_invalid_phone_keeps_todays_phrase(self):
@@ -132,8 +144,10 @@ class AgentPhraseTest(unittest.TestCase):
         f = Flow(sms_enabled=False)
         queued = f.accept()
         self.assertNotIn("SMS", queued.say)
-        self.assertIn("Chiedimi a che punto è quando vuoi", queued.say)
         self.assertNotIn("SMS", f.vela.get_order_status(queued.order_id).say)
+        confirmed = f.confirm(queued.order_id)
+        self.assertNotIn("SMS", confirmed.say)
+        self.assertIn("Chiedimi a che punto è quando vuoi", confirmed.say)
         f.run_until(queued.order_id, OrderStatus.AWAITING_PAYMENT)
         awaiting = f.vela.get_order_status(queued.order_id).say
         self.assertNotIn("SMS", awaiting)

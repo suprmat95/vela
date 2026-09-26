@@ -146,13 +146,15 @@ def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, sc
     if criteria.budget is None:
         if criteria.area is None:
             return text + (" and %s." if en else " ed %s.") % cheapest
-        return text + (" and costs %s in total." if en else " e costa %s in totale.") % total
+        return text + (" with a total starting at %s." if en
+                       else " con un totale a partire da %s.") % total
     budget = fmt_money(criteria.budget, lang)
     if within:
-        return text + ((" and costs %s in total, within your budget of %s." if en
-                        else " e costa %s in totale, dentro il tuo budget di %s.") % (total, budget))
-    text += ((" and costs %s in total, over your budget of %s" if en
-              else " e costa %s in totale, oltre il tuo budget di %s") % (total, budget))
+        return text + ((" with a total starting at %s, within your budget of %s." if en
+                        else " con un totale a partire da %s, dentro il tuo budget di %s.")
+                       % (total, budget))
+    text += ((" with a total starting at %s, over your budget of %s" if en
+              else " con un totale a partire da %s, oltre il tuo budget di %s") % (total, budget))
     if criteria.area is None:
         return text + (", but %s." if en else ", ma %s.") % cheapest
     if score == INSIDE:

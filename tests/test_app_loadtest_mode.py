@@ -28,6 +28,9 @@ class LoadtestModeTest(unittest.TestCase):
             self.assertIsInstance(client, HofJHttp)
             self.assertEqual(str(client.client.base_url), "http://fake-hofj:8001")
 
+    def test_accept_does_not_wait_under_load(self):
+        self.assertEqual(loadtest_app().state.vela.accept_wait_seconds, 0)
+
     def test_locale_is_the_one_of_the_brand_fixture(self):
         router = loadtest_app().state.vela.hofj
         self.assertEqual({b: c.locale for b, c in router.clients.items()},

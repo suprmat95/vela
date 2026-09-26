@@ -181,6 +181,15 @@ def inline_worker(vela, **settings):
     return build_worker(vela, Settings(worker_concurrency=0, **settings))
 
 
+def drain_to_link(vela, worker, proposal_id):
+    """Il flusso fino al link (decisione 2026-09-26): il job si ferma al prezzo effettivo, la
+    seconda accettazione è la conferma e il job riparte dal link."""
+    worker.drain()
+    vela.accept_proposal(proposal_id)
+    worker.drain()
+    return worker
+
+
 
 def asgi_transport(app):
     """Transport httpx **sincrono** verso un'app ASGI in-process (M13a). `httpx.ASGITransport` è

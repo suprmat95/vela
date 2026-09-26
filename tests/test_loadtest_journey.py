@@ -68,6 +68,22 @@ class JourneyTest(unittest.TestCase):
         self.assertLessEqual(rec["t_link"], rec["t_paid"])
         self.assertLess(rec["t_paid"], rec["t_confirmed"])
 
+    def test_confirms_the_actual_price_then_pays(self):
+        """Decisione 2026-09-26: su `awaiting_confirmation` il viaggiatore finto conferma una volta."""
+        s = Script(create_intent=[INTENT], get_proposal=[PROPOSAL], accept_proposal=[QUEUED],
+                   get_order_status=[status("awaiting_confirmation", total="700.00"),
+                                     status("awaiting_confirmation", total="700.00"),
+                                     status("awaiting_payment", payment_url="http://vela:8000/replay/checkout/o1"),
+                                     status("confirmed")],
+                   replay_checkout=[(200, {"status": "paid_pending_booking"})])
+        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, True, True, poll=(30, 30)),
+                          s, s.clock, s.sleep, 900, {})
+        self.assertEqual(rec["final"], "confirmed")
+        accepts = [c[1] for c in s.calls if c[0] == "accept_proposal"]
+        self.assertEqual(accepts, ["/v1/proposals/p1/accept"] * 2)
+        self.assertLess(rec["t_accept"], rec["t_priced"])
+        self.assertLess(rec["t_priced"], rec["t_link"])
+
     def test_non_payer_leaves_at_the_link(self):
         s = Script(create_intent=[INTENT], get_proposal=[PROPOSAL], accept_proposal=[QUEUED],
                    get_order_status=[status("awaiting_payment", payment_url="http://x/replay/checkout/o1")])

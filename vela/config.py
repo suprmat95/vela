@@ -81,6 +81,8 @@ class Settings:
     booking_backoff: Tuple[int, ...] = (5, 10, 20, 40)  # secondi tra i tentativi di booking
     job_lease_seconds: int = 180                       # M18: 5 chiamate × 20 s di timeout + link e margine
     payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
+    accept_wait_seconds: int = 100                     # accept aspetta prezzo e link (2026-09-26), < 120 s di ElevenLabs
+    accept_poll_seconds: float = 1.0                   # rilettura dell'ordine durante l'attesa
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
 

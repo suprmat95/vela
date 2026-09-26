@@ -81,6 +81,7 @@ class SettingsDefaultsTest(unittest.TestCase):
         self.assertEqual(s.job_lease_seconds, 180)          # M18: 5 × 20 s più margine
         self.assertEqual((s.quota_burst, s.quota_floor), (8, 2))
         self.assertEqual(s.payment_poll_seconds, 60)
+        self.assertEqual((s.accept_wait_seconds, s.accept_poll_seconds), (100, 1.0))   # 2026-09-26
         self.assertEqual(s.replay_latency, (0.0, 0.0))
         self.assertIsNone(s.replay_limit)
 

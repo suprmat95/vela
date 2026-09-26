@@ -147,7 +147,9 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
             when = on_date(p.start_date, lang)
         else:
             when = "from %s to %s" % (fmt_date(p.start_date, lang), fmt_date(p.end_date, lang))
-        return ("I suggest %s%s%s, %s for %s, starting at %s per person. %s Shall I go ahead?"
+        return ("I suggest %s%s%s, %s for %s, starting at %s per person: that's the minimum "
+                "price, the actual total depends on dates and availability and I'll tell you "
+                "before the payment link. %s Shall I go ahead?"
                 % (product.title, where, hotel, when, _people(p.pax, lang),
                    fmt_money(p.price_from, lang), p.reason))
     where = " a %s" % product.destination if product.destination else ""
@@ -155,7 +157,9 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
         when = on_date(p.start_date)
     else:
         when = "dal %s al %s" % (fmt_date(p.start_date), fmt_date(p.end_date))
-    return ("Ti propongo %s%s%s, %s per %s, a partire da %s a persona. %s Ti va?"
+    return ("Ti propongo %s%s%s, %s per %s, a partire da %s a persona: è il prezzo minimo, il "
+            "totale effettivo dipende da date e disponibilità e te lo dico prima del link di "
+            "pagamento. %s Ti va?"
             % (product.title, where, hotel, when, _people(p.pax), fmt_money(p.price_from), p.reason))
 
 
@@ -245,6 +249,8 @@ _STATUS = {
         OrderStatus.BOOKING_FAILED: ("Il pagamento è arrivato ma la prenotazione non è riuscita: "
                                      "riprovo io, e se non ci riesco ti avviso."),
         OrderStatus.QUEUED: "Sto preparando il pagamento con il fornitore: chiedimi di nuovo tra poco.",
+        OrderStatus.AWAITING_CONFIRMATION: ("Ho il prezzo effettivo: dimmi se confermi e preparo il "
+                                            "link di pagamento."),
         OrderStatus.REPLACED: "Quel viaggio non è più prenotabile: ti ho proposto un'alternativa.",
         OrderStatus.CANCELLED: "Ho annullato l'ordine.",
         OrderStatus.FAILED: ("Non sono riuscito a preparare il pagamento: %s. Se vuoi, riproviamo "
@@ -259,6 +265,8 @@ _STATUS = {
         OrderStatus.BOOKING_FAILED: ("The payment arrived but the booking did not go through: "
                                      "I'll try again, and if I can't I'll let you know."),
         OrderStatus.QUEUED: "I'm preparing the payment with the supplier: ask me again in a moment.",
+        OrderStatus.AWAITING_CONFIRMATION: ("I have the actual price: tell me if you confirm and I'll "
+                                            "prepare the payment link."),
         OrderStatus.REPLACED: "That trip can no longer be booked: I've suggested an alternative.",
         OrderStatus.CANCELLED: "I've cancelled the order.",
         OrderStatus.FAILED: ("I couldn't prepare the payment: %s. If you like, we can try again "
@@ -281,9 +289,14 @@ _AWAITING_AMOUNT_SMS = {
 
 def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
                lang: str = "it", total: Optional[Decimal] = None, minutes: Optional[int] = None,
-               price_from_total: Optional[Decimal] = None, phone_tail: Optional[str] = None) -> str:
+               price_from_total: Optional[Decimal] = None, phone_tail: Optional[str] = None,
+               pax: Optional[int] = None) -> str:
     if status == OrderStatus.QUEUED and minutes is not None:
+        if total is None:   # prima del prezzo effettivo
+            return say_queued_for_price(minutes, lang)
         return say_queued(minutes, lang, phone_tail)
+    if status == OrderStatus.AWAITING_CONFIRMATION and total is not None:
+        return say_confirm_price(total, price_from_total, pax, lang)
     if status == OrderStatus.AWAITING_PAYMENT and total is not None:
         if phone_tail:
             text = _AWAITING_AMOUNT_SMS.get(lang, _AWAITING_AMOUNT_SMS["it"]) % (fmt_money(total, lang), phone_tail)
@@ -307,6 +320,42 @@ def _price_changed(total: Decimal, price_from_total: Decimal, lang: str = "it") 
             fmt_money(total, lang), fmt_money(price_from_total, lang).replace(" euros", ""))
     return "Il totale reale è %s, non i %s stimati." % (
         fmt_money(total), fmt_money(price_from_total).replace(" euro", ""))
+
+
+def say_confirm_price(total: Decimal, price_from_total: Optional[Decimal], pax: Optional[int],
+                      lang: str = "it") -> str:
+    """Decisione 2026-09-26: il prezzo effettivo del carrello, confrontato con la stima della
+    proposta, e la domanda di conferma. Il link nasce solo dopo il sì."""
+    people = _people(pax, lang)
+    if lang == "en":
+        text = "The actual price is %s in total" % fmt_money(total, lang)
+        text += " for %s" % people if people else ""
+        if price_from_total is None or total == price_from_total:
+            text += ", as estimated." if price_from_total is not None else "."
+        else:
+            more = "more" if total > price_from_total else "less"
+            text += ", %s than the estimated %s." % (more, fmt_money(price_from_total, lang))
+        return text + " Do you confirm? If you say yes, I'll prepare the payment link."
+    text = "Il prezzo effettivo è %s in totale" % fmt_money(total)
+    text += " per %s" % people if people else ""
+    if price_from_total is None or total == price_from_total:
+        text += ", come stimato." if price_from_total is not None else "."
+    else:
+        more = "più" if total > price_from_total else "meno"
+        text += ", %s dei %s stimati." % (more, fmt_money(price_from_total).replace(" euro", ""))
+    return text + " Confermi? Se mi dici di sì preparo il link di pagamento."
+
+
+def say_queued_for_price(minutes: int, lang: str = "it") -> str:
+    """L'attesa per il prezzo effettivo, quando il caso d'uso smette di aspettare prima che il
+    carrello sia pronto: nessun SMS, il prezzo si chiede all'agente."""
+    if lang == "en":
+        wait = "a minute" if minutes == 1 else "%d minutes" % minutes
+        return ("I'm getting the actual price from the supplier: it will be ready in about %s. "
+                "Ask me for it and I'll tell you before sending the payment link." % wait)
+    wait = "un minuto" if minutes == 1 else "%d minuti" % minutes
+    return ("Sto chiedendo il prezzo effettivo al fornitore: sarà pronto tra circa %s. Chiedimelo "
+            "e te lo dico prima di mandarti il link di pagamento." % wait)
 
 
 def say_queued(minutes: int, lang: str = "it", phone_tail: Optional[str] = None) -> str:

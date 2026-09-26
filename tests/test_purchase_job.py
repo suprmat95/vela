@@ -90,19 +90,35 @@ class CallsNeededTest(unittest.TestCase):
 
 
 class HappyPathTest(unittest.TestCase):
-    def test_steps_in_sequence_and_link_created(self):
+    def test_steps_in_sequence_stop_at_the_actual_price(self):
+        """Decisione 2026-09-26: dopo il totale l'ordine aspetta la conferma, niente link."""
         s = Setup(hofj=FakeHofJ(total=Decimal("720")))
         result = s.run()
         self.assertEqual(s.methods(), ["create_itinerary", "set_customer", "get_pax", "set_pax",
                                        "get_itinerary"])
         order = s.order()
-        self.assertEqual(order.status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(order.status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual((order.itinerary_id, order.total, order.currency), ("it-1", Decimal("720"), "EUR"))
-        self.assertEqual((order.payment_url, order.payment_ref), ("http://pay.test/o1", "pi_o1"))
-        self.assertEqual(s.payments.descriptions, ["Padel a Valencia 1"])
-        self.assertEqual((result.job.status, result.job.step), (JobStatus.DONE, 5))
+        self.assertEqual((order.payment_url, s.payments.links), (None, []))
+        self.assertEqual((result.job.status, result.job.step), (JobStatus.DONE, 4))
         self.assertEqual(s.saved_job(), result.job)
         self.assertFalse(result.hit_429)
+        self.assertFalse(any(j.kind in (JobKind.SMS_LINK, JobKind.PAYMENT_CHECK)
+                             for j in s.repos.jobs._jobs.values()))
+
+    def test_confirmed_order_resumes_at_the_link(self):
+        s = Setup(hofj=FakeHofJ(total=Decimal("720")))
+        s.run()
+        s.repos.orders.save(replace(s.order(), status=OrderStatus.QUEUED))   # la conferma
+        s.hofj.calls.clear()
+        result = s.run(step=4)
+        self.assertEqual(s.methods(), [])
+        order = s.order()
+        self.assertEqual(order.status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual((order.payment_url, order.payment_ref, order.total),
+                         ("http://pay.test/o1", "pi_o1", Decimal("720")))
+        self.assertEqual(s.payments.descriptions, ["Padel a Valencia 1"])
+        self.assertEqual((result.job.status, result.job.step), (JobStatus.DONE, 5))
 
     def test_customer_and_pax_come_from_the_order_traveler_and_defaults(self):
         s = Setup()
@@ -142,7 +158,7 @@ class ResumeTest(unittest.TestCase):
         s.hofj.calls.clear()
         s.run(step=2)
         self.assertEqual(s.methods(), ["get_pax", "set_pax", "get_itinerary"])
-        self.assertEqual(s.order().status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(s.order().status, OrderStatus.AWAITING_CONFIRMATION)
 
     def test_resume_at_total_reads_only_the_total(self):
         s = Setup()
@@ -183,7 +199,7 @@ class RetryTest(unittest.TestCase):
         self.assertEqual((job.status, job.step, job.attempts, job.run_after),
                          (JobStatus.PENDING, 0, 1, NEXT_WINDOW))
         s.run(attempts=1)
-        self.assertEqual(s.order().status, OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(s.order().status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual(s.order().orphan_itineraries, 1)
 
     def test_timeout_after_the_itinerary_is_not_an_orphan(self):
@@ -294,7 +310,8 @@ class CancelledTest(unittest.TestCase):
 class SmsLinkTest(unittest.TestCase):
     def test_link_step_enqueues_one_sms_link(self):
         s = Setup()
-        j = replace(s.repos.jobs.get("j1"), status=JobStatus.RUNNING, locked_at=NOW)
+        s.repos.orders.save(replace(s.order(), itinerary_id="it-1", total=Decimal("700")))
+        j = replace(s.repos.jobs.get("j1"), status=JobStatus.RUNNING, locked_at=NOW, step=4)
         s.job.run(j, NEXT_WINDOW)
         self.assertEqual(s.repos.orders.get("o1").status, OrderStatus.AWAITING_PAYMENT)
         sms = [j for j in s.repos.jobs._jobs.values() if j.kind == JobKind.SMS_LINK]

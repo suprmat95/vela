@@ -193,6 +193,50 @@ class EnglishTest(unittest.TestCase):
         self.assertEqual(say.say_no_match("pax"), say.say_no_match("pax", Criteria(language="it")))
 
 
+class PriceConfirmationSayTest(unittest.TestCase):
+    """Decisione 2026-09-26: "a partire da" è il minimo, il prezzo effettivo arriva prima del link."""
+
+    def test_proposal_says_the_price_is_a_minimum_told_before_the_link(self):
+        it = say.say_proposal(PRODUCT, PROPOSAL)
+        self.assertIn("a partire da 578 euro a persona: è il prezzo minimo, il totale effettivo "
+                      "dipende da date e disponibilità e te lo dico prima del link di pagamento.", it)
+        self.assertTrue(it.endswith("Ti va?"))
+        en = say.say_proposal(PRODUCT, PROPOSAL, "en")
+        self.assertIn("starting at 578 euros per person: that's the minimum price, the actual total "
+                      "depends on dates and availability and I'll tell you before the payment link.", en)
+
+    def test_confirm_price_higher_lower_equal(self):
+        higher = say.say_status(OrderStatus.AWAITING_CONFIRMATION, None, None, total=Decimal("840"),
+                                price_from_total=Decimal("656"), pax=2)
+        self.assertEqual(higher, "Il prezzo effettivo è 840 euro in totale per 2 persone, più dei 656 "
+                                 "stimati. Confermi? Se mi dici di sì preparo il link di pagamento.")
+        lower = say.say_confirm_price(Decimal("610"), Decimal("656"), 2)
+        self.assertIn("610 euro in totale per 2 persone, meno dei 656 stimati.", lower)
+        equal = say.say_confirm_price(Decimal("656"), Decimal("656"), 1)
+        self.assertIn("656 euro in totale per 1 persona, come stimato. Confermi?", equal)
+
+    def test_confirm_price_in_english(self):
+        s = say.say_confirm_price(Decimal("840"), Decimal("656"), 2, "en")
+        self.assertEqual(s, "The actual price is 840 euros in total for 2 people, more than the "
+                            "estimated 656 euros. Do you confirm? If you say yes, I'll prepare the "
+                            "payment link.")
+        self.assertIn(", as estimated.", say.say_confirm_price(Decimal("5"), Decimal("5"), 2, "en"))
+
+    def test_queued_for_the_price_mentions_no_sms_and_no_link_yet(self):
+        it = say.say_queued_for_price(1)
+        self.assertEqual(it, "Sto chiedendo il prezzo effettivo al fornitore: sarà pronto tra circa "
+                             "un minuto. Chiedimelo e te lo dico prima di mandarti il link di pagamento.")
+        self.assertIn("in about 3 minutes", say.say_queued_for_price(3, "en"))
+        for text in (it, say.say_queued_for_price(3, "en")):
+            self.assertNotIn("SMS", text)
+            self.assertNotIn("http", text)
+
+    def test_awaiting_confirmation_without_total_asks_to_confirm(self):
+        self.assertIn("dimmi se confermi", say.say_status(OrderStatus.AWAITING_CONFIRMATION, None, None))
+        self.assertIn("tell me if you confirm",
+                      say.say_status(OrderStatus.AWAITING_CONFIRMATION, None, None, "en"))
+
+
 class QueueSayTest(unittest.TestCase):
     """Frasi di M5 (RF-45, RF-16, RF-17, RF-25, RF-49): italiano e inglese, niente URL né markdown."""
 
@@ -352,8 +396,11 @@ class SmsPhrasesTest(unittest.TestCase):
                              "you, also by text to the number ending in 4567.")
 
     def test_queued_status_passes_the_tail(self):
-        s = say.say_status(OrderStatus.QUEUED, None, None, "it", minutes=3, phone_tail="4567")
+        s = say.say_status(OrderStatus.QUEUED, None, None, "it", Decimal("700"), minutes=3,
+                           phone_tail="4567")                # dopo la conferma: arriva il link
         self.assertIn("finisce con 4567", s)
+        before = say.say_status(OrderStatus.QUEUED, None, None, "it", minutes=3, phone_tail="4567")
+        self.assertNotIn("4567", before)                     # prima del prezzo nessun SMS
 
     def test_sms_phrases_have_no_url(self):
         for text in (say.say_queued(5, "it", "4567"), say.say_queued(5, "en", "4567"),

@@ -3,8 +3,9 @@
 Uso: uv run python scripts/mcp_smoke.py https://vela-n506.onrender.com/mcp
 
 Solo per la modalità replay: il "pagamento" è la visita del link /replay/checkout/{order_id}.
-L'accettazione mette l'ordine in coda (M5): lo script interroga `get_order_status` finché il link
-è pronto, lo visita e aspetta la conferma.
+L'accettazione mette l'ordine in coda (M5): lo script interroga `get_order_status` finché c'è il
+prezzo effettivo, lo conferma con una seconda `accept_proposal` (decisione 2026-09-26), aspetta il
+link, lo visita e aspetta la conferma della prenotazione.
 Nessuna chiamata a HofJ né a Stripe; sul server restano un intento e un ordine di prova.
 Richiede Python 3.12 (`uv run`), non il python3 di sistema. Il rifiuto "troppo caro" produce una
 proposta diversa, non necessariamente più economica: l'interpretazione del motivo arriva con M9.
@@ -67,6 +68,8 @@ async def run_flow(client, open_url: Callable[[str], None], expected_base: Optio
     accepted = await call(client, "accept_proposal",
                           dict(TRAVELER, proposal_id=second["proposal_id"]), "order_id")
     order_id = accepted["order_id"]
+    await wait_for(client, order_id, {"awaiting_confirmation"}, attempts, delay, tick)
+    await call(client, "accept_proposal", {"proposal_id": second["proposal_id"]}, "order_id")   # il sì
     ready = await wait_for(client, order_id, {"awaiting_payment"}, attempts, delay, tick)
     url = ready["payment_url"]
     if expected_base and not url.startswith(expected_base.rstrip("/") + "/"):

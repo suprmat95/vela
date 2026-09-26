@@ -106,7 +106,7 @@ class SchedulingTest(unittest.TestCase):
         w.boot()
         w.purchase(1)
         self.assertTrue(w.processor.run_once())
-        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 5)   # quota + acquisto
 
     def test_no_hofj_call_without_acquired_block(self):
@@ -130,7 +130,7 @@ class SchedulingTest(unittest.TestCase):
         self.assertFalse(w.processor.run_once())
         w.clock.advance(0.2)
         self.assertTrue(w.processor.run_once())
-        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
 
     def test_booking_reserve_respected_with_full_purchase_queue(self):
         w = World()
@@ -169,7 +169,7 @@ class SchedulingTest(unittest.TestCase):
         w.repos.jobs.save(replace(w.repos.jobs.get("j1"), step=3))
         w.fill(QuotaClass.PURCHASE, 4)                 # 3 gettoni: c'è posto per 1 sola chiamata
         w.processor.run_once()
-        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
 
     def test_unused_calls_are_not_refunded(self):
         w = World(hofj=FakeHofJ(fail_at={"set_customer": [UpstreamError("timeout")]}))
@@ -202,7 +202,7 @@ class QuotaErrorTest(unittest.TestCase):
         w.processor.run_once()                         # SMS di conferma: priorità sopra l'acquisto
         self.assertEqual(w.status(1), OrderStatus.QUEUED)
         w.processor.run_once()
-        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual(sum(1 for m in w.hofj_methods() if m == "get_quota"), 1)
 
     def test_one_refresh_for_the_cluster_after_a_429(self):
@@ -245,7 +245,7 @@ class QuotaErrorTest(unittest.TestCase):
         for _ in range(20):
             w.processor.run_once()
         self.assertEqual(sum(1 for c in w.hofj.calls if c[0] == "get_quota"), 1)
-        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)   # si lavora con i default
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)   # si lavora con i default
         w.clock.advance(60)
         w.processor.run_once()
         self.assertEqual(sum(1 for c in w.hofj.calls if c[0] == "get_quota"), 2)

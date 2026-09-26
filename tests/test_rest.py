@@ -321,7 +321,12 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(order["status"], "queued")
         again = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 200)
         self.assertEqual(again["order_id"], order["order_id"])
-        c.app.state.worker.drain()                           # job d'acquisto: link pronto
+        c.app.state.worker.drain()                           # job d'acquisto: prezzo effettivo
+        priced = call("get", "/v1/orders/%s" % order["order_id"], 200)
+        self.assertEqual((priced["status"], priced["payment_url"]), ("awaiting_confirmation", None))
+        confirmed = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 202)   # il sì
+        self.assertEqual(confirmed["order_id"], order["order_id"])
+        c.app.state.worker.drain()                           # link pronto
         status = call("get", "/v1/orders/%s" % order["order_id"], 200)
         self.assertEqual(status["status"], "awaiting_payment")
 
@@ -345,7 +350,10 @@ def proposal_id(c):
 class OrderStatusPaymentTest(unittest.TestCase):
     def test_awaiting_payment_status_has_link_and_amount(self):
         c, _ = make_client()
-        order = c.post("/v1/proposals/%s/accept" % proposal_id(c), headers=AUTH).json()
+        pid = proposal_id(c)
+        order = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH).json()
+        c.app.state.worker.drain()
+        c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)   # conferma del prezzo effettivo
         c.app.state.worker.drain()
         r = c.get("/v1/orders/%s" % order["order_id"], headers=AUTH).json()
         self.assertEqual((r["outcome"], r["status"]), ("order_status", "awaiting_payment"))

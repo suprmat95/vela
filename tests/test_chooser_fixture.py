@@ -110,7 +110,7 @@ class FixtureChooserTest(unittest.TestCase):
     def test_demo_reason(self):
         r = choose(self.products, INTENTS["demo §10.1"][0], set(), TODAY)
         self.assertEqual(r.reason, "È a Torre del Mar, in Spagna come hai chiesto. Parte il 1 ottobre "
-                                   "2026, nel periodo che hai chiesto, e costa 558 euro in totale, "
+                                   "2026, nel periodo che hai chiesto, con un totale a partire da 558 euro, "
                                    "dentro il tuo budget di 800 euro.")
 
     def test_compromises_are_declared(self):
