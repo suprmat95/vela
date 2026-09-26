@@ -1,0 +1,87 @@
+:root {
+  --bg: #f7f4ee;
+  --surface: #ffffff;
+  --text: #1c2430;
+  --muted: #5b6573;
+  --accent: #0b6e69;
+  --accent-text: #ffffff;
+  --border: #e3ddd2;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #11161d;
+    --surface: #19212b;
+    --text: #e8edf2;
+    --muted: #9aa6b4;
+    --accent: #4fc1b8;
+    --accent-text: #0b1a19;
+    --border: #2a3440;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header, main, footer { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+
+.hero { padding-top: 4rem; padding-bottom: 2rem; }
+.brand { margin: 0 0 1rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+h1 { margin: 0 0 1rem; font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.15; }
+h2 { margin: 0 0 .75rem; font-size: 1.4rem; }
+.lead { color: var(--muted); font-size: 1.1rem; }
+.intent {
+  margin: 1.5rem 0 0;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  font-size: 1.15rem;
+}
+
+section { padding: 2rem 0; border-top: 1px solid var(--border); }
+.steps { padding-left: 1.25rem; }
+.steps li { margin-bottom: .5rem; }
+
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .95em; }
+.copy { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 1rem 0; }
+#mcp-url {
+  flex: 1 1 16rem;
+  padding: .6rem .8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+button {
+  padding: .6rem 1.1rem;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+a { color: var(--accent); }
+.soon {
+  display: inline-block;
+  padding: .3rem .8rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.phone { font-size: 1.5rem; font-weight: 700; }
+
+footer { padding-top: 2rem; padding-bottom: 3rem; border-top: 1px solid var(--border); color: var(--muted); }
+
+[hidden] { display: none !important; }

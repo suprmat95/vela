@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vela: il tuo viaggio di padel o tennis, da una frase</title>
+  <meta name="description" content="Vela prenota un viaggio di padel o tennis con hotel a partire da quello che dici, dentro l'assistente che usi già.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <p class="brand">Vela</p>
+    <h1>Dì cosa vuoi: Vela prenota il tuo viaggio di padel o tennis con hotel.</h1>
+    <p class="lead">Niente siti da girare, niente elenchi da confrontare. Lo chiedi a parole tue all'assistente che usi già, e Vela ti propone un solo viaggio.</p>
+    <blockquote class="intent">«Un weekend di padel a ottobre, in due, al caldo, sotto i 600 euro.»</blockquote>
+  </header>
+
+  <main>
+    <section id="come-funziona">
+      <h2>Come funziona</h2>
+      <ol class="steps">
+        <li><strong>Dici cosa vuoi.</strong> Sport, periodo, persone, budget: come ti viene.</li>
+        <li><strong>Vela propone un viaggio.</strong> Uno solo. Se non ti convince, dici cosa cambiare.</li>
+        <li><strong>Accetti e paghi.</strong> Ricevi il link di pagamento e poi il codice di prenotazione.</li>
+      </ol>
+    </section>
+
+    <section id="claude">
+      <h2>Con Claude</h2>
+      <ol class="steps">
+        <li>Su claude.ai apri <em>Settings → Connectors</em> e scegli <em>Add custom connector</em>.</li>
+        <li>Come nome scrivi <code>Vela</code>, come URL incolla questo indirizzo. Non serve autenticazione.</li>
+      </ol>
+      <div class="copy">
+        <code id="mcp-url">https://vela-n506.onrender.com/mcp</code>
+        <button type="button" id="copy-mcp" hidden>Copia</button>
+      </div>
+      <p>Poi scrivi a Claude, per esempio: <q>Con Vela, trovami un viaggio di tennis a novembre per due persone.</q></p>
+    </section>
+
+    <section id="voce">
+      <h2>A voce</h2>
+      <p>Parla con l'agente vocale di Vela direttamente da questa pagina.</p>
+      <p class="soon" data-soon="voice">In arrivo</p>
+      <div id="voice-widget"></div>
+    </section>
+
+    <section id="telefono">
+      <h2>Al telefono</h2>
+      <p>Chiama Vela e racconta il viaggio che hai in mente.</p>
+      <p class="soon" data-soon="phone">In arrivo</p>
+      <a id="phone-link" class="phone" hidden></a>
+    </section>
+  </main>
+
+  <footer>
+    <p>Codice sorgente: <a href="https://github.com/suprmat95/vela">github.com/suprmat95/vela</a></p>
+  </footer>
+</body>
+</html>
