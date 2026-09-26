@@ -91,7 +91,7 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. |
 | `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
 | `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
-| `HOFJ_BRAND` | in `live` | Brand/canale di distribuzione HofJ. |
+| `HOFJ_BRANDS` | in `live` | Mappa sport → brand HofJ, es. `padel=weebora.com,tennis=terrarossa.com` (M10). Sport `padel` e `tennis`, brand distinti, almeno una voce. La vecchia `HOFJ_BRAND` da sola blocca l'avvio con l'indicazione di migrare. |
 | `STRIPE_SECRET_KEY` | per Stripe reale | Chiave Stripe di test (una `rk_test` fornita da HofJ). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; richiede `VELA_PUBLIC_URL`. Vedi `docs/stripe.md`. |
 | `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe; il pagamento si verifica leggendo la Checkout Session e si chiude con `POST /v1/bookings` di HofJ (M5). |
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
@@ -118,7 +118,7 @@ errore esplicito.
 2. Render crea `vela-db` e il servizio `vela`; `DATABASE_URL` è collegata al database.
 3. Inserire nella dashboard le variabili marcate `sync: false`. Il Blueprint fissa
    `VELA_UPSTREAM_MODE=live` (M7, HofJ staging): servono `HOFJ_API_KEY`,
-   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRAND=staging.weebora.com`,
+   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRANDS=padel=staging.weebora.com,tennis=staging.tennis.weebora.com`,
    `STRIPE_SECRET_KEY`, `VELA_PUBLIC_URL` e `VELA_API_TOKEN`, altrimenti l'app non parte. Per tornare
    in replay si cambia il valore nel file.
 4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.

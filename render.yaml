@@ -18,7 +18,7 @@ services:
         sync: false
       - key: HOFJ_BASE_URL
         sync: false
-      - key: HOFJ_BRAND
+      - key: HOFJ_BRANDS
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false

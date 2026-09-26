@@ -4,9 +4,10 @@ Nessun file viene aperto: i segreti arrivano dall'ambiente del processo.
 """
 import os
 from dataclasses import dataclass
-from typing import Mapping, Optional, Tuple
+from typing import Dict, Mapping, Optional, Tuple
 
 DEFAULT_UPSTREAM_MODE = "replay"
+BRAND_SPORTS = ("padel", "tennis")
 
 
 def normalize_database_url(url: Optional[str]) -> Optional[str]:
@@ -23,12 +24,41 @@ def normalize_database_url(url: Optional[str]) -> Optional[str]:
     return url
 
 
+def parse_brands(raw: str) -> Dict[str, str]:
+    """`HOFJ_BRANDS` ("padel=weebora.com,tennis=terrarossa.com") → {sport: brand}.
+
+    Sport in {padel, tennis}, uno per voce, brand distinti, almeno una voce (decisione M10).
+    Ogni errore è un `ValueError` con il motivo: l'app non parte.
+    """
+    brands: Dict[str, str] = {}
+    for entry in (part.strip() for part in raw.split(",")):
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise ValueError("HOFJ_BRANDS: voce %r non nel formato sport=brand" % entry)
+        sport, brand = (side.strip() for side in entry.split("=", 1))
+        if sport not in BRAND_SPORTS:
+            raise ValueError("HOFJ_BRANDS: sport %r sconosciuto, ammessi %s"
+                             % (sport, ", ".join(BRAND_SPORTS)))
+        if not brand:
+            raise ValueError("HOFJ_BRANDS: brand vuoto per %s" % sport)
+        if sport in brands:
+            raise ValueError("HOFJ_BRANDS: sport %s ripetuto" % sport)
+        if brand in brands.values():
+            raise ValueError("HOFJ_BRANDS: brand %s usato per due sport" % brand)
+        brands[sport] = brand
+    if not brands:
+        raise ValueError("HOFJ_BRANDS: serve almeno una voce sport=brand")
+    return brands
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: Optional[str] = None
     hofj_api_key: Optional[str] = None
     hofj_base_url: Optional[str] = None
-    hofj_brand: Optional[str] = None
+    hofj_brands: Optional[str] = None                  # M10: "padel=weebora.com,tennis=…"
+    hofj_brand: Optional[str] = None                   # pre-M10: letta solo per dire di migrare
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
     vela_api_token: Optional[str] = None
@@ -54,6 +84,7 @@ class Settings:
             database_url=normalize_database_url(env.get("DATABASE_URL")),
             hofj_api_key=env.get("HOFJ_API_KEY"),
             hofj_base_url=env.get("HOFJ_BASE_URL"),
+            hofj_brands=env.get("HOFJ_BRANDS"),
             hofj_brand=env.get("HOFJ_BRAND"),
             stripe_secret_key=env.get("STRIPE_SECRET_KEY"),
             stripe_webhook_secret=env.get("STRIPE_WEBHOOK_SECRET"),
@@ -62,6 +93,17 @@ class Settings:
             anthropic_api_key=env.get("ANTHROPIC_API_KEY"),
             vela_public_url=env.get("VELA_PUBLIC_URL"),
         )
+
+
+def live_brands(settings: Settings) -> Dict[str, str]:
+    """La mappa sport → brand del live. `HOFJ_BRAND` da sola non basta più (decisione M10):
+    l'errore dice come migrare invece di indovinare lo sport."""
+    if settings.hofj_brands:
+        return parse_brands(settings.hofj_brands)
+    if settings.hofj_brand:
+        raise ValueError("HOFJ_BRAND non è più letta: sostituiscila con HOFJ_BRANDS=padel=%s "
+                         "(e tennis=<brand> se serve)" % settings.hofj_brand)
+    raise ValueError("manca HOFJ_BRANDS (es. padel=weebora.com,tennis=terrarossa.com)")
 
 
 from vela.domain.models import TravelerDefaults  # noqa: E402
