@@ -94,5 +94,26 @@ class BookingJobTest(unittest.TestCase):
             self.assertEqual(s.order().status, status)
 
 
+class SmsConfirmedTest(unittest.TestCase):
+    def sms_jobs(self, s):
+        return [j for j in s.repos.jobs._jobs.values() if j.kind == JobKind.SMS_CONFIRMED]
+
+    def test_confirmation_enqueues_one_sms(self):
+        s = Setup()
+        s.run()
+        self.assertEqual([j.order_id for j in self.sms_jobs(s)], ["o1"])
+
+    def test_second_run_on_confirmed_order_adds_nothing(self):
+        s = Setup()
+        s.run()
+        s.run()
+        self.assertEqual(len(self.sms_jobs(s)), 1)
+
+    def test_failed_booking_enqueues_no_sms(self):
+        s = Setup(hofj=FakeHofJ(fail_at={"create_booking": [ProductError("400")]}))
+        s.run()
+        self.assertEqual(self.sms_jobs(s), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -242,6 +242,15 @@ class RepositoryContract:
         self.assertEqual(order_of_claims, ["j-b", "j-c", "j-p"])
         self.assertIsNone(self.repos.jobs.claim(NOW, LEASE))
 
+    def test_claim_puts_sms_after_payment_check_and_before_purchase(self):
+        self.seed_orders(4)
+        self.repos.jobs.enqueue(job("j-p", "o1", enqueued_at=NOW - timedelta(minutes=9)))
+        self.repos.jobs.enqueue(job("j-s", "o2", JobKind.SMS_LINK, enqueued_at=NOW - timedelta(minutes=1)))
+        self.repos.jobs.enqueue(job("j-c", "o3", JobKind.PAYMENT_CHECK))
+        self.repos.jobs.enqueue(job("j-k", "o4", JobKind.SMS_CONFIRMED))
+        self.assertEqual([self.repos.jobs.claim(NOW, LEASE).id for _ in range(4)],
+                         ["j-c", "j-s", "j-k", "j-p"])
+
     def test_claim_purchase_fifo_by_enqueued_at(self):
         self.seed_orders(3)
         self.repos.jobs.enqueue(job("j2", "o2", enqueued_at=NOW - timedelta(seconds=10)))

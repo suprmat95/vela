@@ -5,6 +5,7 @@ L'app vera in replay (repository in memoria, worker senza thread) per i flussi c
 """
 import contextlib
 import io
+import json
 import os
 import random
 import sys
@@ -278,6 +279,32 @@ class CliTest(unittest.TestCase):
                                 {"VELA_API_TOKEN": TOKEN}, lambda url, token: authed(app))
         self.assertEqual(code, 1)
         self.assertIn("FALLITO", err)
+
+    def test_phone_option_sets_the_traveler_phone(self):
+        # I2: il test manuale degli SMS usa il proprio numero; senza opzione resta quello finto
+        for argv, expected in (([], rest_flow.PROFILE["phone"]),
+                               (["--phone", "+393330000000"], "+393330000000")):
+            with self.subTest(argv=argv):
+                sent = []
+                routes = dict(BASE_ROUTES)
+                routes[("GET", "/v1/orders/o1")] = [status(
+                    "replaced", proposal_changed=True, proposal=proposal("p3", "120", "500.00"),
+                    say="Quel viaggio non è più disponibile, ti propongo questo")]
+
+                def factory(url, token):
+                    client = canned(routes)
+                    client.event_hooks["request"].append(
+                        lambda request: sent.append(json.loads(request.content))
+                        if request.url.path == "/v1/intents" else None)
+                    return client
+
+                code, out, err = run_main(["http://vela.test", "--trap", "--poll", "0"] + argv,
+                                          {"VELA_API_TOKEN": TOKEN}, factory)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(sent[0]["profile"]["phone"], expected)
+                self.assertEqual(sent[0]["profile"]["first_name"], rest_flow.PROFILE["first_name"])
+                self.assertNotIn(expected, out + err)
+        self.assertEqual(rest_flow.PROFILE["phone"], "+390000000000")
 
     def test_format_table(self):
         self.assertEqual(rest_flow.format_table([("intento", 0.25), ("totale", 12.0)]),

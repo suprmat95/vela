@@ -3,6 +3,7 @@
 Uso:
   VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com
   VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com --trap
+  VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com --phone <numero>
 
 Flusso (criterio 3): intento → proposta → rifiuto "troppo caro" (la seconda proposta deve costare
 meno) → accept (202 in coda) → stato finché c'è il link → il link si paga a mano (4242 4242 4242
@@ -11,6 +12,7 @@ meno) → accept (202 in coda) → stato finché c'è il link → il link si pag
 accept → stato finché l'ordine è `replaced` con una proposta diversa e senza errori tecnici nel
 `say`. Nessun link nasce, quindi non resta niente da pagare né da annullare.
 
+`--phone` sostituisce il telefono finto del viaggiatore (test manuale degli SMS, docs/sms.md).
 Ogni risposta deve contenere al massimo un prodotto (RF-10). Alla fine stampa i tempi di ogni
 passo in una tabella Markdown per docs/acceptance.md. Il token si legge solo da VELA_API_TOKEN e
 non viene mai stampato. Chiamate: quelle del flusso verso Vela; Vela chiama HofJ e Stripe.
@@ -177,6 +179,9 @@ def main(argv=None, env=None, client_factory=None) -> int:
     ap.add_argument("--intent", help="frase dell'intento (default: INTENT_FLOW o INTENT_TRAP)")
     ap.add_argument("--poll", type=float, default=5.0, help="secondi tra due richieste di stato")
     ap.add_argument("--timeout", type=float, default=900.0, help="attesa massima per stato, in secondi")
+    ap.add_argument("--phone", default=PROFILE["phone"],
+                    help="telefono del viaggiatore, es. il proprio per il test degli SMS "
+                         "(docs/sms.md); mai nei commit")
     args = ap.parse_args(argv)
     env = os.environ if env is None else env
     token = env.get("VELA_API_TOKEN")
@@ -186,7 +191,8 @@ def main(argv=None, env=None, client_factory=None) -> int:
     factory = client_factory or http_client
     try:
         with factory(args.url, token) as client:
-            summary = run_flow(client, print_link, intent=args.intent, trap=args.trap,
+            summary = run_flow(client, print_link, intent=args.intent,
+                               profile=dict(PROFILE, phone=args.phone), trap=args.trap,
                                poll=args.poll, timeout=args.timeout)
     except (FlowFailure, httpx.HTTPError) as exc:
         print("FALLITO: %s" % exc, file=sys.stderr)

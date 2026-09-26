@@ -7,7 +7,7 @@ ROOT = os.path.join(os.path.dirname(__file__), "..")
 # Variabili di spec §6.
 ENV_VARS = ["HOFJ_API_KEY", "HOFJ_BASE_URL", "HOFJ_BRANDS", "DATABASE_URL", "STRIPE_SECRET_KEY",
             "STRIPE_WEBHOOK_SECRET", "VELA_API_TOKEN", "VELA_UPSTREAM_MODE", "ANTHROPIC_API_KEY",
-            "VELA_PUBLIC_URL"]
+            "VELA_PUBLIC_URL", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"]
 
 
 def read(name):

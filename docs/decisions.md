@@ -791,3 +791,33 @@ linter. Scelte prese con l'utente.
 | Linter | `ruff` nel gruppo `dev` di `pyproject.toml` (0.16.9 in `uv.lock`). Comando: `uv run ruff check .` | Un solo strumento veloce, nessuna config esterna. Resta fuori dall'immagine Docker (`uv sync --no-dev`) |
 | Regole | Fissate a mano in `[tool.ruff.lint]`: `E4`, `E7`, `E9`, `F` (il vecchio default di ruff). Niente E501 (lunghezza righe), niente formatter | Il default di ruff cambia tra le versioni: la 0.16 aggiunge UP, B, RUF e altre, e toccava 118 file. Con E501 a 88 caratteri le violazioni erano 2205, perché il codice usa righe più lunghe: sarebbe stato riformattare il repository |
 | Violazioni esistenti | 36 corrette in un commit: import inutilizzati, import spostati in cima (`tests/support.py`, `tests/test_usecases.py`), lambda assegnate diventate `def`, `l` → `line`, un'istruzione per riga in `scripts/quota_probe.py` | Nessun cambio di comportamento. Suite: 1045 test, 56 saltati senza `DATABASE_URL` |
+
+## 2026-09-26 — SMS: design delle notifiche
+
+Origine: brainstorming "setup Twilio". Design in
+`docs/superpowers/specs/2026-09-26-sms-notifiche-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Notifiche proattive | Due SMS via Twilio al viaggiatore principale: link di pagamento con riepilogo (`awaiting_payment`) e conferma con codice (`confirmed`). Nessun SMS per gli altri esiti | Il viaggiatore doveva chiedere più volte all'agente se il link o la conferma erano pronti |
+| Normalizzazione del numero | Tolti spazi e separatori; `+…` invariato; `00…` → `+…`; altrimenti `+39` davanti; valido se `+` e 8-15 cifre, altrimenti nessun invio | Test in Italia; un `+39` già scritto non si raddoppia e un numero estero dichiarato non diventa italiano |
+| Mittente | Numero Twilio acquistato: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`. Nessuna variabile → notificatore finto; solo alcune → l'app non parte | Il caso più semplice e subito attivo; stesso schema di Stripe |
+| Invio | Due tipi di job nella coda esistente (`sms_link`, `sms_confirmed`), porta `Notifier`, adapter Twilio con `httpx` e finto; priorità dopo `payment_check`, prima di `purchase`; 4 tentativi (30 s, 2 min, 10 min), 4xx definitivo | Un errore di Twilio non blocca acquisto né prenotazione; retry e ripresa già gestiti dalla coda. Scartati: invio diretto nei job (perde o raddoppia SMS, rallenta gli acquisti) e campi `sms_*_sent_at` (migrazione) |
+| Libreria | `httpx` (già presente), nessun SDK `twilio` | Una sola chiamata REST; nessuna dipendenza nuova |
+| Contratto dell'agente | `say_queued` annuncia gli SMS (ultime 4 cifre del numero); `awaiting_payment` dice che il link è arrivato via SMS; istruzioni MCP: non interrogare `get_order_status`, chiamarlo solo se l'utente chiede. Campi e tool invariati | L'agente smette di sollecitare lo stato; il viaggiatore sa cosa aspettarsi |
+| Testo degli SMS | Titolo, date, persone, totale reale (o codice), link; solo GSM-7 con traslitterazione del titolo; SMS 1 su 2-3 segmenti, nessun link corto | Un redirect `/pay/<id>` sarebbe un endpoint in più non richiesto |
+| Doppioni | Un solo job attivo per ordine e tipo; accettato il raro doppio invio se il processo muore tra invio e salvataggio | Eliminarlo richiede un registro degli invii (schema) |
+
+## 2026-09-26 — SMS: esecuzione
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Moduli dei testi | Testi degli SMS in `vela/domain/sms_text.py`, non in `say.py`; accodamento in `vela/domain/notify.py` | `say.py` promette frasi senza URL; `notify.py` evita l'import circolare tra `sms.py` e `purchase.py` |
+| Suite finale | 982 test, 48 saltati, verde con `uv run python` (dopo le correzioni della revisione finale). Nessuna chiamata a Twilio | — |
+| Test esistenti adattati | `tests/test_payment_check.py`: il `new_id` fisso diventa un iteratore di due id, perché il passo del link ora accoda due job (verifica del pagamento e `sms_link`); l'asserzione sul job di verifica è invariata. | Effetto collaterale atteso dei nuovi job, nessuna asserzione indebolita |
+| Test esistenti adattati | `tests/test_job_processor.py` (`test_purchase_fifo`): il processore costruito a mano riceve i gestori SMS e il ciclo fisso di 3 giri diventa al massimo 6 con uscita anticipata, perché i job SMS (priorità 2) passano tra un acquisto e l'altro; l'asserzione FIFO è invariata. | Effetto collaterale atteso dei nuovi job, nessuna asserzione indebolita |
+| SMS promessi solo se partono (revisione finale, C1) | `Vela(sms_enabled=False)` di default; `create_app` costruisce il notificatore una volta, lo passa al worker e accende `sms_enabled` solo se è `TwilioSms`. Spenti: frasi di `say` e istruzioni/descrizioni MCP identiche a prima degli SMS; accesi: le varianti con gli SMS (`INSTRUCTIONS_SMS`, `DESCRIPTIONS_SMS`), scelte in `build_mcp` da `vela.sms_enabled` | Senza variabili Twilio il notificatore è finto: promettere un SMS che non parte lascia il viaggiatore senza link |
+| Stato sempre chiedibile con gli SMS (decisione dell'utente, I1) | `say_queued` con gli SMS chiude con "Se vuoi sapere a che punto è, o se l'SMS non arriva entro qualche minuto, chiedimi pure." (en: "If you want to know how it's going, or the text hasn't arrived in a few minutes, just ask me."). Testi MCP con gli SMS: l'agente non interroga `get_order_status` di sua iniziativa, lo chiama ogni volta che l'utente chiede come va e una volta se dice che l'SMS non è arrivato; nessun "only when". Nessun nuovo tipo di SMS | Un SMS perso o in ritardo non deve lasciare il viaggiatore senza link, e l'agente non deve scoraggiare una domanda sullo stato |
+| Test manuale degli SMS (I2) | `scripts/rest_flow.py --phone <numero>` (default invariato `+390000000000`); `docs/sms.md` spiega il limite dei numeri verificati degli account Twilio di prova e stima 2 SMS, circa 4-5 segmenti | Il numero finto dello script rendeva il test manuale impossibile; il numero vero resta sulla riga di comando, mai nei commit |
+| "(0)" nei numeri (M2) | `normalize_it` toglie il letterale "(0)" prima dei separatori: "+39 (0)333 1234567" → "+393331234567"; i fissi ("02 1234 5678" → "+390212345678") invariati | Lo "(0)" dopo il prefisso internazionale non si compone |
+| SMS nel load test | `build_notifier` restituisce sempre gli SMS finti con `VELA_UPSTREAM_MODE=loadtest`, anche con le variabili Twilio impostate (aggiunto al merge su `master` con M13a) | Come il pagamento, il load test non deve toccare servizi a pagamento né mandare SMS veri |

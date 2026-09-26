@@ -255,6 +255,8 @@ class JobKind(str, Enum):
     PURCHASE = "purchase"              # RF-46
     BOOKING = "booking"                # RF-23, RF-51
     PAYMENT_CHECK = "payment_check"    # RF-20
+    SMS_LINK = "sms_link"              # RF-19: SMS con link e riepilogo (decisione 2026-09-26)
+    SMS_CONFIRMED = "sms_confirmed"    # RF-57: SMS con il codice di prenotazione
 
 
 class JobStatus(str, Enum):

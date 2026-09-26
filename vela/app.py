@@ -15,6 +15,8 @@ Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 In ``loadtest`` (M13a) HofJ è il finto di ``loadtest/fake_hofj`` via HTTP, come in live, ma solo su
 localhost o ``fake-hofj``; il catalogo parte dalle fixture dei brand, il pagamento è sempre finto e
 il checkout di replay è montato.
+Gli SMS al viaggiatore sono Twilio se le tre variabili ``TWILIO_*`` sono impostate, altrimenti finti
+(sempre finti in ``loadtest``).
 """
 import os
 from contextlib import asynccontextmanager
@@ -30,6 +32,8 @@ from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import FIXTURE_PATH, ReplayHofJ
 from vela.adapters.hofj_router import BrandRouter, SingleClientRouter
 from vela.adapters.repo_postgres import PostgresRepositories
+from vela.adapters.sms_fake import FakeSms
+from vela.adapters.sms_twilio import TwilioSms
 from vela.adapters.stripe_fake import FakePayments
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
@@ -40,9 +44,11 @@ from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
 from vela.domain.purchase import PurchaseJob
+from vela.domain.sms import SmsJob
 from vela.domain.usecases import Vela
 from vela.ports.catalog import CatalogSource
 from vela.ports.hofj import HofJRouter
+from vela.ports.notifier import Notifier
 from vela.ports.payments import PaymentsPort
 from vela.surfaces.checkout_pages import router as checkout_router
 from vela.surfaces.health import router as health_router
@@ -70,6 +76,24 @@ def build_payments(settings: Settings) -> PaymentsPort:
         raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
                            "del Checkout")
     return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
+
+
+TWILIO_VARS = (("TWILIO_ACCOUNT_SID", "twilio_account_sid"), ("TWILIO_AUTH_TOKEN", "twilio_auth_token"),
+               ("TWILIO_FROM", "twilio_from"))
+
+
+def build_notifier(settings: Settings) -> Notifier:
+    """SMS Twilio con tutte e tre le variabili, finti con nessuna (indipendente dall'upstream).
+    Una configurazione a metà blocca l'avvio: meglio che scoprire in produzione SMS mai partiti.
+    In `loadtest` sempre finti, come il pagamento: il load test non manda SMS veri (M13a)."""
+    if settings.vela_upstream_mode == LOADTEST:
+        return FakeSms()
+    missing = [name for name, attr in TWILIO_VARS if not getattr(settings, attr)]
+    if len(missing) == len(TWILIO_VARS):
+        return FakeSms()
+    if missing:
+        raise RuntimeError("SMS Twilio: mancano %s" % ", ".join(missing))
+    return TwilioSms(settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from)
 
 
 @dataclass(frozen=True)
@@ -153,7 +177,11 @@ def brand_fixtures(fixtures_dir: str, brands) -> List[str]:
     return [found[b][0] for b in brands]
 
 
-def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
+def build_vela(settings: Settings, engine: Engine,
+               notifier: Optional[Notifier] = None) -> Tuple[Vela, Upstream]:
+    """Le frasi e le istruzioni MCP promettono gli SMS solo se il notificatore è Twilio: con
+    quello finto nessun SMS parte davvero (RF-19, RF-57)."""
+    notifier = notifier or build_notifier(settings)
     upstream = build_hofj(settings)
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
@@ -162,7 +190,8 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
                                  booking_reserve=settings.booking_reserve,
                                  quota_burst=settings.quota_burst, quota_floor=settings.quota_floor)
-    vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
+    vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor,
+                sms_enabled=isinstance(notifier, TwilioSms))
     return vela, upstream
 
 
@@ -175,20 +204,26 @@ def build_scheduler(vela: Vela, upstream: Upstream) -> Optional[SyncScheduler]:
     return SyncScheduler(sync, vela.repos, now=vela.now)
 
 
-def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = None) -> Worker:
-    """Job d'acquisto, prenotazione e verifica del pagamento sotto un solo processore (RF-50).
+def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = None,
+                 notifier: Optional[Notifier] = None) -> Worker:
+    """Job d'acquisto, prenotazione, verifica del pagamento e SMS sotto un solo processore (RF-50).
     Senza `router` (test con un client finto) tutti i brand usano `vela.hofj`."""
     router = router or SingleClientRouter(vela.hofj)
+    notifier = notifier or build_notifier(settings)
     purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
                            new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
     booking = BookingJob(vela.repos, router, now=vela.now,
-                         max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff)
+                         max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff,
+                         new_id=vela.new_id)
     check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
                             poll_seconds=settings.payment_poll_seconds)
+    sms = SmsJob(vela.repos, notifier, now=vela.now)
     processor = JobProcessor(vela.repos, router, {JobKind.PURCHASE: purchase,
                                                      JobKind.BOOKING: booking,
-                                                     JobKind.PAYMENT_CHECK: check},
+                                                     JobKind.PAYMENT_CHECK: check,
+                                                     JobKind.SMS_LINK: sms,
+                                                     JobKind.SMS_CONFIRMED: sms},
                              now=vela.now, lease_seconds=settings.job_lease_seconds)
     return Worker(processor, settings.worker_concurrency)
 
@@ -227,13 +262,14 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
                scheduler: Optional[SyncScheduler] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     engine = make_engine(settings.database_url) if settings.database_url else None
-    router = None
+    router = notifier = None
     if vela is None and engine is not None:
-        vela, upstream = build_vela(settings, engine)
+        notifier = build_notifier(settings)            # uno solo: per il worker e per `sms_enabled`
+        vela, upstream = build_vela(settings, engine, notifier)
         catalog_loader, router = upstream.catalog_loader, upstream.router
         scheduler = build_scheduler(vela, upstream)
     if vela is not None and worker is None:
-        worker = build_worker(vela, settings, router)
+        worker = build_worker(vela, settings, router, notifier=notifier)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

@@ -6,12 +6,14 @@ e lo stato del pagamento. Rete, timeout e 5xx: nuovo tentativo dopo 5, 10, 20, 4
 successiva senza contare il tentativo (RF-38). Un ordine che non è più `paid_pending_booking`
 (già confermato da un altro job) chiude il job senza chiamate.
 """
+import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Callable, Sequence
 
 from vela.domain import say
-from vela.domain.models import Job, JobStatus, Order, OrderStatus
+from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
+from vela.domain.notify import enqueue_sms
 from vela.domain.purchase import JobResult
 from vela.ports.hofj import HofJRouter, PaymentProof, QuotaError, UpstreamError, HofJError
 from vela.ports.repositories import Repositories
@@ -21,9 +23,10 @@ BOOKING_CALLS = 1
 
 class BookingJob:
     def __init__(self, repos: Repositories, hofj: HofJRouter, now: Callable[[], datetime],
-                 max_attempts: int = 5, backoff: Sequence[int] = (5, 10, 20, 40)):
+                 max_attempts: int = 5, backoff: Sequence[int] = (5, 10, 20, 40),
+                 new_id: Callable[[], str] = lambda: str(uuid.uuid4())):
         self.repos, self.hofj, self.now = repos, hofj, now
-        self.max_attempts, self.backoff = max_attempts, tuple(backoff)
+        self.max_attempts, self.backoff, self.new_id = max_attempts, tuple(backoff), new_id
 
     def run(self, job: Job, next_window: datetime) -> JobResult:
         order = self.repos.orders.get(job.order_id)
@@ -46,6 +49,7 @@ class BookingJob:
             self._fail(order, "booking_rejected")
             return self._close(job, JobStatus.DEAD, exc)
         self._save(replace(order, status=OrderStatus.CONFIRMED, booking_code=code))
+        enqueue_sms(self.repos, JobKind.SMS_CONFIRMED, order.id, self.now(), self.new_id)   # RF-57
         return self._close(job, JobStatus.DONE)
 
     def _save(self, order: Order) -> None:

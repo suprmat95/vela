@@ -142,7 +142,8 @@ class MemoryRejections:
 
 
 ACTIVE = (JobStatus.PENDING, JobStatus.RUNNING)
-CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.PURCHASE: 2}
+CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.SMS_LINK: 2,
+                  JobKind.SMS_CONFIRMED: 2, JobKind.PURCHASE: 3}
 
 
 def claimable(j: Job, now: datetime, lease_seconds: int) -> bool:
