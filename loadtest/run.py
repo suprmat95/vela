@@ -1,6 +1,6 @@
 """Un giro del load test (M13a), il comando del servizio compose `locust`.
 
-1. aspetta che Vela risponda e che il sync M10 contro il finto abbia scritto tutto il catalogo;
+1. aspetta che Vela risponda con tutto il catalogo (caricato al boot dalle fixture dei brand);
 2. lancia Locust headless (`loadtest/locustfile.py`) contro Vela;
 3. copia il registro del finto e le sue statistiche nella cartella del giro e scrive il report.
 
@@ -28,7 +28,7 @@ DEFAULT_BRANDS = "weebora.com,terrarossa.com"
 
 
 def expected_products(brands: List[str], fixtures_dir: str = FIXTURES) -> int:
-    """Prodotti attivi nelle fixture dei brand: quanti ne scrive un sync completo."""
+    """Prodotti attivi nelle fixture dei brand: quanti ne carica Vela al boot."""
     total = 0
     for name in sorted(os.listdir(fixtures_dir)):
         if not (name.startswith("catalog") and name.endswith(".json")):
@@ -44,8 +44,8 @@ def wait_for_catalog(get: Callable[[str], dict], expected: int, timeout: float =
                      sleep: Callable[[float], None] = time.sleep,
                      clock: Callable[[], float] = time.monotonic,
                      say: Callable[[str], None] = print) -> dict:
-    """Interroga `/health` finché il catalogo ha `expected` prodotti. Il sync a 120/min ci mette
-    1-2 minuti; errori di rete all'avvio dei container si ignorano."""
+    """Interroga `/health` finché il catalogo ha `expected` prodotti; errori di rete all'avvio dei
+    container si ignorano."""
     start = clock()
     while True:
         try:
@@ -56,9 +56,9 @@ def wait_for_catalog(get: Callable[[str], dict], expected: int, timeout: float =
         if products >= expected:
             return health
         if clock() - start > timeout:
-            raise RuntimeError("catalogo a %d prodotti su %d dopo %g s: il sync non è finito"
+            raise RuntimeError("catalogo a %d prodotti su %d dopo %g s"
                                % (products, expected, timeout))
-        say("attendo il sync del catalogo: %d/%d prodotti" % (products, expected))
+        say("attendo il catalogo: %d/%d prodotti" % (products, expected))
         sleep(10)
 
 

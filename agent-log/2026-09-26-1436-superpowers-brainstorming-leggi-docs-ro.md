@@ -338,3 +338,73 @@ Mentre esce, rendo la chiusura del giro robusta: se Locust interrompe il task (l
 - 🔧 Bash: Make the Locust scenario flush on interruption; read smoke output
 
 - 🔧 Bash: Commit fixes and write the four-run script
+
+- 🔧 Bash: Run the four load test runs in sequence
+
+I quattro giri sono partiti in background, uno dopo l'altro, ognuno da un compose pulito:
+
+| Giro | Viaggiatori | Finto HofJ |
+|---|---|---|
+| `1k` | 1.000 | finestra ancorata, latenza standard, 12/min di altri usi |
+| `10k` | 10.000 | idem |
+| `50k` | 50.000 | idem |
+| `50k-guasti` | 50.000 | latenza pessimistica + guasti su itinerari e booking |
+
+Ogni giro dura circa 2 minuti di sync del catalogo più 17 minuti di scenario: in tutto circa 80 minuti. Tutto resta in locale e nessuna chiamata va a HofJ o a Stripe.
+
+Il giro di prova da 50 viaggiatori è andato fino in fondo, con questi risultati:
+- 0 errori e 0 risposte 429;
+- p95 dei casi d'uso tra 9 e 54 ms;
+- 14 carrelli e 10 prenotazioni;
+- nessun itinerario orfano;
+- Marco confermato 5 secondi dopo il pagamento.
+
+Nel frattempo ho corretto e committato due problemi emersi dalla prova:
+- le sentinelle erano fuori dalla finestra negli scenari brevi;
+- i viaggiatori non venivano scritti quando Locust ferma il giro.
+
+Quando i giri finiscono compilo `loadtest/RESULTS.md` con la colonna "prima" e il confronto con le previsioni della seconda lettura, poi ti faccio il resoconto.
+
+## Utente 15:45
+
+perche ci vogliono 2 minuti di synch?
+
+## Agente 15:45
+
+Il sync serve perché nei giri il DB parte vuoto (`docker compose down -v`), e hai scelto tu di caricare il catalogo con il sync M10 vero contro il finto invece che dalle fixture. Con il DB vuoto il sync scarica tutto:
+
+- **Chiamate:** 3 pagine di lista (padel 110 item = 2 pagine da 100, tennis 80 = 1 pagina) più 126 dettagli, uno per prodotto attivo. Sono circa 130 chiamate a HofJ.
+- **Latenza, la causa principale:** il sync fa le chiamate una alla volta, e il finto dà 0,3-1,5 s a chiamata (0,9 s in media). 130 × 0,9 s fanno circa 2 minuti.
+- **Quota:** 130 chiamate superano le 108 che Vela si concede al minuto, quindi servono comunque almeno due finestre. Qui però pesa meno della latenza.
+
+Il costo è solo del primo avvio. In live, dopo il primo sync, i giri successivi (ogni 6 h) scaricano solo le pagine e i dettagli dei prodotti cambiati: di solito 3 chiamate.
+
+I numeri dello scenario non ne risentono. `run.py` fa partire Locust solo quando il catalogo ha tutti i 126 prodotti, e il report conta le chiamate del sync a parte (riga "prima del giro: sync"). Il sync resta comunque visibile nel registro del finto, come previsto dalla §3.6 della seconda lettura ("M10 entra nel budget").
+
+Se vuoi accorciarlo si può caricare il catalogo dalle fixture al boot, come in replay. È l'opzione che avevi scartato perché meno fedele al live. Per me i 2 minuti a giro, circa 8 in tutto, valgono la fedeltà, quindi lascerei così.
+
+## Utente 15:46
+
+per il load test potremmo usare dei dati fake invece di syncare tutto ogni volta
+
+## Agente 15:46
+
+- 🔧 Bash: Check progress of the running load test script
+
+- 🔧 AskUserQuestion
+
+- 🔧 Bash: Stop the running load test script and stack
+
+- 🔧 Bash: Remove leftover locust container and stop stack
+
+- 🔧 Bash: Remove leftover locust container and stop stack
+
+Stack fermo. Ora la modifica, test prima: in modo `loadtest` il catalogo si carica al boot dalle fixture dei brand configurati.
+
+- 🔧 Bash: Write failing tests for fixture catalog in loadtest mode
+
+- 🔧 Bash: Load loadtest catalog from brand fixtures and run app tests
+
+- 🔧 Bash: Update docs and comments for fixture catalog; run suite
+
+- 🔧 Bash: Commit, rebuild images and start stack

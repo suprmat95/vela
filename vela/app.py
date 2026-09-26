@@ -13,7 +13,8 @@ Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ 
 interrogando la Checkout Session (job di M5).
 Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
 In ``loadtest`` (M13a) HofJ è il finto di ``loadtest/fake_hofj`` via HTTP, come in live, ma solo su
-localhost o ``fake-hofj``; il pagamento è sempre finto e il checkout di replay è montato.
+localhost o ``fake-hofj``; il catalogo parte dalle fixture dei brand, il pagamento è sempre finto e
+il checkout di replay è montato.
 """
 import os
 from contextlib import asynccontextmanager
@@ -34,7 +35,7 @@ from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
 from vela.config import DEFAULT_TRAVELER, Settings, live_brands
 from vela.domain.booking import BookingJob
-from vela.domain.catalog import fixture_meta, select_fixtures
+from vela.domain.catalog import fixture_meta, load_fixture, select_fixtures
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
@@ -87,7 +88,9 @@ def build_hofj(settings: Settings) -> Upstream:
     Un `HofJHttp` per brand, stessa chiave e stesso host; il locale è quello delle fixture
     registrate sull'host (`it` in produzione, `en` su staging).
     `loadtest` (M13a): come live ma verso il finto HofJ, solo su `LOADTEST_HOSTS`, senza Stripe;
-    il locale di ogni brand è quello della sua fixture, perché il finto non è un host registrato."""
+    il locale di ogni brand è quello della sua fixture, perché il finto non è un host registrato.
+    Il catalogo parte dalle fixture dei brand (le stesse che serve il finto), così ogni giro non
+    rifà il sync completo; lo scheduler resta e trova il catalogo fresco."""
     if settings.vela_upstream_mode == REPLAY:
         hofj = ReplayHofJ(latency=settings.replay_latency, limit=settings.replay_limit)
         return Upstream(SingleClientRouter(hofj), catalog_loader=hofj.load_catalog)
@@ -111,8 +114,10 @@ def build_hofj(settings: Settings) -> Upstream:
         clients = {brand: HofJHttp(settings.hofj_base_url, settings.hofj_api_key, brand,
                                    locale=locales.get(brand, "it"))
                    for brand in brands.values()}
-        return Upstream(BrandRouter(clients, brands), catalog_source=next(iter(clients.values())),
-                        brands=brands)
+        paths = brand_fixtures(FIXTURES_DIR, brands.values())
+        loader = lambda: [p for path in paths for p in load_fixture(path)]
+        return Upstream(BrandRouter(clients, brands), catalog_loader=loader,
+                        catalog_source=next(iter(clients.values())), brands=brands)
     if not settings.stripe_secret_key:
         raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
                            "non esiste contro HofJ vero")
@@ -123,14 +128,28 @@ def build_hofj(settings: Settings) -> Upstream:
                     brands=brands)
 
 
-def brand_locales(fixtures_dir: str) -> dict:
-    """{brand: locale} dalle fixture `catalog*.json` di qualunque host (modo `loadtest`)."""
-    locales = {}
+def _fixtures_by_brand(fixtures_dir: str) -> dict:
+    """{brand: (percorso, meta)} delle fixture `catalog*.json` di qualunque host (modo `loadtest`)."""
+    found = {}
     for name in sorted(os.listdir(fixtures_dir)):
         if name.startswith("catalog") and name.endswith(".json"):
-            meta = fixture_meta(os.path.join(fixtures_dir, name))
-            locales[meta["brand"]] = meta["locale"]
-    return locales
+            path = os.path.join(fixtures_dir, name)
+            meta = fixture_meta(path)
+            found[meta["brand"]] = (path, meta)
+    return found
+
+
+def brand_locales(fixtures_dir: str) -> dict:
+    return {brand: meta["locale"] for brand, (_, meta) in _fixtures_by_brand(fixtures_dir).items()}
+
+
+def brand_fixtures(fixtures_dir: str, brands) -> List[str]:
+    """Le fixture dei brand configurati; un brand senza fixture ferma l'avvio."""
+    found = _fixtures_by_brand(fixtures_dir)
+    missing = [b for b in brands if b not in found]
+    if missing:
+        raise RuntimeError("VELA_UPSTREAM_MODE=loadtest: nessuna fixture per %s" % ", ".join(missing))
+    return [found[b][0] for b in brands]
 
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
@@ -146,7 +165,8 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
 
 
 def build_scheduler(vela: Vela, upstream: Upstream) -> Optional[SyncScheduler]:
-    """Il sync del catalogo esiste solo in live (M10); in replay il catalogo sono le fixture."""
+    """Il sync del catalogo esiste in live (M10) e in loadtest (dove parte dalle fixture e trova il
+    catalogo fresco); in replay il catalogo sono le fixture."""
     if upstream.catalog_source is None:
         return None
     sync = CatalogSync(upstream.catalog_source, vela.repos, upstream.brands, now=vela.now)
@@ -188,7 +208,7 @@ def realign_catalog(vela: Vela, catalog_loader: CatalogLoader) -> Tuple[int, int
 def bootstrap(vela: Vela, worker: Worker, catalog_loader: Optional[CatalogLoader],
               scheduler: Optional[SyncScheduler] = None) -> dict:
     loaded = archived = 0
-    if catalog_loader is not None:                     # replay: fixture dell'host (M7)
+    if catalog_loader is not None:                     # replay (M7) e loadtest (M13a): fixture
         loaded, archived = realign_catalog(vela, catalog_loader)
     synced = worker.processor.refresh_quota()          # RF-36: al boot, prima del sync
     if scheduler is not None:                          # live: sync multi-brand (M10, RF-30)

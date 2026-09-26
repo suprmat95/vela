@@ -35,10 +35,28 @@ class LoadtestModeTest(unittest.TestCase):
         staging = loadtest_app(hofj_brands="padel=staging.weebora.com").state.vela.hofj
         self.assertEqual(staging.clients["staging.weebora.com"].locale, "en")
 
-    def test_catalog_comes_from_the_sync(self):
+    def test_catalog_is_loaded_from_the_fixtures_of_the_brands(self):
+        # decisione M13a: niente sync completo a ogni giro, il catalogo parte dalle fixture
         app = loadtest_app()
-        self.assertIsNone(app.state.catalog_loader)
+        products = app.state.catalog_loader()
+        self.assertEqual({p.brand for p in products}, {"weebora.com", "terrarossa.com"})
+        self.assertEqual(sum(1 for p in products if not p.archived), 77 + 49)
+        staging = loadtest_app(hofj_brands="padel=staging.weebora.com").state.catalog_loader()
+        self.assertEqual({p.brand for p in staging}, {"staging.weebora.com"})
+
+    def test_sync_scheduler_stays_but_finds_a_fresh_catalog(self):
+        from vela.adapters.repo_memory import MemoryRepositories
+        from vela.app import realign_catalog
+        app = loadtest_app()
         self.assertIsInstance(app.state.scheduler, SyncScheduler)
+        repos = MemoryRepositories()
+        class Holder:   # realign_catalog vuole solo `repos`
+            pass
+        holder = Holder()
+        holder.repos = repos
+        realign_catalog(holder, app.state.catalog_loader)
+        scheduler = SyncScheduler(sync=None, repos=repos)
+        self.assertGreater(scheduler.tick(), 5 * 3600)   # nessun giro: il catalogo è fresco
 
     def test_payments_are_fake_even_with_a_stripe_key(self):
         app = loadtest_app(stripe_secret_key="rk_test_segreta")

@@ -11,9 +11,9 @@ locale con Docker: **mai contro HofJ vero, mai contro Render, mai Stripe**. Cont
 | Servizio | Cosa fa |
 |---|---|
 | `fake-hofj` | Finto HofJ HTTP (`loadtest/fake_hofj`) con le **regole di HofJ**: quota di 120/min per chiave con finestra ancorata (come misurato, `docs/api/quota-health.md`), latenza 2-6 s su `POST /v1/itineraries`, guasti a richiesta, registro JSONL di ogni chiamata |
-| `vela` | Vela in `VELA_UPSTREAM_MODE=loadtest`: HofJ via HTTP verso il finto (rifiuta ogni host diverso da `fake-hofj`/`localhost`), pagamenti finti, `GET /replay/checkout/{id}` per pagare. Il catalogo arriva dal sync M10 contro il finto |
+| `vela` | Vela in `VELA_UPSTREAM_MODE=loadtest`: HofJ via HTTP verso il finto (rifiuta ogni host diverso da `fake-hofj`/`localhost`), pagamenti finti, `GET /replay/checkout/{id}` per pagare. Il catalogo parte dalle fixture dei brand (le stesse del finto): lo scheduler del sync resta ma lo trova fresco |
 | `postgres` | Postgres 16 locale |
-| `locust` | Profilo `loadtest`: `loadtest/run.py` aspetta il sync, lancia Locust e scrive il report |
+| `locust` | Profilo `loadtest`: `loadtest/run.py` aspetta il catalogo, lancia Locust e scrive il report |
 
 ## Un giro
 
@@ -23,8 +23,8 @@ docker compose run --rm locust --travelers 1000 --label 1k
 docker compose down -v        # ogni giro parte da DB, coda e quota pulite
 ```
 
-`run.py` aspetta che `/health` di Vela abbia tutto il catalogo (126 prodotti, 1-2 minuti di sync a
-120/min), lancia Locust per 10 minuti di arrivi + 5 di coda, poi scrive in
+`run.py` aspetta che `/health` di Vela abbia tutto il catalogo (126 prodotti, caricati al boot),
+lancia Locust per 10 minuti di arrivi + 5 di coda, poi scrive in
 `loadtest/out/<label>/` (ignorata da git):
 
 - `report.md`, `report.json`: le misure del giro;
