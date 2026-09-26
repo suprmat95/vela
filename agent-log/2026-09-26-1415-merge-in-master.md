@@ -66,3 +66,11 @@ si
 - 🔧 Bash: Read quota-health, differences and hofj-questions docs
 
 - 🔧 Bash: Update quota-health, differences, hofj-questions and commit
+
+Ora la spec.
+
+- 🔧 Bash: Locate spec requirements to update
+
+- 🔧 Bash: Read spec requirement texts
+
+- 🔧 Bash: Update spec requirements and commit

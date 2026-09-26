@@ -5,7 +5,9 @@ roadmap (`docs/roadmap.md`); §4.10, RF-14, RF-16, RF-17, RF-19, RF-25, RF-27, R
 RF-41, RNF-04, RNF-05, RNF-10, RNF-12, RNF-13 e §10.1 aggiornati il 2026-09-25 per il twist
 (50.000 viaggiatori in dieci minuti). RF-01..04, RF-08, RF-09, RF-39..42 e §4.11 (RF-52..55)
 aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). RF-28..32, §6, §7 e RF-56
-aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). Origine: `docs/brief.md` e
+aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). RF-36, RF-47, RNF-04,
+RNF-10 aggiornati il 2026-09-26 per la seconda lettura del twist
+(`docs/plans/2026-09-26-twist-seconda-lettura.md`). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -219,9 +221,13 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
 ### 4.8 Gestione della quota HofJ
 
-- **RF-36** Ogni chiamata a HofJ passa da un guardiano della quota: contatore condiviso in
-  Postgres per finestra mobile di 60 secondi, inizializzato da `GET /v1/quota` all'avvio e
-  aggiornato a ogni chiamata (inclusa quella di quota).
+- **RF-36** Ogni chiamata a HofJ passa da un guardiano della quota, che distribuisce le
+  chiamate a ritmo costante (token bucket condiviso in Postgres) in modo che nessun intervallo
+  di 60 secondi superi il limite effettivo; inizializzato da `GET /v1/quota` all'avvio e
+  aggiornato a ogni chiamata (inclusa quella di quota). Nota: la finestra di HofJ misurata è
+  fissa e ancorata alla prima chiamata dopo la scadenza (`docs/api/quota-health.md`); il ritmo
+  costante è sicuro anche se fosse scorrevole. Implementazione: roadmap M18 (oggi il codice
+  usa ancora un contatore per finestra).
 - **RF-37** Il guardiano è lo scheduler della quota di RF-47: nessuna chiamata a HofJ parte
   senza un blocco di budget prenotato nella finestra corrente. Le chiamate di prenotazione
   degli ordini pagati hanno una riserva garantita per finestra; i job d'acquisto usano il
@@ -293,7 +299,7 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   compreso) così che un'interruzione riprenda dal passo successivo. Un passo fallito per rete,
   timeout o 5xx viene ripetuto fino a tre volte nelle finestre successive; poi l'ordine passa a
   `failed` con un motivo leggibile. Un errore del prodotto segue RF-17.
-- **RF-47** Lo scheduler della quota è unico per il cluster: un contatore per finestra di 60 s
+- **RF-47** Lo scheduler della quota è unico per il cluster: un token bucket condiviso
   in Postgres (RF-36), tre classi in ordine di priorità: `booking` (prenotazioni di ordini
   pagati, riserva garantita del 20% della finestra, configurabile), `purchase` (job
   d'acquisto, il resto della finestra, in ordine di arrivo), `sync` (solo a coda `purchase`
@@ -303,7 +309,9 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   boot e dopo un 429, mai in ciclo.
 - **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti per finestra, con acquisti
   per finestra = (limite − riserva `booking`) ÷ 5. Ricalcolata a ogni `get_order_status`. Non
-  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
+  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata. (Da rivedere in M18: se
+  il token bucket cambia la formula diventa acquisti per finestra = (ritmo × 60 − riserva
+  `booking`) ÷ 5.)
 - **RF-49** `reject_proposal` sulla proposta di un ordine `queued` porta l'ordine a
   `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08).
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
@@ -359,7 +367,10 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
   girano in background nello stesso processo (RF-27 copre il crash).
 - **RNF-03 Idempotenza.** Webhook duplicati, ripetizioni di `POST /v1/bookings`, doppio
   `accept` sulla stessa proposta non creano ordini o prenotazioni doppie.
-- **RNF-04 Timeout.** Le chiamate a HofJ hanno timeout di 15 secondi. Nessun caso d'uso
+- **RNF-04 Timeout.** HofJ rinuncia verso il brand dopo 15 s; il client di Vela aspetta 20 s.
+  Un timeout è un esito incerto: si ripetono solo le chiamate idempotenti
+  (`POST /v1/bookings`); un timeout su `POST /v1/itineraries` conta un itinerario
+  probabilmente orfano. Nessun caso d'uso
   aspetta HofJ: il job d'acquisto (RF-46) assorbe i 2-6 secondi della ricerca di
   disponibilità live e i timeout, con ripetizione per passo e stato `failed` come esito
   finale leggibile.
@@ -378,12 +389,13 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
   orchestratore (con porte fake), webhook, superfici REST e MCP. Nessun test chiama servizi
   esterni. Il dominio si testa con repository in memoria; i test che toccano Postgres girano
   solo se `DATABASE_URL` è impostata (Render Postgres) e altrimenti vengono saltati.
-- **RNF-10 Load test.** `loadtest/locustfile.py` esercita il flusso completo in replay contro
-  l'URL live o locale. `loadtest/RESULTS.md` riporta utenti simulati, RPS, p50/p95/p99, errori,
+- **RNF-10 Load test.** `loadtest/locustfile.py` esercita il flusso completo contro l'istanza
+  locale o un'istanza in modo `loadtest`, con HofJ e Stripe simulati; mai contro HofJ reale. `loadtest/RESULTS.md` riporta utenti simulati, RPS, p50/p95/p99, errori,
   più i numeri reali di `GET /v1/quota` (limite per minuto) e la latenza misurata di un
   flusso di prenotazione reale. Uno scenario "twist" simula 50.000 viaggiatori in dieci
-  minuti in replay, con HofJ finto che impone 120 chiamate al minuto e 2-6 secondi di latenza
-  per chiamata: riporta p95 dei casi d'uso, acquisti completati al minuto (atteso ≈ 20),
+  minuti con un HofJ finto che applica le regole di HofJ (120 chiamate al minuto, finestra ancorata) e 2-6 secondi di latenza
+  per chiamata: riporta p95 dei casi d'uso, acquisti completati al minuto (al massimo 17,4 per la quota; ~12 previsti con 4 worker per la
+  latenza, da confermare con M13a),
   scarto tra attesa stimata e reale, tempo tra pagamento simulato e prenotazione (atteso
   < 60 s), errori di quota (atteso 0).
 - **RNF-11 Deploy.** Dockerfile, deploy su Render con Postgres gestito, migrazioni al boot,
