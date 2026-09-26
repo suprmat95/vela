@@ -187,3 +187,62 @@ class UnderstoodTest(unittest.TestCase):
 
     def test_recognised_but_unchanged_is_understood(self):
         self.assertTrue(refinement("a ottobre").understood)
+
+
+class DurationTest(unittest.TestCase):
+    """M21-A: "troppo lungo/corto" sposta la durata rispetto alla proposta (3 notti); una durata
+    esplicita nel motivo o nei campi la sostituisce."""
+
+    def nights(self, reason, criteria=CRIT, fields=None):
+        c = refine(criteria, reason, PROPOSAL, VALENCIA, TODAY, fields=fields).criteria
+        return c.duration_min_nights, c.duration_max_nights
+
+    def with_duration(self, low, high):
+        return replace(CRIT, duration_min_nights=low, duration_max_nights=high)
+
+    def test_too_long_caps_below_the_proposal(self):
+        for reason in ("troppo lungo", "è troppo lunga", "dura troppo", "too long",
+                       "something shorter", "vorrei qualcosa di più breve", "più corto"):
+            with self.subTest(reason):
+                self.assertEqual(self.nights(reason), (None, 2))
+        self.assertEqual(self.nights("too long", self.with_duration(1, 3)), (1, 2))
+        self.assertEqual(self.nights("troppo lungo", self.with_duration(3, 5)), (2, 2))
+
+    def test_too_short_asks_more_than_the_proposal(self):
+        for reason in ("troppo corto", "è troppo breve", "too short", "something longer",
+                       "vorrei qualcosa di più lungo"):
+            with self.subTest(reason):
+                self.assertEqual(self.nights(reason), (4, None))
+        self.assertEqual(self.nights("troppo corto", self.with_duration(1, 3)), (4, 4))
+        self.assertEqual(self.nights("too short", self.with_duration(1, 8)), (4, 8))
+
+    def test_one_night_cannot_be_shorter(self):
+        one = replace(PROPOSAL, end_date=date(2026, 10, 2))
+        r = refine(CRIT, "troppo lungo", one, VALENCIA, TODAY)
+        self.assertEqual((r.criteria.duration_min_nights, r.criteria.duration_max_nights),
+                         (None, None))
+        self.assertFalse(r.understood)
+
+    def test_explicit_duration_in_the_reason(self):
+        self.assertEqual(self.nights("vorrei una settimana"), (6, 8))
+        self.assertEqual(self.nights("meglio 4 notti"), (4, 4))
+        self.assertEqual(self.nights("two weeks please"), (13, 15))
+        self.assertEqual(self.nights("troppo corto, almeno 5 notti"), (5, None))
+
+    def test_fields_beat_the_text(self):
+        r = refine(CRIT, "vorrei una settimana", PROPOSAL, VALENCIA, TODAY,
+                   fields=StructuredFields(duration_min_nights=4, duration_max_nights=5))
+        self.assertEqual((r.criteria.duration_min_nights, r.criteria.duration_max_nights), (4, 5))
+        self.assertIn(("duration_min_nights", 6, 4), r.conflicts)
+        self.assertTrue(r.understood)
+
+    def test_invalid_fields_are_discarded(self):
+        r = refine(CRIT, "", PROPOSAL, VALENCIA, TODAY,
+                   fields=StructuredFields(duration_min_nights=9, duration_max_nights=2))
+        self.assertEqual(r.discarded, (("duration", (9, 2)),))
+        self.assertIsNone(r.criteria.duration_min_nights)
+
+    def test_too_long_is_understood_and_keeps_other_criteria(self):
+        r = refine(CRIT, "too long", PROPOSAL, VALENCIA, TODAY)
+        self.assertTrue(r.understood)
+        self.assertEqual(replace(r.criteria, duration_max_nights=None), CRIT)

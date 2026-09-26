@@ -3,8 +3,8 @@
 Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, prezzo
 (dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
 restanti ordina per aderenza all'area (dentro l'area 3, stessa regione 2, stesso paese 1),
-totale entro budget, prezzo crescente, id. Area e budget non escludono mai: se non sono
-rispettati la motivazione lo dichiara. Se un filtro azzera i candidati, `NoChoice` porta il
+totale entro budget, durata compatibile (M21, RF-58), prezzo crescente, id. Area, budget e
+durata non escludono mai: se non sono rispettati la motivazione lo dichiara (RF-59). Se un filtro azzera i candidati, `NoChoice` porta il
 nome di quel filtro (RF-09).
 """
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ from typing import Iterable, Optional, Set, Tuple, Union
 from vela.domain import geo
 from vela.domain.catalog import is_trip
 from vela.domain.models import Area, Criteria, Period, Product
-from vela.domain.say import fmt_money, on_date
+from vela.domain.say import fmt_money, fmt_nights, fmt_span, nights_range, on_date
 
 FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "price", "rejected")
 
@@ -30,6 +30,8 @@ class Choice:
     reason: str
     area_score: int
     within_budget: bool
+    nights: int = 0
+    duration_ok: bool = True
 
 
 @dataclass(frozen=True)
@@ -134,8 +136,52 @@ def _area_sentence(product: Product, area: Optional[Area], score: int, lang: str
     return ("%s: this one is %s." if en else "%s: questa è %s.") % (head, here)
 
 
+def nights_between(start: date, end: date) -> int:
+    """Notti del viaggio scelto da `departure`: `duration_days` − 1 o la finestra fissa."""
+    return (end - start).days
+
+
+def _duration_ok(nights: int, criteria: Criteria) -> bool:
+    low, high = criteria.duration_min_nights, criteria.duration_max_nights
+    return (low is None or nights >= low) and (high is None or nights <= high)
+
+
+def _product_duration_ok(product: Product, criteria: Criteria, today: date) -> bool:
+    if criteria.duration_min_nights is None and criteria.duration_max_nights is None:
+        return True
+    return _duration_ok(nights_between(*departure(product, criteria.period, today)), criteria)
+
+
+# durate della tabella di UC-A che hanno un nome proprio nella motivazione
+_DURATION_NAMES = {(1, 3): ("weekend", "weekend trips"),
+                   (2, 4): ("ponti o weekend lunghi", "long-weekend trips"),
+                   (6, 8): ("viaggi di una settimana", "week-long trips"),
+                   (13, 15): ("viaggi di due settimane", "two-week trips")}
+
+
+def _duration_sentence(criteria: Criteria, start: date, end: date) -> str:
+    """RF-59: "Non ho weekend compatibili: questo dura 5 notti, dal 9 al 14 ottobre." """
+    lang = criteria.language
+    en = lang == "en"
+    low, high = criteria.duration_min_nights, criteria.duration_max_nights
+    named = _DURATION_NAMES.get((low, high))
+    if named is not None:
+        wanted = named[1] if en else named[0]
+    else:
+        asked = nights_range(low, high, lang)
+        if en:
+            wanted = "trips of " + asked
+        else:
+            wanted = "viaggi " + (asked if asked.startswith("da ") else "di " + asked)
+    nights = fmt_nights(nights_between(start, end), lang)
+    return (("I have no %s: this one is %s, %s." if en else "Non ho %s compatibili: questo dura %s, %s.")
+            % (wanted, nights, fmt_span(start, end, lang)))
+
+
 def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, score: int,
-                           within: bool) -> str:
+                           within: bool, cheaper_skipped: bool = False) -> str:
+    """`cheaper_skipped`: un prodotto più economico con la stessa area e lo stesso budget ha
+    perso solo per la durata, quindi "la più economica" vale tra quelle della durata chiesta."""
     lang = criteria.language
     en = lang == "en"
     text = ("It leaves %s" if en else "Parte %s") % on_date(start, lang)
@@ -143,6 +189,10 @@ def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, sc
         text += ", in the period you asked for," if en else ", nel periodo che hai chiesto,"
     total = fmt_money(_total(product, criteria), lang)
     cheapest = "it's the cheapest compatible option" if en else "è la più economica compatibile"
+    length = ""
+    if cheaper_skipped:
+        length = " of the length you asked for" if en else " tra quelle della durata che hai chiesto"
+        cheapest += length
     if criteria.budget is None:
         if criteria.area is None:
             return text + (" and %s." if en else " ed %s.") % cheapest
@@ -158,15 +208,19 @@ def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, sc
     if criteria.area is None:
         return text + (", but %s." if en else ", ma %s.") % cheapest
     if score == INSIDE:
-        return text + ((", but it's the cheapest %s." if en else ", ma è la più economica %s.")
-                       % geo.where(criteria.area, lang))
+        return text + ((", but it's the cheapest %s%s." if en else ", ma è la più economica %s%s.")
+                       % (geo.where(criteria.area, lang), length))
     return text + "."
 
 
-def _reason(product: Product, criteria: Criteria, start: date, score: int, within: bool) -> str:
-    first = _area_sentence(product, criteria.area, score, criteria.language)
-    second = _dates_budget_sentence(product, criteria, start, score, within)
-    return second if first is None else first + " " + second
+def _reason(product: Product, criteria: Criteria, start: date, end: date, score: int,
+            within: bool, duration_ok: bool, cheaper_skipped: bool) -> str:
+    sentences = [_area_sentence(product, criteria.area, score, criteria.language)]
+    if not duration_ok:
+        sentences.append(_duration_sentence(criteria, start, end))
+    sentences.append(_dates_budget_sentence(product, criteria, start, score, within,
+                                            cheaper_skipped))
+    return " ".join(s for s in sentences if s is not None)
 
 
 RECHECK_AFTER = timedelta(hours=24)   # RF-34
@@ -201,9 +255,14 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         if not candidates:
             return NoChoice(name)
     candidates.sort(key=lambda p: (-area_score(p, criteria.area), not _within_budget(p, criteria),
-                                   p.price, p.id))
+                                   not _product_duration_ok(p, criteria, today), p.price, p.id))
     best = candidates[0]
     start, end = departure(best, criteria.period, today)
     score = area_score(best, criteria.area)
     within = _within_budget(best, criteria)
-    return Choice(best, start, end, _reason(best, criteria, start, score, within), score, within)
+    nights = nights_between(start, end)
+    fits = _duration_ok(nights, criteria)
+    cheaper_skipped = any(p.price < best.price and area_score(p, criteria.area) == score
+                          and _within_budget(p, criteria) == within for p in candidates)
+    reason = _reason(best, criteria, start, end, score, within, fits, cheaper_skipped)
+    return Choice(best, start, end, reason, score, within, nights, fits)

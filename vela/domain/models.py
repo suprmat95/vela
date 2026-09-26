@@ -41,6 +41,8 @@ class Criteria:
     pax: Optional[int] = None
     budget: Optional[Decimal] = None
     language: str = "it"
+    duration_min_nights: Optional[int] = None   # M21, RF-58: morbido, ordina e non esclude
+    duration_max_nights: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -54,10 +56,14 @@ class StructuredFields:
     pax: Optional[int] = None
     budget: Optional[object] = None
     direction: Optional[str] = None
+    duration_min_nights: Optional[object] = None
+    duration_max_nights: Optional[object] = None
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
-                "period_end": self.period_end, "pax": self.pax, "budget": self.budget}
+                "period_end": self.period_end, "pax": self.pax, "budget": self.budget,
+                "duration_min_nights": self.duration_min_nights,
+                "duration_max_nights": self.duration_max_nights}
 
 
 def criteria_to_dict(c: Criteria) -> dict:
@@ -70,6 +76,8 @@ def criteria_to_dict(c: Criteria) -> dict:
                                                  "label": c.period.label},
         "pax": c.pax,
         "budget": None if c.budget is None else money_str(c.budget),
+        "duration_min_nights": c.duration_min_nights,
+        "duration_max_nights": c.duration_max_nights,
         "language": c.language,
     }
 
@@ -86,6 +94,8 @@ def criteria_from_dict(d: dict) -> Criteria:
                                                   period["label"]),
         pax=d.get("pax"),
         budget=None if budget is None else Decimal(budget),
+        duration_min_nights=d.get("duration_min_nights"),
+        duration_max_nights=d.get("duration_max_nights"),
         language=d.get("language") or "it",
     )
 
@@ -211,6 +221,10 @@ class Proposal:
     @property
     def total_from(self) -> Decimal:
         return self.price_from * self.pax
+
+    @property
+    def nights(self) -> int:
+        return (self.end_date - self.start_date).days
 
 
 class OrderStatus(str, Enum):
@@ -354,7 +368,7 @@ class ProposalMade:
         p = self.proposal
         return {"proposal_id": p.id, "intent_id": p.intent_id, "product": self.product.to_dict(),
                 "start_date": p.start_date.isoformat(), "end_date": p.end_date.isoformat(),
-                "pax": p.pax, "price_from": money_str(p.price_from),
+                "nights": p.nights, "pax": p.pax, "price_from": money_str(p.price_from),
                 "total_from": money_str(p.total_from), "currency": p.currency,
                 "reason": p.reason, "replaced": self.replaced, "say": self.say}
 

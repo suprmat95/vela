@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from vela.domain.models import (Area, Criteria, Order, OrderStatus, Participant, Period,
-                                Proposal, TravelerProfile, criteria_from_dict, criteria_to_dict,
+                                ProductSummary, Proposal, ProposalMade, TravelerProfile, criteria_from_dict, criteria_to_dict,
                                 money_str, profile_from_dict, profile_to_dict)
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
@@ -26,8 +26,31 @@ class CriteriaRoundTripTest(unittest.TestCase):
         c = Criteria()
         d = criteria_to_dict(c)
         self.assertEqual(d, {"sport": None, "area": None, "period": None, "pax": None,
-                             "budget": None, "language": "it"})
+                             "budget": None, "duration_min_nights": None,
+                             "duration_max_nights": None, "language": "it"})
         self.assertEqual(criteria_from_dict(d), c)
+
+    def test_duration_round_trip(self):
+        c = Criteria(sport="padel", duration_min_nights=1, duration_max_nights=3)
+        self.assertEqual(criteria_from_dict(criteria_to_dict(c)), c)
+
+    def test_intent_saved_before_m21_has_no_duration(self):
+        old = {"sport": "padel", "area": None, "period": None, "pax": 2, "budget": None,
+               "language": "it"}
+        c = criteria_from_dict(old)
+        self.assertIsNone(c.duration_min_nights)
+        self.assertIsNone(c.duration_max_nights)
+
+
+class ProposalNightsTest(unittest.TestCase):
+    """M21-A: le notti del viaggio proposto nella risposta `proposal`."""
+
+    def test_nights_in_the_response(self):
+        p = Proposal("p1", "i1", "181", date(2026, 10, 9), date(2026, 10, 14), 2, Decimal("400"),
+                     "EUR", "Motivo.", NOW)
+        self.assertEqual(p.nights, 5)
+        d = ProposalMade(p, ProductSummary("181", "T", None, None), "Ti propongo.").to_dict()
+        self.assertEqual(d["nights"], 5)
 
 
 class ProfileTest(unittest.TestCase):

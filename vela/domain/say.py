@@ -30,6 +30,41 @@ def on_date(d: date, lang: str = "it") -> str:
     return ("l'%s" if d.day in (8, 11) else "il %s") % fmt_date(d)
 
 
+def fmt_span(start: date, end: date, lang: str = "it") -> str:
+    """"dal 9 al 14 ottobre", "dall'8 all'11 ottobre", "from 9 to 14 October"; l'anno solo se
+    le due date cadono in anni diversi."""
+    months = MONTHS_EN if lang == "en" else MONTHS_IT
+    if start.year != end.year:
+        first, last = fmt_date(start, lang), fmt_date(end, lang)
+    elif start.month != end.month:
+        first = "%d %s" % (start.day, months[start.month - 1])
+        last = "%d %s" % (end.day, months[end.month - 1])
+    else:
+        first, last = str(start.day), "%d %s" % (end.day, months[end.month - 1])
+    if lang == "en":
+        return "from %s to %s" % (first, last)
+    return "%s%s %s%s" % ("dall'" if start.day in (8, 11) else "dal ", first,
+                          "all'" if end.day in (8, 11) else "al ", last)
+
+
+def fmt_nights(n: int, lang: str = "it") -> str:
+    if lang == "en":
+        return "1 night" if n == 1 else "%d nights" % n
+    return "1 notte" if n == 1 else "%d notti" % n
+
+
+def nights_range(low: Optional[int], high: Optional[int], lang: str = "it") -> str:
+    """Durata chiesta (M21, RF-58): "3 notti", "da 1 a 3 notti", "almeno 3 notti"."""
+    en = lang == "en"
+    if low is not None and low == high:
+        return fmt_nights(low, lang)
+    if low is not None and high is not None:
+        return ("%d to %s" if en else "da %d a %s") % (low, fmt_nights(high, lang))
+    if low is not None:
+        return ("at least %s" if en else "almeno %s") % fmt_nights(low, lang)
+    return ("at most %s" if en else "al massimo %s") % fmt_nights(high, lang)
+
+
 def fmt_money(value: Decimal, lang: str = "it") -> str:
     q = value.quantize(Decimal("0.01"))
     unit = "euros" if lang == "en" else "euro"
@@ -77,6 +112,11 @@ def _describe(c: Criteria) -> str:
         parts.append(geo.where(c.area, lang))
     if c.period:
         parts.append(_when(c.period, lang))
+    if c.duration_min_nights is not None or c.duration_max_nights is not None:
+        # tra virgole: "…a ottobre, da 1 a 3 notti, per 2 persone" (M21, RF-58)
+        parts[-1] += ","
+        parts.append(nights_range(c.duration_min_nights, c.duration_max_nights, lang)
+                     + ("," if c.pax or c.budget is not None else ""))
     if c.pax:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if c.budget is not None:
@@ -106,21 +146,23 @@ _DISCARDED = {
            "period": "Non ho potuto usare le date %s.",
            "pax": "Non ho potuto usare %s come numero di persone.",
            "budget": "Non ho potuto usare %s come budget.",
-           "direction": "Non so spostare la ricerca verso %s."},
+           "direction": "Non so spostare la ricerca verso %s.",
+           "duration": "Non ho potuto usare %s come durata in notti."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
            "pax": "I couldn't use %s as the number of people.",
            "budget": "I couldn't use %s as the budget.",
-           "direction": "I can't move the search %s."},
+           "direction": "I can't move the search %s.",
+           "duration": "I couldn't use %s as the length in nights."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
 
 def _discarded_value(field: str, value, lang: str) -> str:
-    if field == "period":
+    if field in ("period", "duration"):
         start, end = value
-        return "%s - %s" % (start or "?", end or "?")
+        return "%s - %s" % tuple("?" if v is None else v for v in (start, end))
     if field == "direction":
         return _DIRECTION_WORDS.get(lang, _DIRECTION_WORDS["it"]).get(value, str(value))
     return str(value)

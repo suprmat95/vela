@@ -3,7 +3,8 @@
 Prima il motivo in testo libero, con regole it/en che si combinano: budget (una cifra nel motivo,
 altrimenti "troppo caro" porta il budget all'80% del totale proposto, senza mai alzarlo),
 direzione ("più a sud"/"più a nord", "più fresco"/"più caldo" con le tabelle di `geo`), luogo
-esplicito, periodo, sport e persone con gli stessi parser dell'intento. Poi i campi strutturati
+esplicito, periodo, sport, persone e durata con gli stessi parser dell'intento, "troppo
+lungo"/"troppo corto" che spostano la durata rispetto alla proposta (M21-A). Poi i campi strutturati
 dell'agente (RF-52), che vincono sul testo: `direction` sostituisce la direzione del testo,
 `area` vince su ogni direzione. Un motivo non riconosciuto restituisce gli stessi criteri: il
 prodotto rifiutato resta comunque escluso. Stessi ingressi danno sempre lo stesso risultato.
@@ -15,8 +16,8 @@ from decimal import Decimal
 from typing import Optional
 
 from vela.domain import geo
-from vela.domain.intent import (conflicts_between, parse_budget, parse_pax, parse_period,
-                                parse_sport, validate_fields)
+from vela.domain.intent import (MAX_NIGHTS, conflicts_between, parse_budget, parse_duration,
+                                parse_pax, parse_period, parse_sport, validate_fields)
 from vela.domain.models import Area, Criteria, Proposal, StructuredFields
 
 PRICE_FACTOR = Decimal("0.8")
@@ -32,6 +33,11 @@ _SOUTH = re.compile(r"\b(?:più a sud|più al sud|più giù|further south|farthe
 _NORTH = re.compile(r"\b(?:più a nord|più al nord|più su|further north|farther north|more north|"
                     r"more to the north|più fresc[oaie]|più fresch[ie]|più fredd[oaie]|"
                     r"troppo cald[oaie]|cooler|colder|too hot)\b")
+
+_SHORTER = re.compile(r"\b(?:troppo lung[oaie]|dura troppo|durano troppo|più brev[ei]|"
+                      r"più cort[oaie]|meno notti|too long|shorter|fewer nights)\b")
+_LONGER = re.compile(r"\b(?:troppo cort[oaie]|troppo brev[ei]|più lung[oaie]|più notti|"
+                     r"too short|longer|more nights)\b")
 
 
 @dataclass(frozen=True)
@@ -71,7 +77,26 @@ def _text_changes(criteria: Criteria, low: str, proposal: Proposal,
                         ("pax", parse_pax(low))):
         if value is not None:
             changes[name] = value
+    changes.update(_duration_changes(criteria, low, proposal))
     return changes
+
+
+def _duration_changes(criteria: Criteria, low: str, proposal: Proposal) -> dict:
+    """Durata esplicita nel motivo, altrimenti "troppo lungo" = al massimo una notte in meno
+    della proposta, "troppo corto" = almeno una in più; l'altro estremo si adegua se serve."""
+    nights = parse_duration(low)
+    if nights is not None:
+        return {"duration_min_nights": nights[0], "duration_max_nights": nights[1]}
+    shortest, longest = criteria.duration_min_nights, criteria.duration_max_nights
+    if _SHORTER.search(low) and proposal.nights > 1:
+        longest = proposal.nights - 1
+        shortest = None if shortest is None else min(shortest, longest)
+    elif _LONGER.search(low) and proposal.nights < MAX_NIGHTS:
+        shortest = proposal.nights + 1
+        longest = None if longest is None else max(longest, shortest)
+    else:
+        return {}
+    return {"duration_min_nights": shortest, "duration_max_nights": longest}
 
 
 def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
