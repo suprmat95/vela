@@ -62,3 +62,15 @@ I documenti sono su `master` ma questo branch `task/m13a` non li contiene ancora
 - 🔧 Bash: Fast-forward branch to master and view doc conventions
 
 - 🔧 Bash: Save plan to docs, record decisions, commit
+
+- 🔧 Bash: Check Python versions and baseline test suite
+
+- 🔧 Bash: Run baseline test suite
+
+- 🔧 Bash: Write failing tests for fake HofJ quota rules
+
+Piano salvato e decisioni registrate (commit `58e6e0f`). Ora scrivo le regole di quota del finto HofJ, test prima.
+
+- 🔧 Bash: Implement quota rules and run their tests
+
+- 🔧 Bash: Commit rules; read sync internals and fixture helpers
