@@ -1,4 +1,4 @@
-"""Verifica fixtures/catalog.json registrato da scripts/record_catalog.py.
+"""Verifica fixtures/catalog.json, la fixture padel di produzione (`python -m vela.sync --record`).
 
 Si salta se il file non esiste (RNF-09: la suite non richiede servizi esterni).
 """
@@ -20,7 +20,7 @@ def has_key(value, key):
 
 
 @unittest.skipUnless(os.path.exists(FIXTURE),
-                     "fixtures/catalog.json assente: eseguire scripts/record_catalog.py")
+                     "fixtures/catalog.json assente: eseguire python -m vela.sync --record")
 class CatalogFixtureTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

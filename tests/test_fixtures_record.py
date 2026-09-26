@@ -8,7 +8,7 @@ from datetime import timedelta
 from hofj_samples import detail_of, item
 from test_sync import T0, Clock, FakeSource
 from vela.domain.catalog import fixture_meta, load_fixture, project_detail, strip_media
-from vela.fixtures import RecordError, fixture_name, record_fixtures, write_catalog
+from vela.fixtures import RecordError, add_trap, fixture_name, record_fixtures, write_catalog
 from vela.ports.hofj import QuotaSnapshot, UpstreamError
 
 PRODUCTION = "https://api.hofj.com"
@@ -97,6 +97,52 @@ class RecordFixturesTest(unittest.TestCase):
             text = fh.read()
         self.assertTrue(text.endswith("\n"))
         self.assertIn("Città", text)
+
+
+class AddTrapTest(unittest.TestCase):
+    """Prodotto trappola del criterio 4 (M7), portato da `scripts/record_catalog.py`."""
+
+    def setUp(self):
+        items = [item(118, price=245), item(119, price=300), item(7, archived=True)]
+        self.catalog = {"products": items, "details": {
+            i["id"]: {"catalog": project_detail(detail_of(i)), "raw": strip_media(detail_of(i))}
+            for i in items[:2]}}
+
+    def test_clone_has_new_id_lower_price_and_marker(self):
+        self.assertEqual(add_trap(self.catalog, "118"), "900118")
+        listed = [p for p in self.catalog["products"] if p["id"] == "900118"]
+        self.assertEqual([(p["price"], p["vela_trap"]) for p in listed], [(244, True)])
+        trap = self.catalog["details"]["900118"]["catalog"]
+        self.assertEqual((trap["id"], trap["price"], trap["vela_trap"]), ("900118", 244, True))
+        self.assertEqual(self.catalog["details"]["900118"]["raw"]["id"], "900118")
+
+    def test_clone_keeps_dates_destination_and_hotels(self):
+        add_trap(self.catalog, "118")
+        trap = self.catalog["details"]["900118"]["catalog"]
+        self.assertEqual(trap["availabilities"][0]["startDate"], "2026-09-28")
+        self.assertEqual(trap["destination"]["title"], "Sinalunga")
+        self.assertEqual(trap["hotels"]["data"][0]["attributes"]["name"], "Hotel Uno")
+
+    def test_template_is_left_untouched(self):
+        add_trap(self.catalog, "118")
+        template = self.catalog["details"]["118"]["catalog"]
+        self.assertEqual((template["id"], template["price"]), ("118", 245))
+        self.assertNotIn("vela_trap", template)
+
+    def test_missing_archived_or_colliding_template_raises(self):
+        for template_id in ("555", "7"):
+            with self.subTest(template_id), self.assertRaises(ValueError):
+                add_trap(self.catalog, template_id)
+        self.catalog["products"].append(item(900118))
+        with self.assertRaises(ValueError):
+            add_trap(self.catalog, "118")
+
+    def test_trap_loads_as_the_cheapest_active_product(self):
+        add_trap(self.catalog, "118")
+        path = os.path.join(tempfile.mkdtemp(), "catalog.json")
+        write_catalog(self.catalog, path)
+        active = sorted((p for p in load_fixture(path) if not p.archived), key=lambda p: p.price)
+        self.assertEqual((active[0].id, str(active[0].price)), ("900118", "244"))
 
 
 if __name__ == "__main__":

@@ -32,7 +32,8 @@ from mcp_smoke import count_products  # noqa: E402
 # tests/test_staging_fixture.py). Criteri 1 e 3: Barcellona (158, poi Tarragona 115); la frase di
 # §10.1 sulla Spagna porta al 867, che su staging ha un errore di configurazione HofJ (M7).
 # Criterio 4 (`--trap`): Firenze, dove la prima proposta è la trappola 900078 solo con una fixture
-# costruita con `record_catalog.py --trap-from 78`; quella di staging non la contiene più (M7).
+# con la trappola clonata dal 78 (`vela.fixtures.add_trap`); quella di staging non la contiene
+# più (M7).
 INTENT_FLOW = "un weekend di padel a Barcellona a ottobre, siamo in due, massimo 1500 euro"
 INTENT_TRAP = "un weekend di padel a Firenze a ottobre, siamo in due"
 REASON = "troppo caro"

@@ -5,6 +5,7 @@ dettaglio di ogni prodotto attivo) con la quota allineata prima a `/v1/quota`, c
 le chiamate già fatte da altri client con la stessa chiave. Le pagine di lista vengono tenute così
 come arrivano, archiviati compresi. Formato in `docs/fixtures.md`.
 """
+import copy
 import json
 import os
 import time
@@ -39,6 +40,31 @@ def write_catalog(catalog: dict, out_path: str) -> None:
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(catalog, fh, indent=1, ensure_ascii=False)
         fh.write("\n")
+
+
+def add_trap(catalog: dict, template_id) -> str:
+    """Aggiunge a `catalog` il prodotto trappola del criterio 4 di spec §10 (decisione M7).
+
+    Clone del prodotto non archiviato `template_id` (lista e dettaglio) con id 900000 + id,
+    inesistente su HofJ, prezzo più basso di 1 e `vela_trap: true`: il chooser lo propone prima
+    del modello e il carrello fallisce con un vero errore di prodotto. ValueError se il modello
+    manca o è archiviato, o se l'id è già usato. Restituisce l'id della trappola."""
+    template_id = str(template_id)
+    listed = [p for p in catalog["products"] if str(p["id"]) == template_id]
+    if not listed or template_id not in catalog["details"]:
+        raise ValueError("modello della trappola %s assente o archiviato" % template_id)
+    trap_id = str(900000 + int(template_id))
+    if trap_id in catalog["details"] or any(str(p["id"]) == trap_id for p in catalog["products"]):
+        raise ValueError("id della trappola %s già usato" % trap_id)
+    item = copy.deepcopy(listed[0])
+    detail = copy.deepcopy(catalog["details"][template_id])
+    for entry in (item, detail["catalog"], detail["raw"]):
+        entry["id"] = trap_id
+        entry["price"] = entry["price"] - 1
+    item["vela_trap"] = detail["catalog"]["vela_trap"] = True
+    catalog["products"].append(item)
+    catalog["details"][trap_id] = detail
+    return trap_id
 
 
 class _ListRecorder:
