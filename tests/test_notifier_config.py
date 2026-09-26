@@ -3,8 +3,9 @@ import unittest
 
 from vela.adapters.sms_fake import FakeSms
 from vela.adapters.sms_twilio import TwilioSms
-from vela.app import build_notifier
+from vela.app import build_notifier, create_app
 from vela.config import Settings
+from vela.domain.models import JobKind
 
 FULL = dict(twilio_account_sid="AC1", twilio_auth_token="token-segreto", twilio_from="+15550001111")
 
@@ -24,3 +25,21 @@ class BuildNotifierTest(unittest.TestCase):
 
     def test_twilio_is_independent_from_upstream_mode(self):
         self.assertIsInstance(build_notifier(Settings(vela_upstream_mode="replay", **FULL)), TwilioSms)
+
+
+class SmsEnabledTest(unittest.TestCase):
+    """C1: la Vela dell'app annuncia gli SMS solo se il notificatore è Twilio."""
+
+    def test_no_twilio_variables_disables_the_sms_promise(self):
+        app = create_app(Settings(database_url="sqlite://"))
+        self.assertFalse(app.state.vela.sms_enabled)
+        self.assertIsInstance(app.state.worker.processor.handlers[JobKind.SMS_LINK].notifier, FakeSms)
+        self.assertNotIn("texts", app.state.mcp.instructions)
+
+    def test_all_three_enable_the_sms_promise_with_one_notifier(self):
+        app = create_app(Settings(database_url="sqlite://", **FULL))
+        self.assertTrue(app.state.vela.sms_enabled)
+        handlers = app.state.worker.processor.handlers
+        self.assertIsInstance(handlers[JobKind.SMS_LINK].notifier, TwilioSms)
+        self.assertIs(handlers[JobKind.SMS_LINK].notifier, handlers[JobKind.SMS_CONFIRMED].notifier)
+        self.assertIn("texts the payment link", app.state.mcp.instructions)

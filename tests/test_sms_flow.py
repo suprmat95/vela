@@ -26,13 +26,16 @@ class Clock:
 
 
 class Flow:
-    def __init__(self, traveler=TRAVELER):
+    """FakeSms sta al posto di Twilio: la Vela nasce con `sms_enabled=True` come in produzione."""
+
+    def __init__(self, traveler=TRAVELER, sms_enabled=True):
         self.clock = Clock()
         self.repos = MemoryRepositories()
         hofj = ReplayHofJ(now=self.clock)
         self.repos.products.upsert_many(hofj.load_catalog())
         self.payments = FakePayments("http://test", now=self.clock)
-        self.vela = Vela(self.repos, hofj, self.payments, DEFAULT_TRAVELER, now=self.clock)
+        self.vela = Vela(self.repos, hofj, self.payments, DEFAULT_TRAVELER, now=self.clock,
+                         sms_enabled=sms_enabled)
         self.sms = FakeSms()
         self.worker = build_worker(self.vela, Settings(worker_concurrency=0), notifier=self.sms)
         self.worker.processor.refresh_quota()
@@ -95,6 +98,17 @@ class AgentPhraseTest(unittest.TestCase):
         f = Flow(TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000",
                                  participants=(Participant("Bo", "Bi"),)))
         self.assertNotIn("SMS", f.accept().say)
+
+    def test_sms_disabled_keeps_todays_phrases_even_with_a_valid_phone(self):
+        f = Flow(sms_enabled=False)
+        queued = f.accept()
+        self.assertNotIn("SMS", queued.say)
+        self.assertIn("Chiedimi a che punto è quando vuoi", queued.say)
+        self.assertNotIn("SMS", f.vela.get_order_status(queued.order_id).say)
+        f.run_until(queued.order_id, OrderStatus.AWAITING_PAYMENT)
+        awaiting = f.vela.get_order_status(queued.order_id).say
+        self.assertNotIn("SMS", awaiting)
+        self.assertTrue(awaiting.endswith("usa il link che ti ho mandato."), awaiting)
 
 
 if __name__ == "__main__":

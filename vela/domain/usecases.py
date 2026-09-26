@@ -47,8 +47,10 @@ class Vela:
     def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
                  defaults=None, now: Optional[Callable[[], datetime]] = None,
                  new_id: Optional[Callable[[], str]] = None,
-                 extractor: Optional[IntentExtractor] = None):
+                 extractor: Optional[IntentExtractor] = None, sms_enabled: bool = False):
         self.repos = repos
+        # RF-19, RF-57: le frasi annunciano gli SMS solo se partono davvero (Twilio configurato)
+        self.sms_enabled = sms_enabled
         self.hofj = hofj
         self.payments = payments
         self.now = now or utcnow
@@ -201,7 +203,11 @@ class Vela:
                                     enqueued_at, now))
         position, wait = self._queue_position(order.id)
         return OrderQueued(order.id, OrderStatus.QUEUED, position, wait,
-                           say.say_queued(wait_minutes(wait or 0), lang, phone.tail(order.traveler.phone)))
+                           say.say_queued(wait_minutes(wait or 0), lang, self._phone_tail(order)))
+
+    def _phone_tail(self, order: Order) -> Optional[str]:
+        """Ultime cifre da dire solo se l'SMS parte davvero; `None` lascia le frasi senza SMS."""
+        return phone.tail(order.traveler.phone) if self.sms_enabled else None
 
     def _queue_position(self, order_id: str) -> Tuple[Optional[int], Optional[int]]:
         """RF-48: posizione tra gli acquisti in attesa e attesa stimata in secondi."""
@@ -219,7 +225,7 @@ class Vela:
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
         status = order.status
-        tail = phone.tail(order.traveler.phone)
+        tail = self._phone_tail(order)
         if status == OrderStatus.QUEUED:
             position, wait = self._queue_position(order.id)
             minutes = None if wait is None else wait_minutes(wait)

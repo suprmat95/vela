@@ -28,7 +28,7 @@ LOCAL_HOSTS = ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", "testserv
 LOCAL_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*"]
 CLAUDE_ORIGIN = "https://claude.ai"
 
-INSTRUCTIONS = (
+_INSTRUCTIONS_BASE = (
     "Vela books a padel or tennis trip with hotel from one sentence of the user. "
     "Always propose exactly ONE option at a time: never list, compare or invent alternatives, "
     "and never search or suggest trips yourself. After every tool call, speak the `say` field "
@@ -37,12 +37,31 @@ INSTRUCTIONS = (
     "returns an intent_id. Once a proposal exists, every change the user asks for (place, dates, "
     "sport, budget, people, somewhere cooler or warmer) goes through reject_proposal on that "
     "proposal, never through a new create_intent. Accepting a proposal puts the order in a "
-    "queue: Vela texts the payment link and later the booking confirmation to the traveler's "
-    "phone, so do not poll get_order_status: call it only when the user asks."
+    "queue: "
 )
+# Senza Twilio configurato nessun SMS parte: restano i testi di prima degli SMS (C1).
+INSTRUCTIONS = _INSTRUCTIONS_BASE + "the payment link comes later from get_order_status."
+INSTRUCTIONS_SMS = _INSTRUCTIONS_BASE + (
+    "Vela texts the payment link and later the booking confirmation to the traveler's "
+    "phone, so do not poll get_order_status: call it only when the user asks.")
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
           "never mention other trips.")
+
+_ACCEPT = (
+    "Call only after the user explicitly says yes to the current proposal. Pass the details "
+    "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
+    "first and last name of every other participant. If the result has `missing`, ask the "
+    "user only for those details and call accept_proposal again with everything you have: "
+    "calling it again never creates a second order. On success the answer is a wait, not a "
+    "link: the order is `queued` with `order_id`, `position` and `wait_seconds`.")
+_STATES = (
+    " Returns `status`: queued (with `position` and `wait_seconds`), "
+    "awaiting_payment (with `payment_url` and the real `total`: show the link in the chat, "
+    "never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
+    "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "
+    "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired."
+    + _VOICE)
 
 DESCRIPTIONS = {
     "create_intent": (
@@ -72,26 +91,27 @@ DESCRIPTIONS = {
         "warmer. Returns the next single proposal, or `failed_criterion` with "
         "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
         "reject_proposal again on `rejected_proposal_id` with the updated fields." + _VOICE),
-    "accept_proposal": (
-        "Call only after the user explicitly says yes to the current proposal. Pass the details "
-        "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
-        "first and last name of every other participant. If the result has `missing`, ask the "
-        "user only for those details and call accept_proposal again with everything you have: "
-        "calling it again never creates a second order. On success the answer is a wait, not a "
-        "link: the order is `queued` with `order_id`, `position` and `wait_seconds`. Vela texts "
-        "the payment link to the traveler's phone when it is ready and texts again when the "
-        "booking is confirmed; call get_order_status only when the user asks."
-        + _VOICE),
+    "accept_proposal": _ACCEPT + (
+        " Get the payment link with get_order_status after the stated wait, or whenever the user "
+        "asks." + _VOICE),
+    "get_order_status": (
+        "Check an order after the wait stated by accept_proposal, when the user says they paid or "
+        "asks how it is going." + _STATES),
+}
+
+DESCRIPTIONS_SMS = dict(DESCRIPTIONS, **{
+    "accept_proposal": _ACCEPT + (
+        " Vela texts the payment link to the traveler's phone when it is ready and texts again "
+        "when the booking is confirmed; call get_order_status only when the user asks." + _VOICE),
     "get_order_status": (
         "Check an order only when the user asks how it is going or says they paid: Vela already "
-        "texts the payment link and the confirmation. Returns `status`: queued (with `position` "
-        "and `wait_seconds`), "
-        "awaiting_payment (with `payment_url` and the real `total`: show the link in the chat, "
-        "never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
-        "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "
-        "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired."
-        + _VOICE),
-}
+        "texts the payment link and the confirmation." + _STATES),
+})
+
+
+def texts(sms_enabled: bool):
+    """Istruzioni e descrizioni: con gli SMS solo se partono davvero (Twilio configurato)."""
+    return (INSTRUCTIONS_SMS, DESCRIPTIONS_SMS) if sms_enabled else (INSTRUCTIONS, DESCRIPTIONS)
 
 
 class ParticipantArg(BaseModel):
@@ -141,9 +161,12 @@ def fail(sentence: str) -> CallToolResult:
 
 
 def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
-    """Server MCP con i cinque tool. ``get_vela`` è letto a ogni chiamata: l'app lo imposta dopo."""
+    """Server MCP con i cinque tool. ``get_vela`` è letto a ogni chiamata; alla costruzione
+    sceglie i testi con o senza SMS da ``vela.sms_enabled`` (senza Vela: senza SMS)."""
+    vela = get_vela()
+    instructions, descriptions = texts(bool(vela is not None and vela.sms_enabled))
     # MCPServer() chiama logging.basicConfig: WARNING evita di portare a INFO il root dell'app.
-    server = MCPServer("vela", title="Vela", instructions=INSTRUCTIONS, version="0.1.0",
+    server = MCPServer("vela", title="Vela", instructions=instructions, version="0.1.0",
                        log_level="WARNING")
 
     def run(name: str, use_case: Callable[[Vela], object]) -> CallToolResult:
@@ -161,7 +184,7 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
             log.exception("tool MCP %s fallito", name)
             return fail(say.say_error())
 
-    @server.tool(description=DESCRIPTIONS["create_intent"])
+    @server.tool(description=descriptions["create_intent"])
     def create_intent(text: Text, sport: Sport = None, area: Area = None,
                       period_start: PeriodStart = None, period_end: PeriodEnd = None,
                       pax: Pax = None, budget: Budget = None, first_name: FirstName = None,
@@ -171,11 +194,11 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget)
         return run("create_intent", lambda v: v.create_intent(text, profile, fields))
 
-    @server.tool(description=DESCRIPTIONS["get_proposal"])
+    @server.tool(description=descriptions["get_proposal"])
     def get_proposal(intent_id: IntentId) -> CallToolResult:
         return run("get_proposal", lambda v: v.get_proposal(intent_id))
 
-    @server.tool(description=DESCRIPTIONS["reject_proposal"])
+    @server.tool(description=descriptions["reject_proposal"])
     def reject_proposal(proposal_id: ProposalId, reason: Reason = "", sport: Sport = None,
                         area: Area = None, period_start: PeriodStart = None,
                         period_end: PeriodEnd = None, pax: Pax = None, budget: Budget = None,
@@ -183,14 +206,14 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction)
         return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
-    @server.tool(description=DESCRIPTIONS["accept_proposal"])
+    @server.tool(description=descriptions["accept_proposal"])
     def accept_proposal(proposal_id: ProposalId, first_name: FirstName = None,
                         last_name: LastName = None, email: Email = None, phone: Phone = None,
                         participants: Participants = None) -> CallToolResult:
         profile = traveler_profile(first_name, last_name, email, phone, None, participants)
         return run("accept_proposal", lambda v: v.accept_proposal(proposal_id, profile))
 
-    @server.tool(description=DESCRIPTIONS["get_order_status"])
+    @server.tool(description=descriptions["get_order_status"])
     def get_order_status(order_id: OrderId) -> CallToolResult:
         return run("get_order_status", lambda v: v.get_order_status(order_id))
 

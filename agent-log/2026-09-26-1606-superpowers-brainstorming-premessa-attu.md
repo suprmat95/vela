@@ -1097,3 +1097,324 @@ None.
 - 🔧 Agent: Implement Task 9: documentation
 
 Il Task 8 (frasi dell'agente e istruzioni MCP) è approvato. Ora è in corso il Task 9, i documenti: `docs/sms.md`, RF-19 e RF-57 in `docs/spec.md` e il registro delle decisioni.
+
+## Utente 17:22
+
+<task-notification>
+<task-id>a850006d22a07ec90</task-id>
+<tool-use-id>toolu_01UP3foMwCn75LoviWsxiLSg</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a850006d22a07ec90.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 9: documentation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Status
+
+**DONE**
+
+## Commits
+
+- `749a7dd` Document the SMS notifications, RF-19 and RF-57
+
+## Test Summary
+
+971 tests passing, 48 skipped — OK
+
+## Concerns
+
+None. All requirements completed as specified.
+
+## Report
+
+Full report: `/Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-9-report.md`</result>
+<usage><subagent_tokens>69999</subagent_tokens><tool_uses>13</tool_uses><duration_ms>110911</duration_ms></usage>
+</task-notification>
+
+## Agente 17:22
+
+- 🔧 Bash: Build Task 9 review package
+
+- 🔧 Agent: Review Task 9 (spec + quality)
+
+Task 9 scritto (suite 971 test verde); revisione dei documenti in corso.
+
+## Utente 17:25
+
+<task-notification>
+<task-id>a4c0182d29e5d8be1</task-id>
+<tool-use-id>toolu_01E4MrZNbBUrLB5CpUUYMNH1</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a4c0182d29e5d8be1.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 9 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ `docs/sms.md` created — content is a verbatim match to the brief (Numeri, Attivazione, Tentativi, Test manuale sections all present, same wording).
+- ✅ `docs/spec.md` RF-19 (§4.4, lines 103-106) — replacement text matches the brief exactly (just re-wrapped for line width).
+- ✅ `docs/spec.md` RF-57 added (lines 128-130), correctly placed at the end of §4.5, immediately before `### 4.6` (verified section headers at `docs/spec.md:153` §4.5 and `:179` §4.6; no RF-number collision — RF-56 is a pre-existing, unrelated requirement at line 209).
+- ✅ `docs/spec.md` §6 — `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` (opzionali, SMS) appended after `VELA_PUBLIC_URL`; external-calls line updated to `(HofJ, Stripe, Anthropic, Twilio)` — matches brief.
+- ✅ `docs/decisions.md` — new "2026-09-26 — SMS: esecuzione" section added at the end (`docs/decisions.md:651-658`), with the `Moduli dei testi` and `Suite finale` rows from the brief, plus the "Test esistenti adattati" rows and Motivo the controller instructions required.
+- ✅ Placeholders resolved: `&lt;numero&gt;` replaced with real values (971 test, 48 saltati); verified no `&lt;numero&gt;` tokens remain anywhere in the three files (`grep` clean).
+- ✅ No real phone numbers or keys in the new/modified docs (`grep` clean for E.164-like numbers and Twilio/Stripe key patterns).
+- ✅ "Test esistenti adattati" content verified accurate against the actual code (not just trusted): `git show e4b02b9 -- tests/test_payment_check.py` confirms `new_id=lambda: "chk1"` became `new_id=lambda: next(ids)` with `ids = iter(["chk1", "sms1"])`, exactly matching "il `new_id` fisso diventa un iteratore di due id... perché il passo del link ora accoda due job (verifica del pagamento e `sms_link`)". `git show e4b02b9 -- tests/test_job_processor.py` confirms `test_purchase_fifo` gained `SmsJob` handlers for `SMS_LINK`/`SMS_CONFIRMED` and the loop changed from `range(3)` to `range(6)` with an early-exit `break`, matching the doc's description precisely; FIFO assertion (`self.assertEqual(created, ["1","2","3"])`) is indeed unchanged.
+- ✅ "priorità 2" claim verified against `vela/adapters/repo_memory.py:140`: `CLAIM_PRIORITY = {BOOKING: 0, PAYMENT_CHECK: 1, SMS_LINK: 2, SMS_CONFIRMED: 2, PURCHASE: 3}` — SMS does run between payment_check and purchase as both `docs/sms.md` and the decisions row state.
+- ✅ Global constraints cross-checked against `vela/domain/sms.py`, `vela/adapters/sms_twilio.py`, `vela/app.py`, `vela/domain/phone.py`: `+39` default prefix, E.164 mask format `+39******4567`, backoff `(30, 120, 600)` then `dead` on the 4th failure, 429/5xx/network → retry vs. other 4xx → `NotifierRejected` (dead immediately), and the three-`TWILIO_*`-vars all-or-nothing / all-missing startup logic in `build_notifier` — all match the docs exactly.
+- ⚠️ Cannot verify from diff alone: the actual `uv run python -m unittest discover -s tests` run producing "971 test, 48 saltati" (not re-run per instructions; numbers are internally consistent with the report and no longer placeholders, but I did not execute the suite).
+
+### Strengths
+- Every doc statement checked against the real implementation (phone normalization, retry/backoff, priority ordering, masking, activation logic) matched precisely — no drift between docs and code.
+- RF-19/RF-57 wording and placement match the brief character-for-character, correctly wrapped.
+- The two "Test esistenti adattati" entries are substantively more informative than the minimum required (they name the specific job kinds/priority involved), while keeping the required Motivo unchanged and not weakening any assertion, consistent with the controller's binding instruction.
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- The controller instruction said to add "a row" (singular) describing the two adapted tests; the implementer instead added two separate rows both labeled "Test esistenti adattati" (`docs/decisions.md:657-658`), duplicating the Decisione label and the Motivo text. Content and accuracy are fine either way — this is a cosmetic table-shape choice, not a compliance gap.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** All required doc edits are present, accurately reflect the implemented behavior (verified directly against `vela/domain/sms.py`, `sms_twilio.py`, `phone.py`, `app.py`, and the Task 5 test diffs), placeholders are resolved with real numbers, and no secrets/phone numbers leaked into docs. The only nit is a stylistic table-row split rather than a single combined row, which does not affect correctness or trustworthiness of the documentation.</result>
+<usage><subagent_tokens>78528</subagent_tokens><tool_uses>25</tool_uses><duration_ms>149546</duration_ms></usage>
+</task-notification>
+
+## Agente 17:25
+
+- 🔧 Bash: Record Task 9, build final branch package, read final reviewer template
+
+Tutti i 9 task di codice e documenti sono approvati. Lancio la revisione finale dell'intero branch con il modello più capace.
+
+- 🔧 Agent: Final whole-branch code review
+
+Revisione finale dell'intero branch in corso. Ho chiesto di verificare in particolare:
+- la sostituzione della proposta;
+- l'annullamento di un ordine mentre c'è un SMS in attesa;
+- la scadenza del link rispetto ai tentativi di invio;
+- più worker che prelevano gli stessi job SMS;
+- il rischio che il deploy su Render inizi a mandare SMS reali senza volerlo.
+
+## Utente 17:28
+
+finito?
+
+## Agente 17:28
+
+Non ancora: manca solo la revisione finale dell'intero branch, che è in corso e di cui non ho ancora l'esito.
+
+A che punto siamo:
+- **Task 1-9:** fatti, ciascuno approvato dalla sua revisione. Suite completa verde: 971 test, 48 saltati perché senza Postgres.
+- **Revisione finale:** in corso sul modello più capace. Se trova problemi, faccio un solo giro di correzioni con una verifica mirata.
+- **Task 10** (test reale con SMS): fermo. Parte solo quando imposti le tre variabili Twilio e mi dai l'OK, perché costa 2 SMS e un pagamento di test Stripe.
+
+Appena arriva l'esito della revisione ti mando il riepilogo finale: cosa è stato fatto, le decisioni che ho preso durante l'esecuzione e le opzioni per chiudere il branch (merge, PR o altro).
+
+## Utente 17:30
+
+<task-notification>
+<task-id>a6a21e9ebc86eccee</task-id>
+<tool-use-id>toolu_01K1kjS1AmxgJmuHqAb2j263</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a6a21e9ebc86eccee.output</output-file>
+<status>completed</status>
+<summary>Agent "Final whole-branch code review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Strengths
+- The architecture fits the codebase. There is a `Notifier` port, a Twilio adapter over `httpx` and a fake adapter. The two job kinds reuse the queue's retry and lease logic. `notify.py` avoids the import cycle. There is no schema change (`sms_confirmed` is 13 characters, within `String(16)`) and no new dependency.
+- Every attempt of `SmsJob` re-reads the order status. That covers cancellation (RF-49), payment before the SMS goes out, and expiry: no SMS is ever sent with a dead link. The longest retry chain is about 12.5 minutes, far inside the 24-hour link expiry.
+- Privacy handling is careful. Twilio errors are raised `from None` and carry only the Twilio `code`, never `message`. The number is masked in every log line and in `last_error`, and the SMS text is never logged. Tests cover all of this, including a Twilio body that repeats the number.
+- The claim priority is updated in both repositories, with a contract test that also runs on Postgres. The Twilio timeout (10 s) is well below the job lease (120 s), so on multiple instances `SKIP LOCKED` means one claim per job, and a job can only be sent twice if the process dies right after Twilio accepts it (a risk the spec accepts).
+- Partial configuration stops startup, and the error names the missing variables without showing their values. `render.yaml` uses `sync: false`.
+- I ran the full suite with `uv run python -m unittest discover -s tests`: 971 tests pass, 48 skipped (Postgres tests without `DATABASE_URL`).
+
+### Issues
+
+#### Critical (Must Fix)
+**C1. Travelers are promised an SMS that is never sent when Twilio is not configured.**
+- Where: `vela/domain/usecases.py:204,222`, `vela/domain/say.py:1788-1806`, `vela/surfaces/mcp.py:2106-2107,2131-2140` (diff lines).
+- What's wrong: the "I'll text it to the number ending in 4567" line and the "do not poll `get_order_status`" instruction only check whether the phone number is valid. They never check whether the notifier is real. With no Twilio variables, which is the default in `render.yaml`, in replay demos and on the live Render service unless someone fills them in, `FakeSms` sends nothing. The traveler is told a text is coming, the agent is told not to check, and the payment link never reaches anyone unless the user thinks to ask. The order then expires after 24 hours.
+- Why it matters: it breaks RF-19, delivery of the payment link, on any deployment without Twilio. Merging and deploying without the three variables causes it immediately.
+- How to fix: give `Vela` a `sms_enabled` flag (true only when `build_notifier` returns `TwilioSms`). Pass `phone_tail` only when it is set, and choose the MCP instruction and description texts from the same flag (`build_mcp` would take it as a parameter). Add a test with the fake notifier showing the old phrases are kept. At minimum, never deploy this without the Twilio variables set, but local and replay setups would still give false promises.
+
+#### Important (Should Fix)
+**I1. Outcomes other than success go unseen under the new "do not poll" rule.**
+- Where: `vela/surfaces/mcp.py` instructions, and `say_queued` / `awaiting_payment` in `vela/domain/say.py`.
+- What's wrong: once the queued message says "I'll text you", nothing tells the traveler about:
+  - a replacement order (RF-17). `get_order_status` is the only place the replacement proposal appears, and the agent is now told not to call it.
+  - a failed purchase, a failed booking, or an expired link.
+  - a dead SMS job: Twilio rejects landlines (`02…` normalizes as valid), unverified numbers on a trial account, and a wrong token (401 counts as permanent, so every SMS dies).
+- The awaiting-payment line ("use the link I sent you, also by SMS") also claims an SMS was sent even when the job is still pending or dead.
+- Why it matters: a reasonable traveler waits for a text that will never arrive. RF-17 in practice stops working. The spec's "no SMS for other outcomes" decision was not designed together with "do not poll".
+- How to fix. Option A (recommended, small): add a fallback. The queued message says something like "if the SMS hasn't arrived in N minutes, ask me", and the MCP instruction says "call `get_order_status` once if the user hasn't received the SMS after the stated wait, or when the user asks". Option B: add SMS for `replaced` and `failed`. That is a scope change and needs the user's approval, per CLAUDE.md.
+
+**I2. The manual test in `docs/sms.md` cannot be run as written.**
+- Where: `docs/sms.md:149-153`, `scripts/rest_flow.py:40-41,145`.
+- What's wrong: the script hard-codes the phone `+390000000000` and has no option to change it, so "use your own number" is impossible without editing the script. It also polls status every 5 s, which contradicts step 3 ("without checking the status"). And `+390000000000` passes normalization, so every `rest_flow.py` run against a Twilio-enabled deployment makes a Twilio call to a fake number, which gets rejected and leaves a dead job.
+- Why it matters: this manual test is the spec's success criterion ("in un test reale… arrivano i due SMS"), and it is still owed as Task 10.
+- How to fix: add a `--phone` option (or an environment variable) and a `--no-poll-until-paid` mode, or rewrite the procedure. Mention Twilio trial accounts, which can only text verified numbers.
+
+#### Minor (Nice to Have)
+- `vela/domain/sms.py` (`_body`): a missing proposal or product raises outside the `try`. The worker logs it and leaves the job `RUNNING`, and it is claimed again every 120 s forever. Fix: catch and close the job as `DEAD`. The risk is low because products are archived, never deleted.
+- `vela/domain/phone.py`: `+39 (0)333 1234567` becomes `+3903331234567`, which counts as valid but is the wrong number. Stripping a `(0)` right after the country code would fix it.
+- Rollback: code from before this change cannot parse `sms_*` rows (`JobKind(...)` raises a ValueError after the claim has committed). Each such row is retried and logs an error every lease period. Worth one line in `docs/sms.md`: before rolling back, mark pending `sms_*` jobs as `done`.
+- Test gap from the plan: the spec's flow test should include "un retry della prenotazione". `test_sms_flow` covers repeated status calls but not a booking retry. The unit tests partly cover it through `test_second_run_on_confirmed_order_adds_nothing`.
+- The Stripe Checkout URL in live mode is long, so the first SMS may take 3-4 segments rather than 2-3. The cost estimate in `docs/sms.md` may be low.
+
+### Deferred minors triage
+| Item | Verdict |
+|---|---|
+| T1 `mask` shows one subscriber digit for `+1…` numbers | Fine to leave (Italy only; at least 5 digits stay hidden) |
+| T1 no `mask` test at the minimum length | Fine to leave |
+| T2 NFKD keeps only the first component of a ligature | Fine to leave |
+| T2 duplicated greeting if/else | Fine to leave |
+| T2 `_total` quantize with no rounding mode | Fine to leave (HofJ totals have 2 decimals) |
+| T3 suite run with plain `python` | Fine; I re-ran it with `uv`: 971 pass |
+| Ruling: two commits carry the Haiku trailer | Fine to leave; rewriting history needs the user's OK |
+| Ruling: T4 test count 13 vs 14 | Fine |
+| T4 `_body` has no None guard | Fine to leave; cheap fix recommended (see Minor) |
+| T5 docstring alignment | Fine to leave |
+| T5 crash between saving the order and `enqueue_sms` loses the SMS | Fine to leave only if I1's fallback is added. Without it, a lost `sms_link` means the link is never delivered |
+| T5 note: two existing tests adapted | I agree they are legitimate; the FIFO and payment-check assertions are unchanged |
+| T6 2xx without `sid` returns `""` | Fine to leave |
+| T6 "codice None" | Fine to leave |
+| T6 `httpx.Client` never closed | Fine to leave (it lives as long as the process) |
+| T7 partial-config test covers only one permutation | Fine to leave (the logic is generic) |
+| T8 `tail` computed for every status | Fine to leave |
+| T8 near-duplicate templates | Fine to leave |
+| T8 note: dotted test commands need `PYTHONPATH` | Fine |
+| Ruling T9: extra decisions row | Fine |
+| T9 row split in two | Fine |
+| T10 manual test not run | Not a code blocker, but it must be done before calling the feature complete or turning on Twilio in production, and it needs I2 fixed first |
+
+### Declined to judge
+- SMS for `failed`, `replaced`, `expired`, `booking_failed` and `cancelled`: the spec puts them out of scope. I only raised the "do not poll" consequence (I1).
+- A short link or `/pay/&lt;id&gt;` redirect: out of scope in the spec.
+- Exactly-once delivery when the process crashes after Twilio accepts: the spec accepts the rare double send, since fixing it needs a schema change.
+- Foreign numbers written in national format (e.g. UK `07911…` becoming `+39…`): the spec chose the `+39` default ("Test in Italia").
+- Twilio being independent of `VELA_UPSTREAM_MODE`, so replay demos with real-looking numbers would text real people once the variables are set: this is an explicit spec decision.
+- An alphanumeric sender or Messaging Service: out of scope.
+- Two concurrent booking jobs for the same order both confirming and each queuing an SMS: this comes from existing booking-job behavior, not from this diff.
+- `httpx` logging the Twilio URL, which includes the Account SID, at INFO level: the SID is an identifier, not a secret, and it follows the existing Stripe/HofJ pattern.
+
+### Recommendations
+1. Fix C1 with a `sms_enabled` flag set from `build_notifier` and passed to `Vela` and `build_mcp`, plus tests for both states.
+2. Get the user's decision on I1. I recommend Option A, then record it in `docs/decisions.md`.
+3. Make `rest_flow.py` usable for the SMS manual test (I2) before Task 10.
+4. Add a line to the deploy steps: set all three Twilio variables in the same deploy that ships this, or ship with C1 fixed.
+
+### Assessment
+**Ready to merge?** With fixes.
+
+**Reasoning:** The implementation is clean, follows the plan, and meets the privacy and retry constraints. But it promises SMS unconditionally (C1) and tells the agent to stop checking status with no fallback (I1), so the payment link or a replacement proposal can silently never reach the traveler on the default, Twilio-less deployment and whenever an SMS fails.</result>
+<usage><subagent_tokens>126224</subagent_tokens><tool_uses>17</tool_uses><duration_ms>265272</duration_ms></usage>
+</task-notification>
+
+## Agente 17:30
+
+La revisione finale approva l'architettura, la privacy e i tentativi di invio, ma trova un problema critico e due importanti. Decido io come correggerli, li registro nel ledger e mando un unico giro di correzioni.
+
+- 🔧 Bash: Record rulings and write final fix findings file
+
+- 🔧 Agent: Fix final review findings
+
+La revisione finale ha trovato tre problemi da sistemare prima del merge. Ho mandato un solo giro di correzioni, poi ci sarà una verifica mirata.
+
+1. **Critico: SMS promessi anche quando non partono.** Senza le variabili Twilio, cioè la configurazione di default su Render e in replay, l'agente diceva "ti mando un SMS" e non controllava più lo stato, ma nessun SMS partiva. Il link di pagamento non arrivava mai. Correzione: le frasi e le istruzioni MCP sugli SMS compaiono solo quando Twilio è configurato davvero, altrimenti restano quelle di prima.
+2. **Importante: nessuna via d'uscita se l'SMS non arriva.** Con la regola "non interrogare lo stato", un ordine sostituito, fallito o un SMS rifiutato da Twilio non arrivavano mai all'utente. Ho scelto la soluzione piccola: la frase aggiunge "se l'SMS non arriva entro qualche minuto, chiedimi" e l'agente può controllare lo stato una volta in quel caso. L'alternativa era mandare SMS anche per ordini sostituiti o falliti, ma allarga lo scope e richiede il tuo OK.
+3. **Importante: il test manuale non era eseguibile.** Lo script `rest_flow.py` usa un numero fisso. Aggiungo `--phone` e riscrivo la procedura in `docs/sms.md`. La procedura ricorda anche che un account Twilio trial manda SMS solo a numeri verificati.
+
+Nello stesso giro correggo quattro dettagli minori:
+- un job SMS che poteva restare bloccato se mancano proposta o prodotto;
+- i numeri scritti come `+39 (0)333…`;
+- una nota sul rollback;
+- un test del flusso con un nuovo tentativo di prenotazione.
+
+## Utente 17:35
+
+1 dimmi quali variabile devo aggiungere 2 permetti all'utente di interrogare lo stato
+
+## Agente 17:35
+
+- 🔧 SendMessage
+
+- 🔧 Bash: Record user decision in ledger
+
+**1. Variabili da aggiungere su Render** (Dashboard → servizio `vela` → Environment). Nel Blueprint sono già dichiarate con `sync: false`, quindi vanno riempite a mano:
+
+| Variabile | Valore | Dove lo trovi |
+|---|---|---|
+| `TWILIO_ACCOUNT_SID` | l'Account SID, inizia con `AC…` | Twilio Console, pagina principale |
+| `TWILIO_AUTH_TOKEN` | l'Auth Token | Twilio Console, accanto al SID |
+| `TWILIO_FROM` | il numero Twilio acquistato, in formato E.164 (es. `+1555…`) | Twilio Console → Phone Numbers → Active numbers |
+
+Cosa sapere prima di inserirle:
+- **Tutte e tre o nessuna.** Se ne imposti solo una o due, l'app non parte, di proposito.
+- **Senza variabili** gli SMS restano finti. Con la correzione in corso l'agente non promette più SMS che non partono.
+- **Account trial:** Twilio manda SMS solo ai numeri verificati nella Console, quindi verifica prima il tuo.
+- **Mittente e destinazione:** controlla che il numero Twilio possa inviare verso l'Italia, cioè che l'Italia sia abilitata in Messaging → Geo permissions.
+- **Chiavi:** non incollarle qui in chat. Le leggerà solo l'app dall'ambiente.
+
+**2. Stato sempre consultabile dall'utente.** Ho aggiornato le istruzioni al subagente che sta facendo le correzioni:
+- la frase dopo l'accettazione diventa "…Se vuoi sapere a che punto è, o se l'SMS non arriva entro qualche minuto, chiedimi pure.";
+- l'agente non interroga lo stato di sua iniziativa, ma chiama `get_order_status` ogni volta che l'utente lo chiede, in qualsiasi momento;
+- lo registro in `docs/decisions.md` come tua decisione.
+
+Le correzioni sono ancora in corso. Quando finiscono le faccio verificare e ti riporto l'esito.
+
+## Utente 17:38
+
+ho aggiunto le variabili
+
+## Agente 17:38
+
+Le variabili su Render sono a posto, ma per ora non hanno effetto. Il servizio su Render gira il codice di `master`, che non legge ancora `TWILIO_*`. Gli SMS partiranno solo quando questo branch sarà deployato.
+
+Prima di tutto va chiusa la correzione in corso, che include il problema critico sulle promesse di SMS. Poi la faccio verificare. Nel frattempo, per il test reale (Task 10) ci sono due strade:
+
+- **A. In locale (consigliata per il primo test).** Lanci il flusso da questo branch sulla tua macchina. Le tre variabili devono essere anche nel tuo terminale, oltre a `STRIPE_SECRET_KEY` e `VELA_PUBLIC_URL`, che io non leggo. Non tocca produzione e non serve un merge.
+- **B. Su Render.** Serve prima il merge del branch su `master` (o una PR), poi il deploy. Da quel momento ogni prenotazione vera con un numero valido manda SMS reali. Il merge lo faccio solo con il tuo OK esplicito.
+
+**Costo del test:** 2 SMS Twilio (circa 4-5 segmenti in tutto), 1 Checkout Session e 1 pagamento di test Stripe, più le chiamate HofJ indicate in `docs/stripe.md` se si usa HofJ live.
+
+Quale strada preferisci? Intanto aspetto che le correzioni finiscano.
+
+## Utente 17:39
+
+messo tutto nel .env
+
+## Agente 17:40
+
+- 🔧 Bash: Check how rest_flow runs and whether anything loads .env
+
+Vela non legge mai il `.env`: la configurazione arriva solo dalle variabili d'ambiente del processo, ed è voluto. In più CLAUDE.md mi vieta di aprire quel file, quindi non posso caricarlo io. Le variabili vanno esportate nel terminale in cui avvii il server, e questo passaggio lo fai tu.
+
+Aspetta però che finiscano le correzioni in corso: `--phone` nello script di prova è una di queste. Quando ti confermo che sono state verificate, dal tuo terminale, nella cartella di questo worktree:
+
+```bash
+# terminale 1: server locale con le variabili del .env
+set -a; source .env; set +a
+uv run uvicorn vela.app:app --port 8000
+```
+
+```bash
+# terminale 2: flusso di prova con il tuo numero
+set -a; source .env; set +a
+uv run python scripts/rest_flow.py http://localhost:8000 --phone "<il tuo numero>"
+```
+
+Controlla che nel `.env` ci siano, oltre alle tre `TWILIO_*`:
+- **`DATABASE_URL`**: un Postgres locale, perché senza database l'app non costruisce il dominio;
+- **`STRIPE_SECRET_KEY` e `VELA_PUBLIC_URL=http://localhost:8000`**: per il link di pagamento reale;
+- **`VELA_API_TOKEN`**: lo usa lo script per chiamare `/v1`;
+- **`VELA_UPSTREAM_MODE`**: lascialo vuoto o `replay` per non chiamare HofJ reale. Le variabili HofJ servono solo se vuoi `live`.
+
+**Cosa deve succedere:**
+1. Senza che tu chieda lo stato, arriva l'SMS con il riepilogo e il link.
+2. Paghi con `4242 4242 4242 4242`, una data futura e un CVC qualsiasi.
+3. Arriva il secondo SMS con il codice di prenotazione.
+
+Lo script continua a interrogare lo stato da solo, e va bene così: quello che conta è che tu riceva gli SMS senza chiedere niente all'agente.
+
+**Costo:** 2 SMS Twilio (circa 4-5 segmenti in tutto) e 1 pagamento di test Stripe. Con il replay, nessuna chiamata HofJ.
+
+Quando hai finito, dimmi solo se sono arrivati i due SMS: registro io l'esito in `docs/acceptance.md`, senza numero né chiavi. Ti avviso appena le correzioni sono pronte.

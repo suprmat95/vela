@@ -124,7 +124,11 @@ def build_hofj(settings: Settings) -> Upstream:
                     brands=brands)
 
 
-def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
+def build_vela(settings: Settings, engine: Engine,
+               notifier: Optional[Notifier] = None) -> Tuple[Vela, Upstream]:
+    """Le frasi e le istruzioni MCP promettono gli SMS solo se il notificatore è Twilio: con
+    quello finto nessun SMS parte davvero (RF-19, RF-57)."""
+    notifier = notifier or build_notifier(settings)
     upstream = build_hofj(settings)
     extractor = None
     if settings.anthropic_api_key:   # RF-03: senza chiave il fallback è spento, senza errori
@@ -132,7 +136,8 @@ def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, Upstream]:
         extractor = HaikuExtractor.from_api_key(settings.anthropic_api_key)
     repos = PostgresRepositories(engine, quota_margin=settings.quota_margin,
                                  booking_reserve=settings.booking_reserve)
-    vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor)
+    vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor,
+                sms_enabled=isinstance(notifier, TwilioSms))
     return vela, upstream
 
 
@@ -202,13 +207,14 @@ def create_app(settings: Optional[Settings] = None, vela: Optional[Vela] = None,
                scheduler: Optional[SyncScheduler] = None) -> FastAPI:
     settings = settings or Settings.from_env()
     engine = make_engine(settings.database_url) if settings.database_url else None
-    router = None
+    router = notifier = None
     if vela is None and engine is not None:
-        vela, upstream = build_vela(settings, engine)
+        notifier = build_notifier(settings)            # uno solo: per il worker e per `sms_enabled`
+        vela, upstream = build_vela(settings, engine, notifier)
         catalog_loader, router = upstream.catalog_loader, upstream.router
         scheduler = build_scheduler(vela, upstream)
     if vela is not None and worker is None:
-        worker = build_worker(vela, settings, router)
+        worker = build_worker(vela, settings, router, notifier=notifier)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
