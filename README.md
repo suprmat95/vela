@@ -83,6 +83,7 @@ python3 -m unittest discover -s tests
 ```
 
 Equivalente senza attivare il venv: `uv run python3 -m unittest discover -s tests`.
+Lint: `uv run ruff check .` (regole in `pyproject.toml`, vedi `docs/decisions.md`).
 Nessun test chiama servizi esterni. I test che richiedono Postgres girano solo se
 `DATABASE_URL` è impostata, altrimenti vengono saltati. Attenzione: il `python3` di sistema
 potrebbe essere una versione vecchia; la suite richiede il 3.12 del venv e lo verifica.
