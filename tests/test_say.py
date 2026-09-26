@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -268,3 +269,57 @@ class QueueSayTest(unittest.TestCase):
             self.assertNotIn("http", t)
             self.assertNotIn("**", t)
             self.assertNotIn("`", t)
+
+
+SPAIN = Area("country", "Spagna", "ES")
+
+
+class AgentToolSayTest(unittest.TestCase):
+    """RF-54: criteri capiti sempre ripetuti, campi scartati, motivo non traducibile."""
+
+    def test_any_sport_is_spoken(self):
+        self.assertIn("padel o tennis", say.say_intent_created(Criteria("any", SPAIN, pax=2)))
+        self.assertIn("padel or tennis",
+                      say.say_intent_created(Criteria("any", SPAIN, pax=2, language="en")))
+
+    def test_understood_repeats_every_criterion(self):
+        c = Criteria("padel", Area("city", "Madrid", "ES"),
+                     Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"), 3, Decimal("1000"))
+        s = say.say_understood(c)
+        self.assertTrue(s.startswith("Ho capito: un viaggio di padel"))
+        for piece in ("Madrid", "1 ottobre 2026", "3 persone", "1000 euro"):
+            self.assertIn(piece, s)
+        self.assertTrue(say.say_understood(replace(c, language="en")).startswith("Got it: a padel trip"))
+
+    def test_intent_created_with_discarded_fields(self):
+        s = say.say_intent_created(Criteria("padel", pax=3, budget=Decimal("1000")),
+                                   (("area", "Atlantide"),))
+        self.assertTrue(s.startswith("Non conosco il luogo Atlantide"))
+        self.assertIn("Ho capito: un viaggio di padel per 3 persone", s)
+
+    def test_every_discarded_field_has_a_sentence_in_both_languages(self):
+        items = (("sport", "golf"), ("area", "Atlantide"), ("period", ("2026-12-10", "2026-12-01")),
+                 ("pax", 0), ("budget", -5), ("direction", "east"))
+        for lang in ("it", "en"):
+            with self.subTest(lang=lang):
+                s = say.say_discarded(items, lang)
+                for piece in ("golf", "Atlantide", "0", "-5"):
+                    self.assertIn(piece, s)
+                self.assertEqual(s.count("."), len(items))
+        self.assertEqual(say.say_discarded((), "it"), "")
+
+    def test_direction_discarded_names_the_direction(self):
+        self.assertIn("nord", say.say_discarded((("direction", "north"),), "it"))
+        self.assertIn("north", say.say_discarded((("direction", "north"),), "en"))
+
+    def test_untranslatable(self):
+        self.assertIn("ho escluso solo la proposta di prima", say.say_untranslatable("it"))
+        self.assertIn("only excluded the previous proposal", say.say_untranslatable("en"))
+
+    def test_no_match_never_invites_to_rephrase(self):
+        for lang in ("it", "en"):
+            for criterion in (None, "rejected", "sport", "dates", "pax", "price"):
+                with self.subTest(lang=lang, criterion=criterion):
+                    s = say.say_no_match(criterion, Criteria(language=lang)).lower()
+                    self.assertNotIn("riformul", s)
+                    self.assertNotIn("rephras", s)

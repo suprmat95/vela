@@ -188,7 +188,7 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         ("archived", lambda p: not p.archived),
         ("bookable", lambda p: bookable(p, now)),
         ("trip", is_trip),
-        ("sport", lambda p: criteria.sport is None or p.sport == criteria.sport),
+        ("sport", lambda p: criteria.sport in (None, "any") or p.sport == criteria.sport),
         ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
         ("price", lambda p: max_total is None or _total(p, criteria) < max_total),

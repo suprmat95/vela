@@ -7,6 +7,7 @@ Esito: `ok`, `parziale` (con il motivo nelle note), `fallito`, `da eseguire`.
 |---|---|---|---|---|---|---|
 | 1 | Flusso da Claude via MCP: proposta singola, "troppo caro" → altra singola più economica, "sì" → link, pagamento, `confirmed` con codice | — | replay | MCP (claude.ai) | da eseguire | M3. In replay il rifiuto non interpreta il motivo (M9): la seconda proposta è diversa ma può essere più cara |
 | 1 | idem | 2026-09-26 | live (HofJ staging + Stripe test) | MCP (claude.ai) | ok | M7, conversazione dell'utente con frase diversa da §10.1 (Spagna, novembre, 800 €): proposta singola a ogni turno, "troppo costoso" → proposta più economica, accept, link, pagamento, `confirmed`. Codice `cji6lhfcni72` (vedi registro) |
+| 1 | idem, dialogo del 2026-09-26 ripetuto (UC4 di `docs/usecases/agente-tool.md`): sport chiesto prima di `create_intent`, "troppo caldo, vorrei un posto più fresco" → `reject_proposal` con `direction=north` sullo stesso intento, proposta diversa più a nord | — | replay | MCP (claude.ai) | da eseguire | M17. Da eseguire dall'utente dopo il deploy; verificare che l'agente non chiami un nuovo `create_intent` dopo la proposta |
 | 2 | Flusso da agente vocale ElevenLabs, link per testo | — | live | MCP (ElevenLabs) | da eseguire | M12 |
 | 3 | Flusso via REST con `curl` e token | — | replay | REST | da eseguire | M4 |
 | 3 | idem | 2026-09-25 | live (HofJ staging + Stripe test) | REST | ok | M7, `scripts/rest_flow.py`, frase su Barcellona (vedi registro). Codice `wury5zaxzkec` |

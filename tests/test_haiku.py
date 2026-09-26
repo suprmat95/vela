@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import anthropic
 
-from vela.adapters.haiku import (MAX_RETRIES, MODEL, TIMEOUT_SECONDS, TOOL, TOOL_NAME,
-                                 HaikuExtractor)
+from vela.adapters.haiku import (MAX_RETRIES, MODEL, SYSTEM, TIMEOUT_SECONDS, TOOL,
+                                 TOOL_NAME, HaikuExtractor)
 
 TODAY = date(2026, 9, 25)
 INPUT = {"sport": "padel", "area": "Spain", "period_start": "2026-10-01",
@@ -57,6 +57,16 @@ class HaikuExtractorTest(unittest.TestCase):
         props = TOOL["input_schema"]["properties"]
         self.assertEqual(set(props), {"sport", "area", "period_start", "period_end", "pax", "budget"})
         self.assertEqual(set(TOOL["input_schema"]["required"]), set(props))
+
+    def test_sport_enum_includes_any(self):
+        # M17: "indifferente" / "tutti e due" è una risposta valida (RF-02, RF-04)
+        self.assertEqual(TOOL["input_schema"]["properties"]["sport"]["enum"],
+                         ["padel", "tennis", "any", None])
+
+    def test_system_prompt_covers_synonyms_any_and_exclusions(self):
+        for piece in ("terra rossa", "Terrarossa", "clay", "paddle", "Weebora", "any",
+                      "beach tennis", "paddle tennis"):
+            self.assertIn(piece, SYSTEM)
 
     def test_returns_tool_input(self):
         c = client(SimpleNamespace(content=[SimpleNamespace(type="text", text="ok"), tool_use()],

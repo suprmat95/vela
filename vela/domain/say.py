@@ -61,13 +61,18 @@ def _when(period: Period, lang: str = "it") -> str:
     return "tra %s e %s" % (on_date(period.start), on_date(period.end))
 
 
-def say_intent_created(c: Criteria) -> str:
+_ANY_SPORT = {"it": "padel o tennis", "en": "padel or tennis"}
+
+
+def _describe(c: Criteria) -> str:
+    """I criteri capiti come frase: "un viaggio di padel in Spagna … per 2 persone …"."""
     lang = c.language
     en = lang == "en"
+    sport = _ANY_SPORT["en" if en else "it"] if c.sport == "any" else c.sport
     if en:
-        parts = ["a %s trip" % c.sport if c.sport else "a trip"]
+        parts = ["a %s trip" % sport if sport else "a trip"]
     else:
-        parts = ["un viaggio di %s" % c.sport if c.sport else "un viaggio"]
+        parts = ["un viaggio di %s" % sport if sport else "un viaggio"]
     if c.area:
         parts.append(geo.where(c.area, lang))
     if c.period:
@@ -77,9 +82,61 @@ def say_intent_created(c: Criteria) -> str:
     if c.budget is not None:
         parts.append(("with a maximum budget of %s" if en else "con un budget massimo di %s")
                      % fmt_money(c.budget, lang))
-    if en:
-        return "Got it: %s. I'm looking for the right proposal." % " ".join(parts)
-    return "Ho capito: %s. Cerco la proposta giusta." % " ".join(parts)
+    return " ".join(parts)
+
+
+def say_understood(c: Criteria) -> str:
+    """RF-54: i criteri capiti, ripetuti così che il viaggiatore possa correggerli."""
+    return ("Got it: %s." if c.language == "en" else "Ho capito: %s.") % _describe(c)
+
+
+def say_intent_created(c: Criteria, discarded: tuple = ()) -> str:
+    looking = ("I'm looking for the right proposal." if c.language == "en"
+               else "Cerco la proposta giusta.")
+    return prefixed(say_discarded(discarded, c.language), "%s %s" % (say_understood(c), looking))
+
+
+def prefixed(prefix: str, sentence: str) -> str:
+    return "%s %s" % (prefix, sentence) if prefix else sentence
+
+
+_DISCARDED = {
+    "it": {"sport": "Lo sport %s non lo tratto: solo padel o tennis.",
+           "area": "Non conosco il luogo %s.",
+           "period": "Non ho potuto usare le date %s.",
+           "pax": "Non ho potuto usare %s come numero di persone.",
+           "budget": "Non ho potuto usare %s come budget.",
+           "direction": "Non so spostare la ricerca verso %s."},
+    "en": {"sport": "I don't handle %s: only padel or tennis.",
+           "area": "I don't know the place %s.",
+           "period": "I couldn't use the dates %s.",
+           "pax": "I couldn't use %s as the number of people.",
+           "budget": "I couldn't use %s as the budget.",
+           "direction": "I can't move the search %s."},
+}
+_DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
+
+
+def _discarded_value(field: str, value, lang: str) -> str:
+    if field == "period":
+        start, end = value
+        return "%s - %s" % (start or "?", end or "?")
+    if field == "direction":
+        return _DIRECTION_WORDS.get(lang, _DIRECTION_WORDS["it"]).get(value, str(value))
+    return str(value)
+
+
+def say_discarded(items: tuple, lang: str = "it") -> str:
+    """RF-53, RF-54: una frase per ogni campo strutturato scartato perché invalido."""
+    texts = _DISCARDED.get(lang, _DISCARDED["it"])
+    return " ".join(texts[field] % _discarded_value(field, value, lang) for field, value in items)
+
+
+def say_untranslatable(lang: str = "it") -> str:
+    """RF-54: un motivo di rifiuto che non diventa nessun criterio."""
+    if lang == "en":
+        return "I can't choose based on that: I've only excluded the previous proposal."
+    return "Non so scegliere in base a questo: ho escluso solo la proposta di prima."
 
 
 def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
@@ -107,13 +164,13 @@ _NO_MATCH = {
         "archived": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
         "bookable": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
         "trip": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",
-        "rejected": "Hai già scartato tutte le proposte compatibili con la tua richiesta: prova a riformularla.",
-        "sport": "Non trovo nessun viaggio per lo sport che hai chiesto: prova con l'altro sport o riformula la richiesta.",
+        "rejected": "Hai già scartato tutte le proposte compatibili con la tua richiesta: dimmi cosa vuoi cambiare.",
+        "sport": "Non trovo nessun viaggio per lo sport che hai chiesto: prova con l'altro sport o dimmi cosa vuoi cambiare.",
         "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
         "pax": "Non trovo viaggi per il numero di persone indicato: prova a cambiare il numero di persone.",
         "price": "Non ho niente di più economico per la tua richiesta: prova a cambiare periodo o destinazione.",
-        None: "Non trovo nessun viaggio compatibile: prova a riformulare la richiesta.",
-        "sport_value": "Non trovo nessun viaggio di %s: prova con l'altro sport o riformula la richiesta.",
+        None: "Non trovo nessun viaggio compatibile: dimmi cosa vuoi cambiare.",
+        "sport_value": "Non trovo nessun viaggio di %s: prova con l'altro sport o dimmi cosa vuoi cambiare.",
         "dates_value": "Non trovo partenze %s: prova con un altro periodo.",
         "pax_value": "Non trovo viaggi per %s: prova a cambiare il numero di persone.",
     },
@@ -121,13 +178,13 @@ _NO_MATCH = {
         "archived": "Right now I have no bookable trips: please try again later.",
         "bookable": "Right now I have no bookable trips: please try again later.",
         "trip": "Right now I have no bookable trips: please try again later.",
-        "rejected": "You have already turned down every proposal that matches your request: try rephrasing it.",
-        "sport": "I can't find any trip for the sport you asked for: try the other sport or rephrase the request.",
+        "rejected": "You have already turned down every proposal that matches your request: tell me what you want to change.",
+        "sport": "I can't find any trip for the sport you asked for: try the other sport or tell me what you want to change.",
         "dates": "I can't find departures in the period you asked for: try another period.",
         "pax": "I can't find trips for that number of people: try changing the number of people.",
         "price": "I have nothing cheaper for your request: try another period or destination.",
-        None: "I can't find any matching trip: try rephrasing the request.",
-        "sport_value": "I can't find any %s trip: try the other sport or rephrase the request.",
+        None: "I can't find any matching trip: tell me what you want to change.",
+        "sport_value": "I can't find any %s trip: try the other sport or tell me what you want to change.",
         "dates_value": "I can't find departures %s: try another period.",
         "pax_value": "I can't find trips for %s: try changing the number of people.",
     },

@@ -92,6 +92,13 @@ class FilterTest(unittest.TestCase):
         r = choose([make_product(1, sport="tennis")], crit(sport="padel"), set(), TODAY)
         self.assertEqual(r, NoChoice("sport"))
 
+    def test_sport_any_accepts_both_sports(self):
+        # M17: `any` = nessun filtro sport, come `None`
+        for sport in ("padel", "tennis"):
+            with self.subTest(sport=sport):
+                r = choose([make_product(1, sport=sport)], crit(sport="any"), set(), TODAY)
+                self.assertEqual(r.product.id, "1")
+
     def test_no_sport_in_intent_accepts_any_sport(self):
         r = choose([make_product(1, sport="tennis")], crit(sport=None), set(), TODAY)
         self.assertIsInstance(r, Choice)

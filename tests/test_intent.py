@@ -2,11 +2,11 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT_OR_PERIOD,
-                                QUESTION_SPORT_OR_PERIOD_EN, detect_language,
+from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT,
+                                QUESTION_SPORT_EN, detect_language,
                                 is_per_person, parse_budget, parse_intent, parse_pax,
-                                parse_period)
-from vela.domain.models import Area, Period, TravelerProfile
+                                parse_period, parse_sport)
+from vela.domain.models import Area, Period, StructuredFields, TravelerProfile
 
 TODAY = date(2026, 9, 25)   # venerdì
 
@@ -100,6 +100,47 @@ class TableTest(unittest.TestCase):
                 self.assertEqual(c.budget, budget)
                 self.assertEqual(c.language, lang)
                 self.assertIsNone(r.question)
+
+
+# M17: esclusioni, poi "any", poi sinonimi, poi padel/tennis
+SPORT_TABLE = [
+    ("un weekend di padel a Valencia", "padel"),
+    ("tennis camp in Mallorca", "tennis"),
+    ("un viaggio sulla terra rossa a maggio", "tennis"),
+    ("giocare sulla Terra Rossa", "tennis"),
+    ("una settimana con Terrarossa in Puglia", "tennis"),
+    ("a clay court week in Spain", "tennis"),
+    ("playing on clay in May", "tennis"),
+    ("un weekend di paddle a Valencia", "padel"),
+    ("pádel en Madrid", "padel"),
+    ("un viaggio Weebora in Spagna", "padel"),
+    ("padel e tennis in Spagna", "any"),
+    ("tennis and padel in Portugal", "any"),
+    ("Padel o tennis? Indifferente, basta che sia al caldo", "any"),
+    ("indifferente", "any"),
+    ("tutti e due", "any"),
+    ("vanno bene entrambi gli sport", "any"),
+    ("lo sport non importa", "any"),
+    ("either is fine", "any"),
+    ("both sports are fine", "any"),
+    ("the sport doesn't matter", "any"),
+    ("beach tennis a Rimini", None),
+    ("a paddle tennis week", None),
+    ("beach tennis e padel", "padel"),
+    ("una vacanza a Maiorca a giugno", None),
+    ("siamo in due, per il ponte", None),
+]
+
+
+class SportTest(unittest.TestCase):
+    def test_sport_table(self):
+        for text, sport in SPORT_TABLE:
+            with self.subTest(text=text):
+                self.assertEqual(parse_sport(text), sport)
+
+    def test_both_of_us_is_not_both_sports(self):
+        self.assertIsNone(parse_sport("a trip for both of us"))
+        self.assertEqual(parse_sport("a padel trip for both of us"), "padel")
 
 
 class PeriodTest(unittest.TestCase):
@@ -287,9 +328,9 @@ class LanguageTest(unittest.TestCase):
 
 
 class QuestionTest(unittest.TestCase):
-    def test_missing_sport_and_period_asks_sport_or_period(self):
+    def test_missing_sport_asks_sport(self):
         r = parse_intent("un viaggio in Spagna per due", today=TODAY)
-        self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+        self.assertEqual(r.question, QUESTION_SPORT)
 
     def test_missing_pax_asks_one_question(self):
         r = parse_intent("padel a ottobre", today=TODAY)
@@ -305,14 +346,28 @@ class QuestionTest(unittest.TestCase):
         r = parse_intent("padel a ottobre, siamo in 3", profile=TravelerProfile(pax=2), today=TODAY)
         self.assertEqual(r.criteria.pax, 3)
 
-    def test_only_period_is_enough(self):
+    def test_period_without_sport_asks_sport(self):
+        # RF-04 (M17): lo sport è sempre indispensabile, il periodo non basta più
         r = parse_intent("qualcosa a ottobre per due", today=TODAY)
+        self.assertEqual(r.question, QUESTION_SPORT)
+
+    def test_sport_without_period_is_enough(self):
+        r = parse_intent("padel per due", today=TODAY)
         self.assertIsNone(r.question)
-        self.assertIsNone(r.criteria.sport)
+        self.assertIsNone(r.criteria.period)
+
+    def test_sport_asked_before_pax(self):
+        self.assertEqual(parse_intent("una vacanza a Maiorca a giugno", today=TODAY).question,
+                         QUESTION_SPORT)
+
+    def test_any_is_a_valid_sport(self):
+        r = parse_intent("padel o tennis indifferente, a novembre per due", today=TODAY)
+        self.assertIsNone(r.question)
+        self.assertEqual(r.criteria.sport, "any")
 
     def test_questions_in_english(self):
         self.assertEqual(parse_intent("a trip to Spain for the two of us", today=TODAY).question,
-                         QUESTION_SPORT_OR_PERIOD_EN)
+                         QUESTION_SPORT_EN)
         self.assertEqual(parse_intent("we want padel in October", today=TODAY).question,
                          QUESTION_PAX_EN)
 
@@ -344,22 +399,31 @@ class FallbackTest(unittest.TestCase):
         parse_intent("padel in Spagna per due", today=TODAY, extractor=fx)
         self.assertEqual(fx.calls, [])
 
-    def test_not_called_when_period_found(self):
+    def test_called_when_sport_missing_even_with_period(self):
+        # RF-03 (M17): il fallback parte quando manca lo sport, anche se il periodo c'è
         fx = FakeExtractor(GOOD)
-        parse_intent("qualcosa a ottobre per due", today=TODAY, extractor=fx)
-        self.assertEqual(fx.calls, [])
+        r = parse_intent("qualcosa a ottobre per due", today=TODAY, extractor=fx)
+        self.assertEqual(len(fx.calls), 1)
+        self.assertEqual(r.criteria.sport, "padel")
+        self.assertEqual(r.criteria.period.label, "ottobre")
 
-    def test_called_when_both_missing_and_overrides(self):
+    def test_fills_only_missing_criteria(self):
+        # RF-53: parser > Haiku; il fallback riempie solo i criteri vuoti
         fx = FakeExtractor(GOOD)
         r = parse_intent(VAGUE, today=TODAY, extractor=fx)
         self.assertEqual(fx.calls, [(VAGUE, TODAY)])
         c = r.criteria
         self.assertEqual(c.sport, "padel")
-        self.assertEqual(c.area, Area("country", "Grecia", "GR"))
+        self.assertEqual(c.area, Area("country", "Spagna", "ES"))
         self.assertEqual(c.period, Period(date(2026, 11, 1), date(2026, 11, 30), "llm"))
-        self.assertEqual(c.pax, 3)
+        self.assertEqual(c.pax, 2)
         self.assertEqual(c.budget, Decimal("1500"))
         self.assertEqual(c.language, "it")
+        self.assertIsNone(r.question)
+
+    def test_any_from_fallback(self):
+        r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor({"sport": "any"}))
+        self.assertEqual(r.criteria.sport, "any")
         self.assertIsNone(r.question)
 
     def test_null_fields_keep_parser_values(self):
@@ -381,17 +445,104 @@ class FallbackTest(unittest.TestCase):
             with self.subTest(bad=bad):
                 r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(bad))
                 self.assertEqual(r.criteria, baseline)
-                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+                self.assertEqual(r.question, QUESTION_SPORT)
 
     def test_extractor_error_is_ignored(self):
         r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(error=RuntimeError("boom")))
-        self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+        self.assertEqual(r.question, QUESTION_SPORT)
 
     def test_extractor_returning_none_or_junk(self):
         for result in (None, "testo", ["x"]):
             with self.subTest(result=result):
                 r = parse_intent(VAGUE, today=TODAY, extractor=FakeExtractor(result))
-                self.assertEqual(r.question, QUESTION_SPORT_OR_PERIOD)
+                self.assertEqual(r.question, QUESTION_SPORT)
 
     def test_no_extractor_no_error(self):
-        self.assertEqual(parse_intent(VAGUE, today=TODAY).question, QUESTION_SPORT_OR_PERIOD)
+        self.assertEqual(parse_intent(VAGUE, today=TODAY).question, QUESTION_SPORT)
+
+
+class FieldsTest(unittest.TestCase):
+    """RF-52, RF-53: campo strutturato valido > parser > Haiku; campo invalido scartato."""
+
+    def test_fields_alone_build_the_criteria(self):
+        f = StructuredFields(sport="padel", area="Spagna", period_start="2026-10-01",
+                             period_end="2026-10-31", pax=2, budget=800)
+        r = parse_intent("qualcosa", today=TODAY, fields=f)
+        c = r.criteria
+        self.assertIsNone(r.question)
+        self.assertEqual(c.sport, "padel")
+        self.assertEqual(c.area, Area("country", "Spagna", "ES"))
+        self.assertEqual((c.period.start, c.period.end), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertEqual((c.pax, c.budget), (2, Decimal("800.00")))
+        self.assertEqual((r.discarded, r.conflicts), ((), ()))
+
+    def test_field_beats_parser_and_conflict_is_reported(self):
+        r = parse_intent("Tennis a Roma a maggio per due", today=TODAY,
+                         fields=StructuredFields(sport="padel"))
+        self.assertEqual(r.criteria.sport, "padel")
+        self.assertEqual(r.conflicts, (("sport", "tennis", "padel"),))
+
+    def test_same_value_is_not_a_conflict(self):
+        r = parse_intent("padel per due", today=TODAY, fields=StructuredFields(sport="padel", pax=2))
+        self.assertEqual(r.conflicts, ())
+
+    def test_field_pax_beats_text_and_profile(self):
+        r = parse_intent("padel, siamo in 3", profile=TravelerProfile(pax=4), today=TODAY,
+                         fields=StructuredFields(pax=2))
+        self.assertEqual(r.criteria.pax, 2)
+        self.assertEqual(r.conflicts, (("pax", 3, 2),))
+
+    def test_field_pax_used_for_per_person_budget(self):
+        r = parse_intent("padel, 500 euro a testa", today=TODAY, fields=StructuredFields(pax=2))
+        self.assertEqual(r.criteria.budget, Decimal("1000"))
+
+    def test_invalid_fields_are_discarded_not_blocking(self):
+        f = StructuredFields(sport="golf", area="Atlantide", period_start="2026-12-10",
+                             period_end="2026-12-01", pax=0, budget=-5)
+        r = parse_intent("padel in Spagna per due", today=TODAY, fields=f)
+        self.assertIsNone(r.question)
+        c = r.criteria
+        self.assertEqual((c.sport, c.area.name, c.pax), ("padel", "Spagna", 2))
+        self.assertEqual([d[0] for d in r.discarded], ["sport", "area", "period", "pax", "budget"])
+        self.assertIn(("area", "Atlantide"), r.discarded)
+
+    def test_past_or_partial_period_is_discarded(self):
+        for f in (StructuredFields(period_start="2025-01-01", period_end="2025-01-05"),
+                  StructuredFields(period_start="2026-11-01"),
+                  StructuredFields(period_end="2026-11-30"),
+                  StructuredFields(period_start="ieri", period_end="domani")):
+            with self.subTest(f=f):
+                r = parse_intent("padel per due", today=TODAY, fields=f)
+                self.assertIsNone(r.criteria.period)
+                self.assertEqual([d[0] for d in r.discarded], ["period"])
+
+    def test_pax_out_of_range_and_bool(self):
+        for pax in (0, 21, True):
+            with self.subTest(pax=pax):
+                r = parse_intent("padel per due", today=TODAY, fields=StructuredFields(pax=pax))
+                self.assertEqual(r.criteria.pax, 2)
+                self.assertEqual(r.discarded, (("pax", pax),))
+
+    def test_field_sport_any(self):
+        r = parse_intent("al caldo a novembre per due", today=TODAY,
+                         fields=StructuredFields(sport="ANY"))
+        self.assertEqual(r.criteria.sport, "any")
+        self.assertIsNone(r.question)
+
+    def test_field_sport_skips_fallback(self):
+        fx = FakeExtractor(GOOD)
+        parse_intent(VAGUE, today=TODAY, extractor=fx, fields=StructuredFields(sport="tennis"))
+        self.assertEqual(fx.calls, [])
+
+    def test_field_beats_fallback(self):
+        fx = FakeExtractor(GOOD)
+        r = parse_intent("una vacanza per due", today=TODAY, extractor=fx,
+                         fields=StructuredFields(budget=900, area="Italia"))
+        c = r.criteria
+        self.assertEqual(c.sport, "padel")
+        self.assertEqual((c.budget, c.area.name), (Decimal("900.00"), "Italia"))
+
+    def test_no_sport_from_fields_parser_or_fallback_asks(self):
+        r = parse_intent("per il ponte dell'8 dicembre, siamo in due", today=TODAY,
+                         fields=StructuredFields(period_start="2026-12-05", period_end="2026-12-08"))
+        self.assertEqual(r.question, QUESTION_SPORT)

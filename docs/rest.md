@@ -9,14 +9,45 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 
 | Endpoint | Body | Esiti |
 |---|---|---|
-| `POST /v1/intents` | `{"text": str, "profile"?: Profile}` | 201 `intent_created`, 200 `question` |
+| `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
-| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str}` | 200 `proposal`, 200 `no_match` |
+| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
 | `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile}` | 202 `order_queued` (con `Location`), 200 `order_status` a un secondo accept, 200 `missing_traveler_data` |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
 
 `Profile` = `{"first_name"?, "last_name"?, "email"?, "phone"?, "pax"? (≥ 1), "participants"?: [{"first_name"?, "last_name"?}]}`.
 `text` è ripulito dagli spazi e va da 1 a 1000 caratteri. I campi extra sono ignorati.
+
+### Campi strutturati (M17, RF-52..55)
+
+`Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?}`, gli stessi
+nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
+già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
+viaggiatore. Un client che manda solo testo funziona come prima.
+
+| Campo | Valori | Scartato se |
+|---|---|---|
+| `sport` | `padel`, `tennis`, `any` (indifferente: nessun filtro sport) | fuori dai tre valori |
+| `area` | nome di un luogo (paese, regione, città) | sconosciuto a `geo` |
+| `period_start`, `period_end` | date `YYYY-MM-DD`, servono entrambe | una sola, non ISO, inizio dopo la fine, fine passata |
+| `pax` | intero | fuori da 1..20 |
+| `budget` | numero, totale massimo in euro per il gruppo | non positivo |
+| `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
+
+- **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
+  creazione). Se testo e campo non coincidono vince il campo e il conflitto va nei log (logger
+  `vela.domain.usecases`, mai il testo). Nel rifiuto `area` vince su `direction`. Su
+  `/v1/intents` `pax` al primo livello vince su `profile.pax`, che resta il default.
+- **Campo invalido**: scartato senza bloccare la richiesta e dichiarato all'inizio del `say`
+  (nessun 422). Un tipo JSON sbagliato (es. `"pax": "tre"`) resta un 422.
+- **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
+  è `question` "Padel o tennis?" e nessun intento viene salvato.
+- **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
+  capiti ("Ho capito: …"); un motivo di rifiuto che non cambia nessun criterio viene dichiarato.
+- **Dopo una proposta** (RF-55) ogni cambiamento passa da `reject`, mai da un nuovo
+  `POST /v1/intents`. Un `no_match` restituito da `reject` porta `rejected_proposal_id`: un
+  nuovo `reject` su quella proposta con i campi cambiati aggiorna i criteri e propone di nuovo,
+  senza registrare un secondo rifiuto.
 
 ## Risposte
 
@@ -29,7 +60,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 | `intent_created` | 201 | intento salvato con i criteri estratti |
 | `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
 | `proposal` | 200 | una proposta |
-| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché |
+| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine in coda (M5, RF-45): `order_id`, `status` `queued`, `position`, `wait_seconds`. Nessun link: arriva con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
 | `order_status` | 200 | stato dell'ordine con campi fissi, `null` quando non pertinenti (tabella sotto) |

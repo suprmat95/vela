@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 
 from support import NOW, TODAY
-from vela.domain.models import Area, Criteria, Period, Proposal
+from vela.domain.models import Area, Criteria, Period, Proposal, StructuredFields
 from vela.domain.refine import is_price_reason, refine
 
 SPAIN = Area("country", "Spagna", "ES")
@@ -17,7 +17,11 @@ PROPOSAL = Proposal("p1", "i1", "1", date(2026, 10, 1), date(2026, 10, 4), 2, De
 
 
 def refined(reason, criteria=CRIT, area=VALENCIA):
-    return refine(criteria, reason, PROPOSAL, area, TODAY)
+    return refine(criteria, reason, PROPOSAL, area, TODAY).criteria
+
+
+def refinement(reason="", fields=None, area=VALENCIA):
+    return refine(CRIT, reason, PROPOSAL, area, TODAY, fields=fields)
 
 
 class PriceReasonTest(unittest.TestCase):
@@ -94,8 +98,92 @@ class UnrecognizedTest(unittest.TestCase):
 
     def test_idempotent(self):
         once = refined("troppo caro")
-        self.assertEqual(refine(once, "troppo caro", PROPOSAL, VALENCIA, TODAY), once)
+        self.assertEqual(refine(once, "troppo caro", PROPOSAL, VALENCIA, TODAY).criteria, once)
 
     def test_language_is_kept(self):
         en = replace(CRIT, language="en")
         self.assertEqual(refined("too expensive", en).language, "en")
+
+
+class TemperatureTest(unittest.TestCase):
+    """M17: "più fresco" = più a nord, "più caldo" = più a sud (nessun dato climatico)."""
+
+    def test_cooler_goes_north(self):
+        for reason in ("Troppo caldo, vorrei un posto più fresco", "più freddo", "vorrei più fresca",
+                       "somewhere cooler", "colder please", "too hot"):
+            with self.subTest(reason=reason):
+                self.assertEqual(refined(reason).area, Area("city", "Tarragona", "ES"))
+
+    def test_warmer_goes_south(self):
+        for reason in ("vorrei un posto più caldo", "somewhere warmer", "hotter", "troppo freddo",
+                       "too cold"):
+            with self.subTest(reason=reason):
+                self.assertEqual(refined(reason).area, Area("city", "Alicante", "ES"))
+
+
+class FieldsTest(unittest.TestCase):
+    """RF-52, RF-53 sul rifiuto: campo valido > testo; `area` > `direction`."""
+
+    def test_direction_field(self):
+        r = refinement("Troppo caldo", StructuredFields(direction="north"))
+        self.assertEqual(r.criteria.area, Area("city", "Tarragona", "ES"))
+        self.assertTrue(r.understood)
+        self.assertEqual((r.discarded, r.conflicts), ((), ()))
+
+    def test_direction_field_beats_text_direction(self):
+        self.assertEqual(refinement("più a nord", StructuredFields(direction="south")).criteria.area,
+                         Area("city", "Alicante", "ES"))
+
+    def test_invalid_or_unmovable_direction_is_discarded(self):
+        for direction, area in (("east", VALENCIA), ("south", Area("region", "Lanzarote", "ES")),
+                                ("north", None)):
+            with self.subTest(direction=direction):
+                r = refinement("", StructuredFields(direction=direction), area=area)
+                self.assertEqual(r.criteria, CRIT)
+                self.assertEqual(r.discarded, (("direction", direction),))
+
+    def test_area_beats_direction_with_conflict(self):
+        r = refinement("più fresco", StructuredFields(area="Italia", direction="north"))
+        self.assertEqual(r.criteria.area, Area("country", "Italia", "IT"))
+        self.assertEqual(r.conflicts, (("area", "Tarragona", "Italia"),))
+
+    def test_fields_update_criteria(self):
+        r = refinement("Preferisco il tennis", StructuredFields(
+            sport="tennis", period_start="2026-11-01", period_end="2026-11-30", pax=3, budget=600))
+        c = r.criteria
+        self.assertEqual((c.sport, c.pax, c.budget), ("tennis", 3, Decimal("600.00")))
+        self.assertEqual((c.period.start, c.period.end), (date(2026, 11, 1), date(2026, 11, 30)))
+        self.assertEqual(r.conflicts, ())
+
+    def test_text_field_conflict(self):
+        r = refinement("preferisco il tennis", StructuredFields(sport="padel"))
+        self.assertEqual(r.criteria.sport, "padel")
+        self.assertEqual(r.conflicts, (("sport", "tennis", "padel"),))
+
+    def test_old_criteria_are_not_conflicts(self):
+        self.assertEqual(refinement("", StructuredFields(budget=500)).conflicts, ())
+
+    def test_invalid_fields_are_discarded(self):
+        r = refinement("", StructuredFields(sport="golf", area="Atlantide", pax=0))
+        self.assertEqual(r.criteria, CRIT)
+        self.assertEqual([d[0] for d in r.discarded], ["sport", "area", "pax"])
+        self.assertFalse(r.understood)
+
+    def test_sport_any_from_text(self):
+        self.assertEqual(refined("va bene anche il tennis, padel o tennis indifferente").sport, "any")
+
+
+class UnderstoodTest(unittest.TestCase):
+    """RF-54: un motivo che non si traduce in nessun criterio va dichiarato."""
+
+    def test_untranslatable_reason(self):
+        self.assertFalse(refinement("Voglio un hotel con la spa").understood)
+
+    def test_translatable_reasons(self):
+        for reason in ("troppo caro", "più a sud", "a novembre", "siamo in 4", "più fresco",
+                       "meglio in Grecia"):
+            with self.subTest(reason=reason):
+                self.assertTrue(refinement(reason).understood)
+
+    def test_recognised_but_unchanged_is_understood(self):
+        self.assertTrue(refinement("a ottobre").understood)
