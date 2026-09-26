@@ -45,3 +45,19 @@ class DockerignoreTest(unittest.TestCase):
         lines = read(".dockerignore").splitlines()
         for needed in ("alembic", "alembic.ini", "pyproject.toml", "uv.lock", "vela"):
             self.assertNotIn(needed, lines)
+
+
+class ComposeTest(unittest.TestCase):
+    """Banco di prova di M13a: il compose non deve mai portare il carico a HofJ vero."""
+
+    def test_vela_runs_in_loadtest_mode_against_the_fake(self):
+        compose = read("docker-compose.yml")
+        self.assertIn("VELA_UPSTREAM_MODE: loadtest", compose)
+        self.assertIn("HOFJ_BASE_URL: http://fake-hofj:8001", compose)
+        self.assertNotIn("hofj.com", compose.replace("weebora.com", "").replace("terrarossa.com", ""))
+        self.assertNotIn("STRIPE_SECRET_KEY", compose)
+
+    def test_render_still_builds_the_app_stage(self):
+        dockerfile = read("Dockerfile")
+        self.assertIn("AS loadtest", dockerfile)
+        self.assertEqual(dockerfile.strip().splitlines()[-1], "FROM app")

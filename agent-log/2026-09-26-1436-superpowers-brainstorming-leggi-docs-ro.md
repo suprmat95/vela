@@ -178,3 +178,61 @@ Ora `report.py`: prima aggiungo `t_end` al percorso (serve per l'età della coda
 - 🔧 Bash: Write report tests and run them
 
 - 🔧 Bash: Commit journey/locust/report; read docker ignore and tests
+
+Ora `run.py`, compose e Dockerfile. `loadtest/` è escluso dall'immagine (`.dockerignore`): lo monto nei servizi del compose, così l'immagine di Render non cambia.
+
+- 🔧 Bash: Add env defaults to fake CLI and test them
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/run.py
+
+- 🔧 Bash: Write and run tests for the run command
+
+Ora Dockerfile (stage `loadtest`) e `docker-compose.yml`.
+
+- 🔧 Bash: Add loadtest Dockerfile stage, compose file and tests
+
+Build e primo avvio del compose (pull di `postgres:16` e dell'immagine uv; nessuna chiamata a HofJ/Stripe).
+
+- 🔧 Bash: Build images and start the compose stack
+
+Docker Desktop non è avviato. Lo avvio (`open -a Docker`) e aspetto il daemon.
+
+- 🔧 Bash: Start Docker Desktop and wait for the daemon
+
+- 🔧 Bash: Build images and start the compose stack
+
+- 🔧 Bash: Check Vela health, fake stats and logs
+
+- 🔧 Bash: Recheck Vela health and logs after startup
+
+- 🔧 Bash: Check Vela health, fake stats and container status
+
+- 🔧 Bash: Show Vela container crash logs
+
+Il container di Vela si è fermato subito dopo le migrazioni senza log; sto cercando il motivo.
+
+- 🔧 Bash: Inspect Vela container exit state
+
+Uscita 132 = SIGILL (istruzione illegale) dopo le migrazioni. Isolo quale import la provoca.
+
+- 🔧 Bash: Find which import crashes with SIGILL in container
+
+- 🔧 Bash: Trace the mcp import crash with faulthandler
+
+- 🔧 Bash: Locate the native module causing the illegal instruction
+
+- 🔧 Bash: Check cryptography version and Docker VM CPU features
+
+- 🔧 Bash: Test mcp import with OpenSSL CPU caps masked
+
+Funziona. Aggiungo `OPENSSL_armcap: "0"` ai servizi del compose (ignorata su x86; qui non c'è TLS, quindi nessun effetto sulle misure) e lo registro nelle decisioni.
+
+- 🔧 Bash: Set OpenSSL workaround in compose and restart stack
+
+- 🔧 Monitor
+
+Mentre il sync gira, scrivo `loadtest/README.md`.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/README.md
+
+- 🔧 Bash: Check sync progress

@@ -223,9 +223,18 @@ if __name__ == "__main__":
 class CliTest(unittest.TestCase):
     def test_arguments_become_the_config(self):
         from loadtest.fake_hofj.__main__ import config_from, parse_args
-        config = config_from(parse_args(["--window", "rolling", "--background-rpm", "12",
+        config = config_from(parse_args(env={}, argv=["--window", "rolling", "--background-rpm", "12",
                                          "--latency", "pessimistic", "--seed", "5",
                                          "--fault", "POST /v1/bookings=hang:0.1"]))
         self.assertEqual((config.window, config.background_rpm, config.latency, config.seed),
                          ("rolling", 12.0, "pessimistic", 5))
         self.assertEqual(config.faults[0].kind, "hang")
+
+    def test_environment_defaults_for_compose(self):
+        from loadtest.fake_hofj.__main__ import config_from, parse_args
+        env = {"FAKE_HOFJ_LATENCY": "pessimistic", "FAKE_HOFJ_BACKGROUND_RPM": "12",
+               "FAKE_HOFJ_FAULTS": "POST /v1/bookings=hang_then_execute:0.05; POST /v1/itineraries=hang:0.02"}
+        config = config_from(parse_args([], env=env))
+        self.assertEqual((config.latency, config.background_rpm, config.window), ("pessimistic", 12.0, "anchored"))
+        self.assertEqual([(f.endpoint, f.kind) for f in config.faults],
+                         [("POST /v1/bookings", "hang_then_execute"), ("POST /v1/itineraries", "hang")])
