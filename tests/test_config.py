@@ -15,6 +15,9 @@ ALL_VARS = {
     "VELA_UPSTREAM_MODE": "live",
     "ANTHROPIC_API_KEY": "ak",
     "VELA_PUBLIC_URL": "https://vela.example.test",
+    "TWILIO_ACCOUNT_SID": "AC1",
+    "TWILIO_AUTH_TOKEN": "tt",
+    "TWILIO_FROM": "+15550001111",
 }
 
 
@@ -31,6 +34,9 @@ class SettingsFromEnvTest(unittest.TestCase):
         self.assertIsNone(s.vela_api_token)
         self.assertIsNone(s.anthropic_api_key)
         self.assertIsNone(s.vela_public_url)
+        self.assertIsNone(s.twilio_account_sid)
+        self.assertIsNone(s.twilio_auth_token)
+        self.assertIsNone(s.twilio_from)
         self.assertEqual(s.vela_upstream_mode, "replay")
 
     def test_all_variables_are_read(self):
@@ -44,6 +50,8 @@ class SettingsFromEnvTest(unittest.TestCase):
         self.assertEqual(s.vela_upstream_mode, "live")
         self.assertEqual(s.anthropic_api_key, "ak")
         self.assertEqual(s.vela_public_url, "https://vela.example.test")
+        self.assertEqual((s.twilio_account_sid, s.twilio_auth_token, s.twilio_from),
+                         ("AC1", "tt", "+15550001111"))
 
     def test_database_url_is_normalized(self):
         s = Settings.from_env(ALL_VARS)

@@ -109,6 +109,9 @@ dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env
 | `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
 | `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. Obbligatoria con `STRIPE_SECRET_KEY`. |
 | `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) quando il parser non trova né sport né periodo; timeout 5 s, 1 retry. Prova manuale (una chiamata): `uv run python scripts/try_haiku.py "testo"`. |
+| `TWILIO_ACCOUNT_SID` | per SMS reali | Account Twilio. Con `TWILIO_AUTH_TOKEN` e `TWILIO_FROM` Vela manda al viaggiatore l'SMS con il link di pagamento e quello di conferma; senza nessuna delle tre gli SMS sono finti; con solo alcune l'app non parte. Vedi `docs/sms.md`. |
+| `TWILIO_AUTH_TOKEN` | per SMS reali | Token dell'account Twilio. |
+| `TWILIO_FROM` | per SMS reali | Numero Twilio del mittente in E.164 (es. `+1555…`). |
 
 ## Docker
 

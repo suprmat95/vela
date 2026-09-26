@@ -65,6 +65,9 @@ class Settings:
     vela_upstream_mode: str = DEFAULT_UPSTREAM_MODE
     anthropic_api_key: Optional[str] = None
     vela_public_url: Optional[str] = None
+    twilio_account_sid: Optional[str] = None           # SMS al viaggiatore (decisione 2026-09-26)
+    twilio_auth_token: Optional[str] = None
+    twilio_from: Optional[str] = None                  # numero Twilio del mittente, E.164
     # Parametri di M5: configurabili da codice, mai da env (l'elenco di §6 resta chiuso).
     worker_concurrency: int = 4                        # RF-50, thread per istanza
     quota_margin: float = 0.10                         # limite effettivo = limitPerMinute × 0,9
@@ -92,6 +95,9 @@ class Settings:
             vela_upstream_mode=env.get("VELA_UPSTREAM_MODE") or DEFAULT_UPSTREAM_MODE,
             anthropic_api_key=env.get("ANTHROPIC_API_KEY"),
             vela_public_url=env.get("VELA_PUBLIC_URL"),
+            twilio_account_sid=env.get("TWILIO_ACCOUNT_SID"),
+            twilio_auth_token=env.get("TWILIO_AUTH_TOKEN"),
+            twilio_from=env.get("TWILIO_FROM"),
         )
 
 

@@ -850,3 +850,85 @@ None.
 - 🔧 Agent: Implement Task 6: Twilio adapter
 
 Il Task 5 è approvato. Il revisore ha giudicato legittimi i due adattamenti ai test esistenti: le asserzioni originali restano intatte. Ora è in corso il Task 6, l'adapter Twilio.
+
+## Utente 17:05
+
+<task-notification>
+<task-id>a28ee8602f1f217c7</task-id>
+<tool-use-id>toolu_01DBRY3fZJFW8YMRcsnbpjsS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a28ee8602f1f217c7.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 6: Twilio adapter" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Final Report
+
+**Status:** DONE
+
+**Commit:** 5ec206a - Add the Twilio SMS adapter over httpx
+
+**Test Summary:** 4/4 adapter tests pass; full suite 958/958 tests pass (48 skipped)
+
+**Concerns:** None
+
+**Report:** `/Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-6-report.md`</result>
+<usage><subagent_tokens>42060</subagent_tokens><tool_uses>11</tool_uses><duration_ms>106857</duration_ms></usage>
+</task-notification>
+
+## Agente 17:05
+
+- 🔧 Bash: Build Task 6 review package
+
+- 🔧 Agent: Review Task 6 (spec + quality)
+
+Revisione del Task 6 in corso.
+
+## Utente 17:07
+
+<task-notification>
+<task-id>a3c7a1971a66409b4</task-id>
+<tool-use-id>toolu_015fpaCfmHSvvbQfSyJUnu8j</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a3c7a1971a66409b4.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 6 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ No new dependency: uses only `httpx` (already in `pyproject.toml`, `httpx&gt;=0.27`) — `vela/adapters/sms_twilio.py:1-9`.
+- ✅ Correct endpoint and method: `POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json` built from `API_BASE` + `self.path` (`sms_twilio.py:106,113,120`); verified in `tests/test_sms_twilio.py:52-53` against the actual `httpx.Request.url`.
+- ✅ Basic auth with (sid, token): `httpx.Client(..., auth=(account_sid, auth_token), ...)` (`sms_twilio.py:120`), verified against the literal `Authorization: Basic ...` header in the test (`test_sms_twilio.py:55-56`).
+- ✅ Form body `To`/`From`/`Body`, timeout default 10s: `data={"To": to, "From": self.from_number, "Body": body}` (`sms_twilio.py:125-126`), `TIMEOUT_SECONDS = 10.0` used as default (`sms_twilio.py:112,117`); form encoding verified via `parse_qs` (`test_sms_twilio.py:54`).
+- ✅ 2xx → message sid: `_json(response).get("sid") or ""` (`sms_twilio.py:136`), verified by `test_posts_the_message_form_with_basic_auth`.
+- ✅ 429 / 5xx / network / timeout → `NotifierError`: `status == 429 or status &gt;= 500` (`sms_twilio.py:132-133`), `except httpx.TimeoutException` and `except httpx.HTTPError` (`sms_twilio.py:127-130`) — all httpx transport exceptions inherit from `httpx.HTTPError`, so the catch-all is exhaustive; verified by `test_429_5xx_timeout_and_network_are_temporary` with `httpx.ReadTimeout`/`httpx.ConnectError` mocks.
+- ✅ Other 4xx → `NotifierRejected` carrying only the Twilio numeric code (not Twilio's `message`, which can repeat the phone number, per the module's own docstring at `sms_twilio.py:102`): `_code(response)` reads only the `code` field (`sms_twilio.py:135,147-148`); verified in `test_4xx_is_definitive_with_twilio_code`.
+- ✅ No secrets/plaintext number/SMS text in exceptions: `raise ... from None` on both httpx-exception branches (`sms_twilio.py:128,130`) prevents `__cause__`/`__context__` chaining; messages are built only from `type(exc).__name__`, HTTP status, and the Twilio numeric code — never `to`, `body`, or the token. Verified directly by `test_errors_never_contain_token_number_or_text`, which inspects `str(exc)`, `repr(exc.__cause__)`, and `repr(exc.__context__)`. Cross-checked the consumer (`vela/domain/sms.py:80-81`, pre-existing, not in this diff): `_describe` only does `str(exc)`, consistent with what's tested.
+- ✅ No network calls in tests: exclusively `httpx.MockTransport` (`test_sms_twilio.py:43`).
+
+### Strengths
+- Implementation and tests match the codebase's established pattern in `vela/adapters/hofj_http.py` (same `TimeoutException`/`HTTPError` split, same `from None` rationale, same constructor shape with `transport`/`timeout` for testability) — strong internal consistency.
+- The docstring explicitly names the exact leak vector being guarded against (Twilio's `message` field echoing the phone number) and the code's `_code()` helper correctly avoids that field.
+- Test suite exercises real request construction (method, URL, form-encoded body, auth header) against an actual `httpx.Request`, not mocked-away — this is genuine behavioral verification, not a tautological test.
+
+### Issues
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- `sms_twilio.py:136`: on a 2xx response whose JSON body has no `sid` key (or isn't valid JSON), `send_sms` silently returns `""` instead of raising. This masks a malformed/unexpected success response rather than surfacing it as an error. Not exercised by any test.
+- `sms_twilio.py:147-148`: `_code()` returns `None` when a 4xx body lacks a `code` field, yielding a message like `"Twilio: HTTP 402, codice None"`. Cosmetic only (no secret exposure), but slightly sloppy.
+- `TwilioSms` owns an `httpx.Client` with no `close()`/context-manager support, unlike some HTTP client wrappers; fine for a long-lived singleton adapter but there's no way to release the connection pool deterministically.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The adapter and tests satisfy every constraint in the brief precisely (endpoint, auth, form fields, timeout, 2xx/429/5xx/network/timeout/4xx classification, and the no-secrets/no-plaintext-number/no-SMS-text guarantee, the last verified by a direct assertion on `str`/`__cause__`/`__context__`), tests run with zero network calls via `MockTransport`, and the code follows the codebase's existing adapter conventions. The only gaps are minor edge-case polish (silent empty sid, `None` code formatting) with no security or correctness impact.</result>
+<usage><subagent_tokens>65909</subagent_tokens><tool_uses>9</tool_uses><duration_ms>149198</duration_ms></usage>
+</task-notification>
+
+## Agente 17:08
+
+- 🔧 Bash: Record Task 6 completion and extract Task 7 brief
+
+- 🔧 Agent: Implement Task 7: Twilio configuration
+
+Task 6 (adapter Twilio) approvato. In corso il Task 7: configurazione, `render.yaml` e README.

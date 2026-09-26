@@ -12,6 +12,7 @@ La superficie REST (``/v1``) è sempre montata; gli errori sotto ``/v1`` sono RF
 Nessun webhook Stripe: il pagamento si chiude con ``POST /v1/bookings`` di HofJ e Vela lo scopre
 interrogando la Checkout Session (job di M5).
 Il pagamento è Stripe se ``STRIPE_SECRET_KEY`` è impostata, altrimenti finto.
+Gli SMS al viaggiatore sono Twilio se le tre variabili ``TWILIO_*`` sono impostate, altrimenti finti.
 """
 import os
 from contextlib import asynccontextmanager
@@ -27,6 +28,7 @@ from vela.adapters.hofj_replay import FIXTURE_PATH, ReplayHofJ
 from vela.adapters.hofj_router import BrandRouter, SingleClientRouter
 from vela.adapters.repo_postgres import PostgresRepositories
 from vela.adapters.sms_fake import FakeSms
+from vela.adapters.sms_twilio import TwilioSms
 from vela.adapters.stripe_fake import FakePayments
 from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
@@ -66,6 +68,21 @@ def build_payments(settings: Settings) -> PaymentsPort:
         raise RuntimeError("STRIPE_SECRET_KEY richiede VELA_PUBLIC_URL per le pagine di ritorno "
                            "del Checkout")
     return StripePayments(build_stripe_client(settings.stripe_secret_key), settings.vela_public_url)
+
+
+TWILIO_VARS = (("TWILIO_ACCOUNT_SID", "twilio_account_sid"), ("TWILIO_AUTH_TOKEN", "twilio_auth_token"),
+               ("TWILIO_FROM", "twilio_from"))
+
+
+def build_notifier(settings: Settings) -> Notifier:
+    """SMS Twilio con tutte e tre le variabili, finti con nessuna (indipendente dall'upstream).
+    Una configurazione a metà blocca l'avvio: meglio che scoprire in produzione SMS mai partiti."""
+    missing = [name for name, attr in TWILIO_VARS if not getattr(settings, attr)]
+    if len(missing) == len(TWILIO_VARS):
+        return FakeSms()
+    if missing:
+        raise RuntimeError("SMS Twilio: mancano %s" % ", ".join(missing))
+    return TwilioSms(settings.twilio_account_sid, settings.twilio_auth_token, settings.twilio_from)
 
 
 @dataclass(frozen=True)
@@ -132,7 +149,7 @@ def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = 
     """Job d'acquisto, prenotazione, verifica del pagamento e SMS sotto un solo processore (RF-50).
     Senza `router` (test con un client finto) tutti i brand usano `vela.hofj`."""
     router = router or SingleClientRouter(vela.hofj)
-    notifier = notifier or FakeSms()
+    notifier = notifier or build_notifier(settings)
     purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
                            new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
