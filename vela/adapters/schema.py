@@ -3,7 +3,7 @@
 Tipi neutri (JSON, Numeric, String, Date, DateTime): `tests/test_migrations.py` applica le
 migrazioni anche su SQLite. Postgres è l'unico backend di produzione (RNF-01).
 """
-from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
+from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
                         Numeric, String, Table, Text, UniqueConstraint)
 
 from vela.adapters.db import metadata
@@ -84,6 +84,7 @@ orders_t = Table(
     Column("paid_at", DateTime(timezone=True)),
     Column("enqueued_at", DateTime(timezone=True)),
     Column("replacement_proposal_id", String(36), index=True),
+    Column("orphan_itineraries", Integer, nullable=False, server_default="0"),   # M18
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
@@ -120,6 +121,8 @@ quota_window_t = Table(
     Column("window_start", DateTime(timezone=True), nullable=False),
     Column("window_end", DateTime(timezone=True), nullable=False),
     Column("limit_per_minute", Integer, nullable=False),
-    Column("used", Integer, nullable=False, default=0),
+    Column("used", Integer, nullable=False, default=0),      # finestra a griglia (M5), non più letta da M18
     Column("needs_refresh", Boolean, nullable=False, default=False),
+    Column("tokens", Float, nullable=False),                  # token bucket (M18), può essere negativo
+    Column("refilled_at", DateTime(timezone=True), nullable=False),
 )

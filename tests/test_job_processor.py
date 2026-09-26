@@ -1,6 +1,7 @@
 """Processore dei job sotto lo scheduler della quota (RF-36..38, RF-47, RF-50, RF-51).
 
-Limite 120, margine 10%, riserva 20%: 108 effettive, 87 per gli acquisti. Orologio manuale.
+Limite 120, margine 10%: 108 effettive, token bucket con B = 8, r = 100/60 gettoni/s e soglia 2
+per gli acquisti (M18). Dopo `boot` il bucket ha 7 gettoni (1 per `/v1/quota`). Orologio manuale.
 """
 import unittest
 from dataclasses import replace
@@ -101,40 +102,40 @@ class SchedulingTest(unittest.TestCase):
         w.purchase(1)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
-        self.assertEqual(w.repos.quota.snapshot(w.clock())["used"], 1 + 5)   # quota + acquisto
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 5)   # quota + acquisto
 
     def test_no_hofj_call_without_acquired_block(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 86)
+        w.fill(QuotaClass.PURCHASE, 1)                 # 6 gettoni: un acquisto ne vuole 5 + soglia 2
         w.purchase(1)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.hofj_methods(), [])
         job = w.repos.jobs.get("j1")
         self.assertEqual((job.status, job.attempts, job.step), (JobStatus.PENDING, 0, 0))
-        self.assertEqual(job.run_after, NOW + timedelta(seconds=60))
+        self.assertAlmostEqual((job.run_after - NOW).total_seconds(), 0.6, places=3)   # 1 gettone
 
-    def test_job_waits_next_window_when_budget_short(self):
+    def test_job_waits_for_the_bucket_when_budget_short(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 86)
+        w.fill(QuotaClass.PURCHASE, 1)
         w.purchase(1)
         w.processor.run_once()
-        w.clock.advance(59)
+        w.clock.advance(0.5)
         self.assertFalse(w.processor.run_once())
-        w.clock.advance(1)
+        w.clock.advance(0.2)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
 
-    def test_booking_reserve_respected_with_full_window(self):
+    def test_booking_reserve_respected_with_full_purchase_queue(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 86)
+        w.fill(QuotaClass.PURCHASE, 5)                 # restano i 2 gettoni della soglia
         w.purchase(1)
         w.booking(2)
-        w.processor.run_once()                         # booking prima, dalla riserva
+        w.processor.run_once()                         # booking prima, dalla soglia
         self.assertEqual(w.status(2), OrderStatus.CONFIRMED)
-        w.processor.run_once()                         # purchase: 87 + 5 > 87, rinviato
+        w.processor.run_once()                         # purchase: 1 gettone, rinviato
         self.assertEqual(w.status(1), OrderStatus.QUEUED)
 
     def test_purchase_fifo(self):
@@ -145,6 +146,7 @@ class SchedulingTest(unittest.TestCase):
         w.purchase(3, seconds_ago=1)
         for _ in range(3):
             w.processor.run_once()
+            w.clock.advance(5)                         # il bucket si riempie di nuovo
         created = [c[1] for c in w.hofj.calls if c[0] == "create_itinerary"]
         self.assertEqual(created, ["1", "2", "3"])
 
@@ -156,7 +158,7 @@ class SchedulingTest(unittest.TestCase):
         order = w.repos.orders.get("o1")
         w.repos.orders.save(replace(order, itinerary_id="it-1"))
         w.repos.jobs.save(replace(w.repos.jobs.get("j1"), step=3))
-        w.fill(QuotaClass.PURCHASE, 85)                # 1 + 85 = 86: c'è posto per 1 sola chiamata
+        w.fill(QuotaClass.PURCHASE, 4)                 # 3 gettoni: c'è posto per 1 sola chiamata
         w.processor.run_once()
         self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
 
@@ -165,12 +167,12 @@ class SchedulingTest(unittest.TestCase):
         w.boot()
         w.purchase(1)
         w.processor.run_once()
-        self.assertEqual(w.repos.quota.snapshot(w.clock())["used"], 1 + 5)
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 5)
         self.assertEqual(w.repos.jobs.get("j1").step, 1)
 
 
 class QuotaErrorTest(unittest.TestCase):
-    def test_429_zeroes_budget_and_retries_next_window(self):
+    def test_429_empties_bucket_and_never_retries_immediately(self):
         w = World(hofj=FakeHofJ(fail_at={"create_itinerary": [QuotaError("429")]}))
         w.boot()
         w.purchase(1)
@@ -178,16 +180,44 @@ class QuotaErrorTest(unittest.TestCase):
         w.repos.jobs.save(replace(w.repos.jobs.get("b2"), run_after=NOW + timedelta(seconds=10)))
         w.processor.run_once()                         # acquisto: 429
         snap = w.repos.quota.snapshot(w.clock())
-        self.assertEqual(snap["remaining"], 0)
-        self.assertTrue(snap["needs_refresh"])
-        w.clock.advance(10)
-        w.processor.run_once()                         # booking: nessun budget nemmeno per la riserva
-        self.assertEqual(w.status(2), OrderStatus.PAID_PENDING_BOOKING)
+        self.assertEqual((snap["tokens"], snap["needs_refresh"]), (0, True))
+        self.assertGreaterEqual(w.repos.jobs.get("j1").run_after, NOW + timedelta(seconds=4))
+        self.assertFalse(w.processor.run_once())       # nessun gettone, nessun job pronto
         self.assertEqual(w.hofj_methods(), ["create_itinerary"])
-        w.clock.advance(50)                            # finestra successiva
+        w.clock.advance(0.6)                           # un gettone: la rilettura, una sola
         w.processor.run_once()
-        self.assertEqual(w.hofj_methods()[1], "get_quota")
+        self.assertEqual(w.hofj_methods(), ["create_itinerary", "get_quota"])
+        w.clock.advance(10)
+        w.processor.run_once()
         self.assertEqual(w.status(2), OrderStatus.CONFIRMED)
+        w.processor.run_once()
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
+        self.assertEqual(sum(1 for m in w.hofj_methods() if m == "get_quota"), 1)
+
+    def test_one_refresh_for_the_cluster_after_a_429(self):
+        w = World()
+        w.boot()
+        other = JobProcessor(w.repos, SingleClientRouter(w.hofj), w.processor.handlers, now=w.clock)
+        w.repos.quota.on_429(w.clock())
+        w.clock.advance(5)
+        w.processor.run_once()
+        other.run_once()
+        self.assertEqual(w.hofj_methods(), ["get_quota"])
+
+    def test_429_on_the_refresh_holds_the_bucket_a_whole_window(self):
+        w = World(hofj=FakeHofJ(fail_at={"get_quota": [QuotaError("429")]}))
+        w.booking(1)
+        w.processor.run_once()                         # rilettura: 429; il booking aspetta
+        self.assertEqual(w.hofj_methods(), ["get_quota"])
+        self.assertEqual(w.status(1), OrderStatus.PAID_PENDING_BOOKING)
+        w.clock.advance(59)
+        w.processor.run_once()
+        self.assertEqual(w.hofj_methods(), ["get_quota"])
+        w.clock.advance(2)
+        w.processor.run_once()                         # rilettura riuscita (il gettone era suo)
+        w.clock.advance(1)
+        w.processor.run_once()                         # poi il booking
+        self.assertEqual(w.hofj_methods(), ["get_quota", "get_quota", "create_booking"])
 
     def test_quota_refresh_only_at_boot_and_after_429(self):
         w = World()
@@ -209,13 +239,13 @@ class QuotaErrorTest(unittest.TestCase):
         w.processor.run_once()
         self.assertEqual(sum(1 for c in w.hofj.calls if c[0] == "get_quota"), 2)
 
-    def test_boot_refresh_aligns_the_window_to_hofj(self):
+    def test_boot_refresh_aligns_the_bucket_to_hofj(self):
         start = NOW - timedelta(seconds=40)
-        w = World(quota=QuotaSnapshot(120, 30, start, start + timedelta(seconds=60)))
+        w = World(quota=QuotaSnapshot(120, 105, start, start + timedelta(seconds=60)))
         self.assertTrue(w.processor.refresh_quota())
         snap = w.repos.quota.snapshot(w.clock())
-        self.assertEqual((snap["used"], snap["window_end"], snap["needs_refresh"]),
-                         (30, NOW + timedelta(seconds=20), False))
+        self.assertEqual((snap["tokens"], snap["hofj_window_end"], snap["needs_refresh"]),
+                         (3, NOW + timedelta(seconds=20), False))   # HofJ lascia 108 − 105
 
 
 if __name__ == "__main__":

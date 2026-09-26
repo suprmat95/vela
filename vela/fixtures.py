@@ -90,7 +90,7 @@ def record_fixtures(source, brands: Dict[str, str], base_url: str, locale: str, 
     leggere la quota (`HofJHttp`). Tutto o niente: con un brand in errore non scrive nulla."""
     repos = MemoryRepositories()
     if repos.quota.acquire(QuotaClass.SYNC, 1, now()):
-        repos.quota.sync_from_snapshot(source.get_quota())
+        repos.quota.sync_from_snapshot(source.get_quota(), now())
     recorder = _ListRecorder(source)
     report = CatalogSync(recorder, repos, brands, now=now, sleep=sleep).run()
     failed = ["%s: %s" % (b.brand, b.error) for b in report.brands if b.error]
