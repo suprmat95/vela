@@ -538,3 +538,14 @@ Requisiti in `docs/spec.md` (RF-28..32, RF-56, §6, §7), casi d'uso in
 | Chooser, MCP, REST | Invariati in M10: il filtro sport basta, `sport=any` = nessun filtro (M17). M10 non tocca `chooser.py`; il file comune possibile con M17 è `usecases.py` | Supera la nota "unico file comune `chooser.py`" della decisione del contratto agente-tool |
 | Fuori scope | Il §7 della spec non esclude più "più brand"; resta escluso il multi-tenant. Tolto "multi-brand" dai prossimi passi di M15 | Il multi-brand serve a vendere il tennis |
 | Parser | Sinonimi, "padel e tennis", beach/paddle tennis, tornei restano decisioni di M17; M10 assume lo sport già `padel`, `tennis` o `any` | Una decisione in un posto solo |
+
+## 2026-09-26 — M10: pacchetti evento esclusi
+
+Origine: nella verifica degli id il catalogo Terrarossa è risultato contenere pacchetti per
+assistere a eventi ("Watch & Stay", "Hospitality… Finals", Coppa Davis). Letto dalle risposte
+già salvate, senza nuove chiamate.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Pacchetti evento | `is_trip` esclude l'intera categoria dei pacchetti evento (Terrarossa: `categoryId` 23 in produzione, 12 prodotti attivi; 15 su staging, 1), identificata per nome di categoria. Persi di proposito i Watch & Play (Torino, Vienna, Dubai) e i tornei amatoriali MT100/MT400, circa 5 prodotti | Vela vende viaggi per giocare: proporre "guarda la finale" a chi vuole giocare è peggio di qualche prodotto in meno. Scartate: categoria con eccezioni per titolo ("Play", "Masters Tour"), parole chiave nei titoli (fragili). I tornei amatoriali potranno rientrare più avanti (tornei di M17) |
+| Nome della categoria | Letto dai dettagli quando M10 registra le fixture Terrarossa; nessuna chiamata `/v1/categories` ora | Gli id di categoria cambiano tra produzione e staging; il nome è già nel dettaglio (`products.category`) |

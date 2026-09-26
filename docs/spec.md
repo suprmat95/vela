@@ -184,7 +184,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   finiscono nella stessa tabella. Lo sport di un prodotto si ricava dal suo brand; la ricerca
   di `padel`/`tennis` nei testi del prodotto resta solo come riserva per un brand fuori dalla
   mappa. L'id HofJ resta la chiave del prodotto: se lo stesso id arrivasse da due brand, il
-  sync si ferma con un errore esplicito.
+  sync si ferma con un errore esplicito. Il chooser propone solo viaggi in cui si gioca: esclude
+  le gift card di ogni brand e la categoria dei pacchetti evento (guardare un torneo,
+  hospitality), identificata per nome di categoria.
 - **RF-29** Solo il job di sincronizzazione chiama `GET /v1/products` e
   `GET /v1/products/{id}` (locale `it`), una volta per ogni brand di `HOFJ_BRANDS` con
   `?brand=<brand>`. Per ogni brand il job scorre la lista con `limit=100` e `cursor`, poi

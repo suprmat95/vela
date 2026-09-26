@@ -83,6 +83,17 @@ sport di ogni prodotto viene dal suo brand e il filtro sport del chooser basta.
   restituisce il `no_match` esistente con la frase `sport_value`: "Non trovo nessun viaggio di
   tennis: prova con l'altro sport o riformula la richiesta." Nessuna frase nuova.
 
+## MB9 — Pacchetto da spettatore escluso
+
+- **Utente.** "Tennis a Torino a novembre, siamo in due."
+- **Agente.** `create_intent(text="…", sport="tennis", area="Torino", period_start=…,
+  period_end=…, pax=2)`.
+- **Server.** Nel catalogo Terrarossa ci sono "Hospitality Full Day Torino Finals" e "Watch &
+  Play alle Torino Finals", della categoria dei pacchetti evento: `is_trip` li esclude (filtro
+  `trip`). Il chooser propone un viaggio di tennis da giocare, anche in un'altra area, con la
+  motivazione che lo dice; se non ce n'è nessuno, `no_match` come in MB8.
+- **Agente legge.** La proposta di un viaggio in cui si gioca, mai "guarda la finale".
+
 ## Fuori da M10
 
 Il riconoscimento dello sport nel testo (sinonimi come "terra rossa" o "Weebora", "padel e

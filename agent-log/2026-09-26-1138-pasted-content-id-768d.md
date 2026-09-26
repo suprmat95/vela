@@ -274,3 +274,78 @@ Nessun id in comune, con 4 chiamate. Controllo i titoli dei prodotti che `detect
 Verifica chiusa: nessun id in comune, e i titoli confermano che lo sport va preso dal brand. Completo la decisione e faccio il commit.
 
 - 🔧 Bash: Fill id decision and commit docs
+
+Ho lanciato la verifica: gli id prodotto non si ripetono fra i brand. Ho fatto il commit della documentazione di M10 sul branch `doc/m10-multibrand` (`5279c0d`), senza push.
+
+**Risultato della verifica** (4 chiamate autenticate: 2 `/v1/quota` e 2 pagine di lista, nessun 429):
+
+| Host | Brand tennis | Prodotti | Id | Id in comune con la fixture padel |
+|---|---|---|---|---|
+| Produzione | `terrarossa.com` (`it`) | 80, di cui 31 archiviati | 340-1087 | 0 su 110 |
+| Staging | `staging.tennis.weebora.com` (`en`) | 36, di cui 23 archiviati | 12-641 | 0 su 88 |
+
+Gli id sembrano venire da un'unica tabella CMS. Quindi la chiave resta l'id HofJ più la colonna `brand`, e il sync si ferma con un errore se un giorno trova lo stesso id in due brand. Le risposte salvate sono nella scratchpad, fuori dal repo.
+
+**Il commit contiene:**
+- `docs/roadmap.md`: M10 riscritta ("Sync multi-brand", taglia L), con tabella, nota sui file comuni, riga di M17, M15 e matrice aggiornate;
+- `docs/spec.md`: RF-28..32 modificati, nuova RF-56 (carrello e prenotazione con il brand del prodotto), `HOFJ_BRANDS` in §6, e i brand padel e tennis non più fuori scope in §7;
+- `docs/usecases/multi-brand.md`: casi d'uso MB1-MB8;
+- `docs/decisions.md`: la voce di oggi con config, chiave degli id (e numeri della verifica), `products.brand`, `HofJRouter`, archiviazione per brand e catalogo in live.
+
+**Per lanciare lo script:**
+- ho caricato `/Users/matteodospina/orca/vela/.env` senza stamparlo, come da tua autorizzazione;
+- il Python 3.7 di sistema non trovava i certificati CA, quindi il primo tentativo è fallito prima di inviare qualsiasi richiesta. L'ho rilanciato con il bundle di `certifi` (`SSL_CERT_FILE`). In M10, per registrare le fixture, servirà lo stesso accorgimento.
+
+**Cose di cui non sono sicuro:**
+- `detect_sport` classifica come padel 9 prodotti tennis su 49 attivi in Terrarossa e 3 su 13 in staging ("Rafa Nadal Academy", "Laver Cup", "Coppa Davis": nel testo manca la parola "tennis"). È una conferma che lo sport va preso dal brand; il dato è registrato nella decisione.
+- Il catalogo Terrarossa contiene anche pacchetti per assistere a un evento ("Watch & Stay", "Hospitality… Finals"), non per giocare. Oggi il chooser li proporrebbe come viaggi di tennis. Non l'ho messo in M10: va deciso se escluderli (in M11 o M17) o tenerli.
+
+## Utente 11:47
+
+escludili
+
+## Agente 11:48
+
+Prima di proporre come escluderli guardo nelle risposte già salvate (nessuna chiamata nuova) se c'è un campo che distingue i pacchetti evento, per esempio la categoria.
+
+- 🔧 Bash: Group tennis products by category from saved responses
+
+Prima di scrivere ti propongo come farlo, perché c'è una complicazione.
+
+**Il dato.** In Terrarossa i pacchetti evento hanno una categoria loro: `categoryId` 23 in produzione (12 prodotti attivi), 15 su staging (1). I camp stanno nella categoria 17, i soggiorni nella 20 (produzione) e nella 13/14 (staging). La categoria quindi li separa in modo netto.
+
+**La complicazione.** La categoria 23 non contiene solo pacchetti da spettatore:
+- *Watch & Stay*, *Hospitality*, Coppa Davis, Six Kings Slam: solo guardare;
+- *Watch & Play* (Torino, Vienna, Dubai): guardare e anche giocare;
+- *MT100/MT400 World Tennis Masters Tour*: tornei amatoriali in cui il viaggiatore gioca.
+
+**Opzioni**
+- **A) Escludere l'intera categoria "eventi" in `is_trip`**, come già si fa per le gift card: deterministico, nessun lavoro sui titoli. Perde però anche i Watch & Play e i tornei amatoriali (circa 5 prodotti).
+- B) Escludere la categoria, ma tenere i titoli con "Play" o "Masters Tour": salva i 5 prodotti, ma è fragile. Ogni nuovo titolo va controllato a mano.
+- C) Solo parole chiave nei titoli ("Watch & Stay", "Hospitality", "Finale"…): la più fragile.
+
+Raccomando **A**: Vela vende viaggi per giocare, e una proposta "guarda la finale" a chi vuole giocare è peggio di qualche camp-torneo in meno. Se servirà, i tornei amatoriali possono rientrare in seguito (per esempio con M17 e i tornei).
+
+**Come la chiudo.** Gli id di categoria cambiano tra produzione e staging (23 contro 15), quindi la regola va scritta sul nome della categoria, che il dettaglio porta già in `products.category`. Il nome ancora non lo conosco. Per saperlo hai due strade:
+- **(i) ora**, con 1 chiamata `/v1/categories?brand=…` per host, più 2 di quota: 4 chiamate in tutto;
+- **(ii) in M10**, leggendolo dai dettagli quando si registrano le fixture Terrarossa: zero chiamate adesso.
+
+Raccomando **(ii)**.
+
+**Documenti da aggiornare (commit piccolo, stesso branch):**
+- M10: `is_trip` esclude le gift card di ogni brand e la categoria dei pacchetti evento, identificata per nome, più un test con un prodotto evento finto;
+- spec RF-28: il catalogo comprende solo viaggi in cui si gioca, quindi niente gift card né pacchetti da spettatore;
+- MB8 o un nuovo MB9: una richiesta "tennis a Torino a novembre" non propone l'Hospitality delle Finals;
+- `decisions.md`: la regola, i numeri trovati e i 5 prodotti persi.
+
+Mi confermi A + (ii)?
+
+## Utente 11:49
+
+A +ii
+
+## Agente 11:49
+
+- 🔧 Bash: Locate lines to edit
+
+- 🔧 Bash: Document event-package exclusion and commit

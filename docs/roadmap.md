@@ -416,7 +416,7 @@ ritmato dal guardiano; `python -m vela.sync` lo forza. Se l'utente chiede tennis
 Terrarossa, se chiede padel in Weebora, con `sport=any` in entrambi. Ogni chiamata del carrello
 e della prenotazione usa il brand del prodotto dell'ordine, anche dopo un riavvio o un retry del
 job. Le fixture, una per (host, brand), si rigenerano dallo stesso codice e servono solo a
-replay e test. Casi d'uso in `docs/usecases/multi-brand.md` (MB1-MB8).
+replay e test. Casi d'uso in `docs/usecases/multi-brand.md` (MB1-MB9).
 
 **Scope.**
 - Config: `HOFJ_BRANDS="padel=weebora.com,tennis=terrarossa.com"` (sport → brand) al posto di
@@ -447,7 +447,11 @@ replay e test. Casi d'uso in `docs/usecases/multi-brand.md` (MB1-MB8).
   rigenerazione usa lo stesso codice del sync (sostituisce `scripts/record_catalog.py` o lo
   riusa). Da registrare: Terrarossa in produzione e `staging.tennis.weebora.com` su staging,
   chiamate dichiarate prima.
-- `is_trip`: esclude la gift card di qualunque brand, non solo "Weebora".
+- `is_trip`: esclude la gift card di qualunque brand, non solo "Weebora", e la categoria dei
+  pacchetti evento (Terrarossa: `categoryId` 23 in produzione, 15 su staging), identificata
+  per nome di categoria perché gli id cambiano tra gli host. Il nome si legge dai dettagli
+  quando si registrano le fixture Terrarossa, senza chiamate dedicate. Tutta la categoria è
+  esclusa, anche Watch & Play e i tornei amatoriali (decisione M10).
 - Chooser, MCP e REST non cambiano: il filtro sport basta (`sport=any` = nessun filtro, M17).
 - Tabella `products` completa di RF-28.
 
@@ -459,12 +463,14 @@ replay e test. Casi d'uso in `docs/usecases/multi-brand.md` (MB1-MB8).
 - Un ordine tennis usa il client Terrarossa in tutte le chiamate del carrello (client finti per
   brand che registrano le chiamate).
 - Una ricerca con `sport=any` restituisce candidati di entrambi i brand.
+- `is_trip` falso per un prodotto finto della categoria evento e per la gift card di un brand
+  diverso da Weebora; MB9 (tennis a Torino a novembre non propone l'Hospitality delle Finals).
 - Un retry del job di booking dopo un riavvio (nuovo processore, stesso DB) usa ancora il brand
   giusto.
 - Config: formato valido, sport sconosciuto, brand duplicato, `HOFJ_BRAND` senza
   `HOFJ_BRANDS` → errore all'avvio.
 - Migrazione `0006` applicata anche su SQLite (`tests/test_migrations.py`).
-- MB1-MB8 di `docs/usecases/multi-brand.md` come test dei casi d'uso con repository in memoria.
+- MB1-MB9 di `docs/usecases/multi-brand.md` come test dei casi d'uso con repository in memoria.
 - Manuale: un sync su Render con chiamate contate; `/health` mostra l'età aggiornata; da
   claude.ai una richiesta di tennis riceve una proposta Terrarossa (in `docs/acceptance.md`).
 
