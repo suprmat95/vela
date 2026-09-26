@@ -1,6 +1,7 @@
 """Tool MCP in-process (RF-39, RF-41, RF-10): client dell'SDK collegato al server senza HTTP."""
 import json
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 
 from mcp import Client
@@ -388,3 +389,65 @@ class AgentToolContractTest(McpCase):
         first = await self.ok("get_proposal", intent_id=intent["intent_id"])
         d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no")
         self.assertEqual(d["rejected_proposal_id"], first["proposal_id"])
+
+
+def trip(pid, nights, price, **kw):
+    """Prodotto a finestra fissa di `nights` notti dal 1 ottobre."""
+    end = "2026-10-%02d" % (1 + nights)
+    return replace(make_product(pid, price=price, windows=(("2026-10-01", end),), **kw),
+                   duration_days=nights + 1)
+
+
+class DurationContractTest(McpCase):
+    """M21-A (UC-A): durata come campi opzionali, criterio morbido, `nights` nella proposta."""
+
+    WEEK_CHEAP, WEEKEND = trip(1, 7, 300), trip(2, 3, 400)
+
+    async def test_duration_fields_are_optional_integer_arguments(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            props = tools[name].input_schema["properties"]
+            for field in ("duration_min_nights", "duration_max_nights"):
+                with self.subTest(tool=name, field=field):
+                    self.assertIn("integer", json.dumps(props[field]))
+                    self.assertIn("nights", props[field]["description"])
+                    self.assertNotIn(field, tools[name].input_schema["required"])
+            self.assertIn("duration_min_nights", DESCRIPTIONS[name])
+
+    async def test_fields_reach_the_intent_and_the_say(self):
+        d = await self.ok("create_intent", text=INTENT, duration_min_nights=6, duration_max_nights=8)
+        c = d["criteria"]
+        self.assertEqual((c["duration_min_nights"], c["duration_max_nights"]), (6, 8))
+        self.assertIn("da 6 a 8 notti", d["say"])
+
+    async def test_invalid_duration_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text="padel a ottobre, siamo in due",
+                          duration_min_nights=0)
+        self.assertIsNone(d["criteria"]["duration_min_nights"])
+        self.assertTrue(d["say"].startswith("Non ho potuto usare 0 - ? come durata in notti."))
+
+    async def test_weekend_is_preferred_then_too_short_moves_to_the_week(self):
+        self.vela = make_vela(products=[self.WEEK_CHEAP, self.WEEKEND])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual((first["product"]["product_id"], first["nights"]), ("2", 3))
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="troppo corto")
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+    async def test_reject_with_duration_fields(self):
+        # senza i campi la proposta successiva sarebbe l'altro weekend (id 3)
+        self.vela = make_vela(products=[self.WEEK_CHEAP, self.WEEKEND, trip(3, 2, 450)])
+        intent = await self.ok("create_intent", text="un weekend di padel in Spagna a ottobre, "
+                                                     "siamo in due")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
+                          reason="no grazie", duration_min_nights=6, duration_max_nights=8)
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+    async def test_no_weekend_is_declared(self):
+        self.vela = make_vela(products=[self.WEEK_CHEAP])
+        intent = await self.ok("create_intent", text=INTENT)
+        d = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertIn("Non ho weekend compatibili: questo dura 7 notti, dal 1 all'8 ottobre.",
+                      d["say"])

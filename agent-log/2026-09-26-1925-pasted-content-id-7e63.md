@@ -231,3 +231,33 @@ Refine tests (RED). The proposal in the tests is 3 nights (1→4 October):
 - 🔧 Bash: Add refine duration tests and run
 
 - 🔧 Bash: Implement duration changes in refine and run suite
+
+- 🔧 Bash: Commit refine duration changes
+
+Step 5: MCP and REST. Reading the surfaces and their tests:
+
+- 🔧 Bash: Read MCP descriptions and REST bodies
+
+- 🔧 Bash: List MCP and REST test structure
+
+- 🔧 Bash: Read REST test helpers and agent-tool tests
+
+- 🔧 Bash: Read MCP test helpers and contract tests
+
+Surface tests (MCP and REST, RED):
+
+- 🔧 Bash: Add MCP duration contract tests
+
+- 🔧 Bash: Fix import order in MCP test
+
+- 🔧 Bash: Add REST duration tests and run surface tests
+
+Some tests pass even before implementing, because the text already carries the duration ("weekend", "una settimana"): they don't prove the fields work. I'll make them independent of the text:
+
+- 🔧 Bash: Make surface tests independent of text and rerun
+
+- 🔧 Bash: Strengthen reject tests and rerun
+
+All RED. Now the surfaces:
+
+- 🔧 Bash: Add duration fields to MCP and REST, run suite

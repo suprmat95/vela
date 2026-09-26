@@ -1,6 +1,7 @@
 """Superficie REST (RF-40, RF-43): auth, esiti, errori RFC 7807, flusso completo in replay, RF-10."""
 import random
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import urlparse
 
@@ -426,3 +427,56 @@ class AgentToolContractTest(unittest.TestCase):
                          "period_end": "2026-11-30"}).json()
         self.assertEqual(d["outcome"], "no_match")
         self.assertEqual(d["failed_criterion"], "dates")
+
+
+def trip(pid, nights, price):
+    """Prodotto a finestra fissa di `nights` notti dal 1 ottobre."""
+    end = "2026-10-%02d" % (1 + nights)
+    return replace(make_product(pid, price=price, windows=(("2026-10-01", end),)),
+                   duration_days=nights + 1)
+
+
+class DurationContractTest(unittest.TestCase):
+    """M21-A (UC-A): `duration_min_nights`/`duration_max_nights` nel corpo JSON, `nights` nella
+    proposta."""
+
+    PRODUCTS = [trip(1, 7, 300), trip(2, 3, 400)]
+
+    def test_fields_reach_the_intent(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": "padel in Spagna a ottobre, siamo in due", "duration_min_nights": 6,
+            "duration_max_nights": 8})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["duration_min_nights"], crit["duration_max_nights"]), (6, 8))
+        self.assertIn("da 6 a 8 notti", r.json()["say"])
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "duration_min_nights": "tre"})
+        self.assertEqual(r.status_code, 422)
+        r = c.post("/v1/proposals/x/reject", headers=AUTH, json={"duration_max_nights": [3]})
+        self.assertEqual(r.status_code, 422)
+
+    def test_out_of_range_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": "padel a ottobre, siamo in due", "duration_min_nights": 5,
+            "duration_max_nights": 2})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare 5 - 2 come durata in notti."))
+
+    def test_weekend_then_reject_with_fields(self):
+        # senza i campi la proposta successiva sarebbe l'altro weekend (id 3)
+        c, _ = make_client(products=self.PRODUCTS + [trip(3, 2, 450)])
+        intent = new_intent(c, text="un weekend di padel in Spagna a ottobre, siamo in due")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        assert_single_product(self, first)
+        self.assertEqual((first["product"]["product_id"], first["nights"]), ("2", 3))
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "no grazie", "duration_min_nights": 6})
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        assert_single_product(self, d)
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
