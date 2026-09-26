@@ -554,3 +554,68 @@ si
 - 🔧 Bash: Add projection model with tests
 
 - 🔧 Bash: Commit projection; check run progress
+
+- 🔧 Bash: Read report of run A-500
+
+Proiezione scritta, testata e committata (`f9eedca`): `python loadtest/projection.py --rate <link/min misurati>` produce la tabella per 1k/10k/50k in 10 minuti.
+
+Il giro **A-500** è finito e contiene già un risultato importante:
+
+| Misura | Valore |
+|---|---|
+| **Massimo di chiamate Vela → HofJ in 60 s** | **132**: sopra il limite di Vela (108) e anche sopra i 120 di HofJ |
+| 429 ricevuti | 0 |
+| Link al minuto a regime | ~15-20 |
+| Errori REST, p95 dei casi d'uso | 0 errori, p95 tra 10 e 18 ms |
+| Itinerari orfani, booking doppi | 0, 0 |
+| Marco | link a 70 s, confermato 5 s dopo il pagamento |
+
+Perché 132 chiamate senza nessun 429: il finto applica la finestra ancorata e dentro ogni sua finestra Vela resta sotto 120. Il contatore di Vela però riparte su una griglia di 60 s, quindi le raffiche a cavallo dei bordi mettono 132 chiamate (144 con gli altri usi della chiave) in un intervallo di 60 s qualsiasi. È la deriva prevista in §3.1 della seconda lettura, ora **misurata**. Con una finestra scorrevole, quella che dicono brief e OAS, queste raffiche prenderebbero 429. Il confine "sotto 108 in qualsiasi 60 s" oggi non regge, ed è esattamente la colonna "prima" che M18 deve correggere.
+
+Gli altri tre giri (B-1000, C-2500, D-1000-guasti) finiscono verso le 16:31. Poi compilo `RESULTS.md` con misure e proiezione.
+
+## Utente 16:32
+
+<task-notification>
+<task-id>b5qiuhuuu</task-id>
+<tool-use-id>toolu_01Gx6P6jXdfJwR63wseVoXeK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m13a/b785a2d9-3eaa-4ad6-b525-98d21d947b4b/tasks/b5qiuhuuu.output</output-file>
+<status>completed</status>
+<summary>Background command "Run the four reduced load test runs" completed (exit code 0)</summary>
+</task-notification>
+
+## Agente 16:32
+
+- 🔧 Bash: Read remaining run reports
+
+- 🔧 Bash: Run B-1000 again with a rolling quota window
+
+Mentre gira, ricavo dai report i ritmi a regime e le proiezioni.
+
+- 🔧 Bash: Compute steady rates and projections from reports
+
+- 🔧 Bash: Get peak REST request rate from Locust history
+
+Ho i numeri. Scrivo `loadtest/RESULTS.md` e aggiungo il giro con finestra scorrevole appena finisce (verso le 16:43).
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/RESULTS.md
+
+`RESULTS.md` è in bozza. Mancano solo i valori del giro E con finestra scorrevole, che finisce verso le 16:43; li inserisco quando arriva la notifica.
+
+## Utente 16:42
+
+<task-notification>
+<task-id>b7vm7qoaw</task-id>
+<tool-use-id>toolu_01L9HueDJ8uZBMgErJc3Yy51</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m13a/b785a2d9-3eaa-4ad6-b525-98d21d947b4b/tasks/b7vm7qoaw.output</output-file>
+<status>completed</status>
+<summary>Background command "Run B-1000 again with a rolling quota window" completed (exit code 0)</summary>
+</task-notification>
+
+## Agente 16:42
+
+- 🔧 Bash: Read rolling-window run report
+
+- 🔧 Bash: Fill rolling-window results into RESULTS.md
+
+- 🔧 Bash: Run suite, check stack down, commit results
