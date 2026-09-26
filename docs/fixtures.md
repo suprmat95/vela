@@ -81,9 +81,9 @@ fixture il cui `base_url` coincide con `HOFJ_BASE_URL` e usa il suo `locale` per
 | Voce | Valore |
 |---|---|
 | Registrata | 2026-09-25, host `https://staging.api.hofj.com`, brand `staging.weebora.com`, locale `en` |
-| Prodotti | 87 in lista, 56 non archiviati, più il prodotto trappola `900078` |
+| Prodotti | 87 in lista, 56 non archiviati |
 | Chiamate autenticate | 58 |
-| Prodotto trappola | Clone del 78 (Spector Padel House, Firenze) con id `900078`, inesistente su HofJ, 249 € invece di 250 € e `vela_trap: true`: criterio 4 di spec §10, frase `INTENT_TRAP` di `scripts/rest_flow.py` |
+| Prodotto trappola | Tolto il 2026-09-26 dopo l'esecuzione del criterio 4: era il clone del 78 (Firenze) con id `900078`, inesistente su HofJ, 249 € e `vela_trap: true`, e dopo "troppo caro" compariva anche su intenti non su Firenze. Si rimette con `--trap-from 78` |
 
 Staging contiene anche prodotti di prova ("GROUP TOUR TEST", "Test Companion e Player") e dati
 incoerenti (il 867 "Costa Blanca Padel Experience" ha destinazione Nicosia, Cipro): la fixture li
@@ -94,9 +94,9 @@ riporta come sono.
 HOFJ_BASE_URL=https://staging.api.hofj.com HOFJ_BRAND=staging.weebora.com \
   uv run python scripts/record_catalog.py --raw-dir ~/vela-raw/catalog-staging-en-AAAAMMGG \
   --locale en --out fixtures/catalog-staging.json
-# ricostruzione con la trappola, senza chiamate
+# ricostruzione senza chiamate (aggiungere --trap-from 78 per la trappola del criterio 4)
 HOFJ_BASE_URL=https://staging.api.hofj.com uv run python scripts/record_catalog.py \
-  --raw-dir ~/vela-raw/catalog-staging-en-AAAAMMGG --locale en --build-only --trap-from 78 \
+  --raw-dir ~/vela-raw/catalog-staging-en-AAAAMMGG --locale en --build-only \
   --out fixtures/catalog-staging.json
 ```
 

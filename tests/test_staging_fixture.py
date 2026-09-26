@@ -1,7 +1,8 @@
 """Fixture del catalogo di staging (M7) e scenari dei criteri 1, 3 e 4 su di essa.
 
-`fixtures/catalog-staging.json` è registrata su HofJ staging in `en` con il prodotto trappola del
-criterio 4 (`record_catalog.py --trap-from 78`). Gli scenari usano le frasi di
+`fixtures/catalog-staging.json` è registrata su HofJ staging in `en`, senza prodotto trappola: il
+criterio 4 è stato eseguito il 2026-09-26 e la trappola, che dopo "troppo caro" compariva anche su
+intenti non su Firenze, è stata tolta (decisione M7). Gli scenari usano le frasi di
 `scripts/rest_flow.py` e il dominio vero con repository in memoria, alla data della
 registrazione: gli id attesi valgono per la fixture del 2026-09-25 e vanno rivisti se la si
 rigenera.
@@ -52,12 +53,9 @@ class StagingFixtureTest(unittest.TestCase):
         self.assertEqual(os.path.basename(select_fixture(FIXTURES, STAGING)), "catalog-staging.json")
         self.assertEqual(os.path.basename(select_fixture(FIXTURES, "https://api.hofj.com")), "catalog.json")
 
-    def test_exactly_one_declared_trap_cloned_from_product_78(self):
-        traps = [p["id"] for p in self.catalog["products"] if p.get("vela_trap")]
-        self.assertEqual(traps, [TRAP])
-        trap = self.catalog["details"][TRAP]["catalog"]
-        self.assertTrue(trap["vela_trap"])
-        self.assertEqual((trap["price"], self.catalog["details"]["78"]["catalog"]["price"]), (249, 250))
+    def test_no_trap_product(self):
+        self.assertEqual([p["id"] for p in self.catalog["products"] if p.get("vela_trap")], [])
+        self.assertNotIn(TRAP, self.catalog["details"])
 
     def test_every_active_product_has_a_detail(self):
         active = sorted(p["id"] for p in self.catalog["products"] if not p["archived"])
@@ -89,14 +87,10 @@ class CriteriaScenarioTest(unittest.TestCase):
             r = vela.reject_proposal(r.proposal.id, rest_flow.REASON)
         self.assertEqual(seen, ["158", "115", "28"])
 
-    def test_trap_intent_proposes_the_trap_first_and_a_real_product_after_it_fails(self):
-        """Criterio 4: la trappola è la prima proposta; il sostituto è il 78 vero, a Firenze."""
+    def test_florence_intent_proposes_the_real_product_78(self):
         vela = vela_on_staging()
-        iid = vela.create_intent(rest_flow.INTENT_TRAP).intent_id
-        first = vela.get_proposal(iid)
-        self.assertEqual(first.product.product_id, TRAP)
-        replacement = vela.reject_proposal(first.proposal.id, "prodotto non prenotabile")
-        self.assertEqual(replacement.product.product_id, "78")
+        first = vela.get_proposal(vela.create_intent(rest_flow.INTENT_TRAP).intent_id)
+        self.assertEqual(first.product.product_id, "78")
 
     def test_spain_phrase_of_section_10_1_ends_with_nothing_cheaper(self):
         """La frase originale di §10.1 su staging: 28 (398 €), 867 (200 €), poi `price`."""

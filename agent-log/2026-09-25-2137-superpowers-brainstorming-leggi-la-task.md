@@ -1116,3 +1116,62 @@ Prima del commit salvo nel repository quello che finora sta solo nella conversaz
 - 🔧 Bash: Check status and acceptance rows to update
 
 - 🔧 Bash: Record acceptance, decisions, progress and commit
+
+Ho committato tutto su `task/m7`: l'ultimo commit è `cbb18ca` e il working tree è pulito.
+
+**Cosa ho salvato nel repository**
+- **`docs/acceptance.md`:**
+  - criterio 3 in live: `ok`, con codice `wury5zaxzkec`;
+  - criterio 4: `parziale`, per ora c'è solo il fallimento naturale del 867;
+  - registro delle due esecuzioni e tabella di latenza per M13.
+- **`docs/decisions.md`:** push di M5 e M7 insieme, deploy fallito per `HOFJ_BASE_URL`, i 197 prodotti, la frase su Barcellona, test Postgres non eseguiti.
+- **Piano di M7:** una sezione "Stato al 2026-09-25" con cosa è fatto e cosa resta.
+
+**Cosa non ho fatto**
+- Non ho mergiato né pushato. Su `master` e su Render c'è il merge `d31e51e`. I tre commit successivi, cioè la frase su Barcellona e le registrazioni, sono solo su `task/m7` e vanno mergiati a fine M7. Render non ne ha bisogno per le prove: la frase la usa lo script in locale.
+
+**Da domani**
+- Task 10: criterio 1 in claude.ai con la frase su Barcellona. La scaletta è nel messaggio precedente.
+- Task 11: criterio 4 con `rest_flow.py --trap`.
+- Task 13: righe finali, decisioni e merge.
+- Il 867 torna prenotabile su Render circa 24 ore dopo il fallimento, cioè il 26 settembre verso le 20:28 UTC. Con la frase su Barcellona non conta.
+
+## Utente 11:29
+
+ok procedi
+
+## Agente 11:29
+
+Il criterio 1 in claude.ai lo conduci tu. Intanto eseguo io il Task 11, il criterio 4 con la trappola:
+- **Flusso:** intento su Firenze, proposta (la trappola `900078`), accept, poi attesa finché l'ordine non diventa `replaced`.
+- **Costo:** 1 chiamata HofJ, il `POST /v1/itineraries` che fallisce; nessuna Checkout Session. Il piano ne stimava 6, ma lo script si ferma alla sostituzione e non accetta la nuova proposta.
+
+Prima sveglio il servizio: il piano free di Render si addormenta.
+
+- 🔧 Bash: Wake Render service and check health
+
+- 🔧 Bash: Run criterion 4 trap flow against Render
+
+- 🔧 Bash: Read-only query of trap order state on Render DB
+
+- 🔧 Bash: Read-only list of orders created since last night
+
+- 🔧 Bash: Cancel leftover test order via REST reject
+
+L'ordine della mia prova è `cancelled` e la lettura della sessione Stripe si ferma. Ora mi servono due risposte per chiudere i criteri 1 e 4.
+
+- 🔧 AskUserQuestion
+
+- 🔧 Bash: Read-only check of the two morning conversations
+
+- 🔧 Bash: Change staging tests to expect no trap, expect red
+
+Rossi per il motivo giusto. Ricostruisco la fixture di staging senza trappola, dalle risposte grezze e senza chiamate:
+
+- 🔧 Bash: Rebuild fixture without trap, update docs, run suite
+
+Suite verde. Registro in `docs/acceptance.md` le esecuzioni del mattino, poi aggiorno le decisioni:
+
+- 🔧 Bash: Locate acceptance rows for criteria 1 and 4
+
+- 🔧 Bash: Record acceptance and decisions, commit
