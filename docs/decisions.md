@@ -525,3 +525,36 @@ implementazione in roadmap M17.
 | `docs/rest.md` | Aggiornato in M17, insieme al codice | Descrive il contratto implementato, non quello pianificato |
 | Collocazione | Task nuova M17, ondata 5, parallela a M10 (unico file comune `chooser.py` per `sport=any`), M12, M13, M14 | M9 e M11 sono concluse |
 | Decisioni aperte sul parser | Sinonimi, "padel e tennis", "beach tennis"/"paddle tennis", tornei, "più fresco" nel testo: opzioni e raccomandazioni in roadmap M17, da chiudere nel brainstorm di M17 | Non ancora decise |
+
+## 2026-09-26 — M10: sync multi-brand del catalogo
+
+Origine: su claude.ai il tennis non si trova mai. Vela usa un solo brand HofJ (`HOFJ_BRAND`,
+Weebora = padel) e carica il catalogo dalla fixture al boot (decisione M7); su HofJ ogni brand ha
+un catalogo separato e le due fixture registrate non contengono nessun prodotto di tennis.
+Requisiti in `docs/spec.md` (RF-28..32, RF-56, §6, §7), casi d'uso in
+`docs/usecases/multi-brand.md`, implementazione in roadmap M10.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Portata di M10 | M10 diventa "Sync multi-brand del catalogo da HofJ", taglia L (era M): sync incrementale più config, migrazione, router del carrello e fixture per brand, in una task sola | Il sync è il punto in cui entrano i brand; separarli avrebbe riscritto due volte lo stesso codice |
+| Config | `HOFJ_BRANDS="padel=weebora.com,tennis=terrarossa.com"` (sport → brand) al posto di `HOFJ_BRAND`. Sport in {padel, tennis}, brand distinti, almeno una voce; una sola voce è valida (l'altro sport dà il `no_match` esistente). `HOFJ_BRAND` senza `HOFJ_BRANDS` → l'app non parte e lo dice | Una sola variabile e una sola chiave in `render.yaml`; nessuna compatibilità silenziosa. Scartate: due variabili per sport (una nuova a ogni sport), JSON (scomodo da quotare) |
+| Chiave degli id | L'id HofJ resta la chiave primaria di `products`, più la colonna `brand`; nessuna FK cambia. Se lo stesso id arriva da due brand il sync di quel brand si ferma con un errore esplicito. Se un giorno capita, si passa a un id con prefisso corto (`t:`/`p:`, `String(32)`) | Verificato il 2026-09-26 con 4 chiamate (2 `/v1/quota`, 2 pagine di lista): produzione `terrarossa.com` `it` 80 prodotti (id 340-1087, `channelId` 2), staging `staging.tennis.weebora.com` `en` 36 prodotti (id 12-641); zero id in comune con `fixtures/catalog.json` (110) e `fixtures/catalog-staging.json` (88). Gli id sembrano venire da un'unica tabella CMS. La chiave composta avrebbe toccato 4 tabelle; il prefisso avrebbe cambiato id pubblici e righe esistenti |
+| `products.brand` | Colonna nullable, migrazione `0006`; il sync la scrive; lo sport si ricava dal brand tramite la mappa, `detect_sport` solo come riserva. Righe già su Render con `brand` NULL finché il primo sync non le riscrive | Nessuna migrazione di dati con valori indovinati; il sync è la fonte. Nella verifica `detect_sport` classifica padel 9 prodotti tennis su 49 attivi in Terrarossa e 3 su 13 in staging ("Rafa Nadal Academy", "Laver Cup", "Coppa Davis": nessuna parola "tennis") |
+| Router del carrello | `HofJPort` invariata; nuova porta `HofJRouter` (`client(brand) -> HofJPort`, `get_quota()`), un `HofJHttp` per brand. `PurchaseJob` e `BookingJob` ricavano il brand da ordine → prodotto → `products.brand` a ogni esecuzione. Brand NULL → brand dello sport del prodotto. In replay tutti i brand puntano allo stesso `ReplayHofJ` | 5 metodi della porta su 7 ricevono solo `itinerary_id`: un router dietro la porta invariata dovrebbe interrogare il DB dall'adapter, con il rischio di cercare un itinerario non ancora salvato. Il brand letto dal DB a ogni esecuzione regge riavvii e retry |
+| Quota | Una sola: la quota è per chiave API, letta da un client qualsiasi | Stessa chiave e stesso host per tutti i brand |
+| Archiviazione | Per brand: un prodotto sparito dalla lista di un brand si archivia solo tra i prodotti di quel brand; un brand che fallisce non archivia nulla | Altrimenti il sync di un brand archivierebbe il catalogo dell'altro |
+| Catalogo in live | Il sync sostituisce `realign_catalog` e la fixture al boot; le fixture, una per (host, brand), servono solo a replay e test e si rigenerano con lo stesso codice del sync | Supera la decisione M7 "Catalogo sul DB" per il live |
+| Chooser, MCP, REST | Invariati in M10: il filtro sport basta, `sport=any` = nessun filtro (M17). M10 non tocca `chooser.py`; il file comune possibile con M17 è `usecases.py` | Supera la nota "unico file comune `chooser.py`" della decisione del contratto agente-tool |
+| Fuori scope | Il §7 della spec non esclude più "più brand"; resta escluso il multi-tenant. Tolto "multi-brand" dai prossimi passi di M15 | Il multi-brand serve a vendere il tennis |
+| Parser | Sinonimi, "padel e tennis", beach/paddle tennis, tornei restano decisioni di M17; M10 assume lo sport già `padel`, `tennis` o `any` | Una decisione in un posto solo |
+
+## 2026-09-26 — M10: pacchetti evento esclusi
+
+Origine: nella verifica degli id il catalogo Terrarossa è risultato contenere pacchetti per
+assistere a eventi ("Watch & Stay", "Hospitality… Finals", Coppa Davis). Letto dalle risposte
+già salvate, senza nuove chiamate.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Pacchetti evento | `is_trip` esclude l'intera categoria dei pacchetti evento (Terrarossa: `categoryId` 23 in produzione, 12 prodotti attivi; 15 su staging, 1), identificata per nome di categoria. Persi di proposito i Watch & Play (Torino, Vienna, Dubai) e i tornei amatoriali MT100/MT400, circa 5 prodotti | Vela vende viaggi per giocare: proporre "guarda la finale" a chi vuole giocare è peggio di qualche prodotto in meno. Scartate: categoria con eccezioni per titolo ("Play", "Masters Tour"), parole chiave nei titoli (fragili). I tornei amatoriali potranno rientrare più avanti (tornei di M17) |
+| Nome della categoria | Letto dai dettagli quando M10 registra le fixture Terrarossa; nessuna chiamata `/v1/categories` ora | Gli id di categoria cambiano tra produzione e staging; il nome è già nel dettaglio (`products.category`) |
