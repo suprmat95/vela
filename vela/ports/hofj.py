@@ -31,6 +31,11 @@ class UpstreamError(HofJError):
     """Rete, timeout, 5xx non riconducibili al prodotto."""
 
 
+class UpstreamTimeout(UpstreamError):
+    """Esito incerto (M18): il nostro client o HofJ verso il brand hanno smesso di aspettare, ma
+    l'operazione può essere avvenuta. Si ripete come ogni `UpstreamError`."""
+
+
 @dataclass(frozen=True)
 class Itinerary:
     id: str

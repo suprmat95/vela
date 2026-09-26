@@ -1,13 +1,14 @@
 """Adapter HTTP verso House of Journeys (RF-14, RF-23, RF-36, RNF-04).
 
-httpx sincrono, timeout di 15 s, `?brand=&locale=` su ogni chiamata del carrello, `Bearer` in
+httpx sincrono, timeout di 20 s (più dei 15 s di HofJ verso il brand, M18), `?brand=&locale=` su ogni chiamata del carrello, `Bearer` in
 intestazione. Implementa anche `CatalogSource` per il sync (M10, RF-29): lista paginata e
 dettaglio esteso con il brand passato alla chiamata, non quello del client. Risposte `{data, meta}` con `meta` facoltativo; errori RFC 7807 letti senza
 guardare il content-type (HofJ usa `application/json` anche per i problemi). Forme verificate su
 staging nel Task 1 di M5 (`docs/api/internal-checkout.md`).
 
 Mappatura degli errori (decisione M5):
-- timeout, connessione, JSON illeggibile, 5xx → `UpstreamError` (si ripete);
+- timeout, connessione, JSON illeggibile, 5xx → `UpstreamError` (si ripete); il nostro timeout e
+  un 5xx il cui `detail` parla di timeout sono `UpstreamTimeout`, un esito incerto (M18);
 - 429 → `QuotaError` con `retry_after` se HofJ lo dichiara;
 - 401/403 → `ConfigError`;
 - solo su `POST /v1/itineraries`: 400/404, oppure 502 il cui `detail` riporta un errore
@@ -25,9 +26,10 @@ import httpx
 
 from vela.domain.models import Product
 from vela.ports.hofj import (ConfigError, Customer, HofJError, Itinerary, Pax, PaymentProof,
-                             ProductError, QuotaError, QuotaSnapshot, UpstreamError)
+                             ProductError, QuotaError, QuotaSnapshot, UpstreamError,
+                             UpstreamTimeout)
 
-TIMEOUT_SECONDS = 15.0
+TIMEOUT_SECONDS = 20.0   # M18: HofJ rinuncia verso il brand dopo 15 s, noi aspettiamo la sua risposta
 PAGE_LIMIT = 100   # RF-29
 _PRODUCT_502 = re.compile(r"(returned|failed:)\s*(4\d\d|500)\b", re.IGNORECASE)
 
@@ -112,7 +114,7 @@ class HofJHttp:
         try:
             response = self.client.request(method, path, params=query, json=json)
         except httpx.TimeoutException as exc:
-            raise UpstreamError("HofJ %s %s: timeout (%s)" % (method, path, type(exc).__name__)) from None
+            raise UpstreamTimeout("HofJ %s %s: timeout (%s)" % (method, path, type(exc).__name__)) from None
         except httpx.HTTPError as exc:
             raise UpstreamError("HofJ %s %s: rete (%s)" % (method, path, type(exc).__name__)) from None
         try:
@@ -140,6 +142,8 @@ def _error(method: str, path: str, response: httpx.Response, body, itinerary: bo
         return ProductError(where)
     if 400 <= status < 500:
         return ProductError(where)
+    if "timeout" in detail.lower():
+        return UpstreamTimeout(where)
     return UpstreamError(where)
 
 

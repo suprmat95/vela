@@ -248,6 +248,7 @@ class Order:
     paid_at: Optional[datetime] = None
     enqueued_at: Optional[datetime] = None            # posizione FIFO (RF-48); ereditata in RF-17
     replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
+    orphan_itineraries: int = 0                       # M18: timeout su POST /v1/itineraries
 
 
 class JobKind(str, Enum):

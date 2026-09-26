@@ -79,7 +79,7 @@ class RecordFixturesTest(unittest.TestCase):
         self.assertEqual(len(self.source.calls), 1 + 2 + 1)    # quota, due pagine, un dettaglio
 
     def test_respects_the_calls_already_used_in_the_window(self):
-        self.source.used = 86                                  # 87 = tetto del sync nella finestra
+        self.source.used = 104                                 # HofJ lascia 4 gettoni, 2 sopra la soglia
         self.record()
         self.assertTrue(self.clock.slept)
 

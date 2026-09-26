@@ -2,6 +2,7 @@
 
 HofJ replay con la quota vera (120/min, finestra fissa ancorata alla prima chiamata), repository
 in memoria, orologio manuale che avanza di un secondo per giro; il worker gira con `drain`.
+Vela esce dal token bucket di M18: B = 8, 100 gettoni/min, attesa dichiarata su 16 acquisti/min.
 """
 import unittest
 from dataclasses import replace
@@ -75,8 +76,8 @@ class LaunchBurstTest(unittest.TestCase):
         waits = [a.wait_seconds for a in accepted]
         self.assertEqual(waits, sorted(waits))
         self.assertEqual((accepted[0].position, accepted[-1].position), (1, 200))
-        self.assertEqual(accepted[-1].wait_seconds, 690)      # 200 × 60 ÷ 17,4 per eccesso
-        self.assertIn("12 minuti", accepted[-1].say)
+        self.assertEqual(accepted[-1].wait_seconds, 750)      # 200 × 60 ÷ 16 (M18)
+        self.assertIn("13 minuti", accepted[-1].say)
         self.assertEqual(w.hofj._used, 1)                     # solo la lettura della quota al boot
 
     def test_throughput_never_exceeds_effective_limit_per_window(self):
@@ -92,15 +93,18 @@ class LaunchBurstTest(unittest.TestCase):
         errors = [j.last_error for j in w.repos.jobs._jobs.values() if j.last_error]
         self.assertEqual([e for e in errors if "QuotaError" in e], [])
         minutes = (w.clock() - NOW).total_seconds() / 60
-        self.assertLess(minutes, 13)                           # ~200 ÷ 17 finestre
+        self.assertLess(minutes, 11)                           # ~200 ÷ 20 acquisti/min senza booking
 
-    def test_declared_wait_is_close_to_the_real_one(self):
+    def test_declared_wait_is_prudent_and_close_to_the_real_one(self):
+        """RF-48 con la soglia di M18: l'attesa conta l'80% del ritmo, quindi senza prenotazioni
+        l'acquisto arriva prima di quanto detto, ma non molto prima."""
         w = Launch()
         orders = w.accept(100)
         last = orders[-1]
         w.run(lambda: w.repos.orders.get(last.order_id).status == OrderStatus.AWAITING_PAYMENT)
         real = (w.clock() - NOW).total_seconds()
-        self.assertLessEqual(abs(real - last.wait_seconds), 60)
+        self.assertLessEqual(real, last.wait_seconds)
+        self.assertGreaterEqual(real, 0.75 * last.wait_seconds)
 
     def test_paid_order_booked_within_next_window(self):
         """RF-51: con 150 acquisti in coda la prenotazione usa la riserva e non aspetta la coda."""
@@ -128,6 +132,7 @@ class EndToEndTest(unittest.TestCase):
         replacement = status.proposal.proposal.id
         again = w.vela.accept_proposal(replacement)
         self.assertEqual(again.position, 1)
+        w.clock.advance(5)                                     # il bucket si riempie di nuovo
         w.worker.drain()
         final = w.vela.get_order_status(again.order_id)
         self.assertEqual(final.status, OrderStatus.AWAITING_PAYMENT)
