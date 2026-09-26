@@ -88,3 +88,9 @@ Applico le modifiche alla roadmap.
 - 🔧 Bash: Apply roadmap edits and find leftover M13 references
 
 - 🔧 Bash: Check remaining M13 reference and new graph
+
+- 🔧 Bash: Commit roadmap and read decisions tail
+
+Ora la voce in `decisions.md`.
+
+- 🔧 Bash: Append decisions entry and commit
