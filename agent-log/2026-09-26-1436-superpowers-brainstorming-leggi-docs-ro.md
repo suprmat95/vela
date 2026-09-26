@@ -158,3 +158,23 @@ No response requested.
 Riprendo: la correzione del test non era stata applicata, e `app.py` è identico all'ultimo commit.
 
 - 🔧 Bash: Fix proposal id access and rerun scenario tests
+
+- 🔧 Bash: Commit scenario module
+
+Ora il percorso del singolo viaggiatore (`loadtest/journey.py`, puro e testabile) e poi il `locustfile.py`.
+
+- 🔧 Bash: Write journey module with tests and run them
+
+- 🔧 Bash: Verify REST outcome names and payment_url field
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/locustfile.py
+
+Ora `report.py`: prima aggiungo `t_end` al percorso (serve per l'età della coda).
+
+- 🔧 Bash: Add journey end time and rerun journey tests
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/report.py
+
+- 🔧 Bash: Write report tests and run them
+
+- 🔧 Bash: Commit journey/locust/report; read docker ignore and tests
