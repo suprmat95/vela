@@ -780,3 +780,15 @@ scelte sono state prese con l'utente prima di scrivere codice.
 | Coda in `/health` | `queue.oldest_purchase_age_seconds`: età del più vecchio acquisto `pending` o `running` | Dice quanto aspetta chi è in fondo alla coda |
 | Test aggiornati | Contratto della quota riscritto (`tests/quota_contract.py`), con finestra scorrevole, ancorata e a griglia simulate; `test_quota_rules`, `test_job_processor`, `LaunchBurstTest` (attesa 750 s / 13 minuti, attesa reale ≤ dichiarata e ≥ 75%), `test_usecases` (8 s), `test_health`, `test_config`, `test_hofj_http`, `test_migrations` (head 0007), `test_payment_check`, `test_fixtures_record`, `test_purchase_job` (orfani). In alcuni test l'orologio avanza qualche secondo tra un acquisto e l'altro | Fissavano la finestra a griglia e i numeri 87/108/17,4 |
 | Suite finale | 946 test, 56 saltati senza `DATABASE_URL`; verde anche su un Postgres locale usa e getta. Nessuna chiamata esterna | — |
+
+## 2026-09-26 — M13b: rilancio dopo M18
+
+Origine: roadmap M13b. Risultati in `loadtest/RESULTS.md` (colonne "prima" e "dopo").
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Giri del "dopo" | Gli stessi cinque giri del "prima", con gli stessi comandi dello script di M13a (recuperato dall'agent-log): A-500, B-1000, C-2500, D-1000-guasti, E-1000-rolling, `--duration 8 --arrival-minutes 5 --tail-minutes 3`, seme 13, compose pulito a ogni giro, immagini ricostruite una volta sul commit `a9d1f57`. 1k/10k/50k in 10 minuti restano una proiezione, ricalcolata con il ritmo del "dopo" (17,8 link/min) | Richiesta dell'utente: stesso numero di viaggiatori di M13a. `git diff 14ddd31..a9d1f57` su `loadtest/`, compose, Dockerfile ed entrypoint è vuoto: cambia solo `vela/` |
+| Criterio fallito | Tutti i giri si completano comunque; un criterio fallito si scrive con il numero, senza toccare test o codice, e si segnala all'utente prima del commit | Scelta dell'utente. Esito: nessun criterio fallito |
+| "Prenotazioni doppie" | Il criterio conta i booking distinti per `itineraryId` sul finto (upsert), non le `POST /v1/bookings`; le POST ripetute si riportano a parte | Le POST ripetute dopo un timeout sono una scelta di M5/M18 (upsert idempotente); il rischio è un secondo booking |
+| POST di booking doppie senza guasti | Riportate in `RESULTS.md` come regressione trovata (1, 4, 2 itinerari in A, C, E); la causa, due job `booking` per ordine da `mark_paid` concorrenti, è stata verificata sul DB di Vela in sola lettura durante D ed E. Correzione in una task separata (`task/booking-race`), approvata dall'utente: passaggio di stato atomico dell'ordine più indice unico parziale sui job `booking` attivi | M13b non cambia il codice. La corsa era annotata in M18 come teorica; con 10 worker è frequente |
+| p95 REST più alto dopo M18 | Riportato come misura con un'ipotesi (10 worker nello stesso processo uvicorn), senza indagare | Fuori scope; 0 errori e proposta sempre sotto 15 ms per Anna |
