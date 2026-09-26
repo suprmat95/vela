@@ -55,7 +55,8 @@ class RepositoryContract:
     def test_products_fields_round_trip(self):
         p = make_product(7, min_pax=2, max_pax=0, hotel=None, windows=(("2026-10-01", "2026-10-04"),
                                                                         ("2026-11-05", "2026-11-08")))
-        p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW)
+        p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW,
+                    brand="terrarossa.com")
         self.repos.products.upsert_many([p])
         got = self.repos.products.get("7")
         self.assertEqual(got, p)
@@ -84,6 +85,29 @@ class RepositoryContract:
         self.assertEqual(self.repos.products.archive_missing([]), 2)
         self.assertEqual(self.repos.products.archive_missing([]), 0)
         self.assertEqual(self.repos.products.count(), 2)
+
+    def test_products_archive_missing_by_brand_touches_only_that_brand(self):
+        self.repos.products.upsert_many([make_product(1, brand="a.com"), make_product(2, brand="a.com"),
+                                         make_product(3, brand="b.com"), make_product(4)])
+        self.assertEqual(self.repos.products.archive_missing(["1"], brand="a.com"), 1)
+        archived = {p.id: p.archived for p in self.repos.products.list_all()}
+        self.assertEqual(archived, {"1": False, "2": True, "3": False, "4": False})
+
+    def test_products_sync_state(self):
+        self.repos.products.upsert_many([make_product(1, brand="a.com", updated_at="u1"),
+                                         make_product(2, updated_at="u2")])
+        self.assertEqual(self.repos.products.sync_state(["1", "2", "9"]),
+                         {"1": ("a.com", "u1"), "2": (None, "u2")})
+        self.assertEqual(self.repos.products.sync_state([]), {})
+
+    def test_products_set_brand(self):
+        self.repos.products.upsert_many([make_product(1), make_product(2), make_product(3)])
+        self.repos.products.set_brand(["1", "2"], "t.com", "tennis")
+        got = {p.id: (p.brand, p.sport) for p in self.repos.products.list_all()}
+        self.assertEqual(got, {"1": ("t.com", "tennis"), "2": ("t.com", "tennis"),
+                               "3": (None, "padel")})
+        self.assertEqual(self.repos.products.get("1").price, Decimal("500"))
+        self.repos.products.set_brand([], "t.com", "tennis")
 
     # intenti
     def test_intents_round_trip(self):

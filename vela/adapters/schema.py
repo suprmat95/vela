@@ -35,6 +35,7 @@ products_t = Table(
     Column("bookable_checked_at", DateTime(timezone=True)),
     Column("archived", Boolean, nullable=False, default=False),
     Column("provider_id", String(32)),
+    Column("brand", String(64)),
 )
 
 intents_t = Table(

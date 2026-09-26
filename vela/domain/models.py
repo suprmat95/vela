@@ -190,6 +190,7 @@ class Product:
     bookable_checked_at: Optional[datetime] = None
     archived: bool = False
     provider_id: Optional[str] = None
+    brand: Optional[str] = None  # brand HofJ del catalogo di provenienza (M10); None = pre-M10
 
 
 # --- proposta, ordine, rifiuto -------------------------------------------------

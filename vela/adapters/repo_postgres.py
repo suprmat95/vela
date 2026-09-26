@@ -1,6 +1,6 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
 from datetime import date, datetime, timedelta
-from typing import Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -31,7 +31,7 @@ def _product_row(p: Product) -> dict:
         "duration_days": p.duration_days, "hofj_updated_at": p.hofj_updated_at, "raw": p.raw,
         "fetched_at": p.fetched_at, "bookable": p.bookable,
         "bookable_checked_at": p.bookable_checked_at, "archived": p.archived,
-        "provider_id": p.provider_id,
+        "provider_id": p.provider_id, "brand": p.brand,
     }
 
 
@@ -47,7 +47,7 @@ def _product(m, raw: Optional[dict]) -> Product:
         duration_days=m["duration_days"], hofj_updated_at=m["hofj_updated_at"],
         raw=raw if raw is not None else {}, fetched_at=m["fetched_at"], bookable=m["bookable"],
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
-        provider_id=m["provider_id"])
+        provider_id=m["provider_id"], brand=m["brand"])
 
 
 class PostgresProducts:
@@ -89,14 +89,35 @@ class PostgresProducts:
             conn.execute(update(products_t).where(products_t.c.id == product_id)
                          .values(bookable=bookable, bookable_checked_at=checked_at))
 
-    def archive_missing(self, keep_ids: Iterable[str]) -> int:
-        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`."""
+    def archive_missing(self, keep_ids: Iterable[str], brand: Optional[str] = None) -> int:
+        """Archivia (mai DELETE: proposte e ordini hanno FK) i prodotti attivi fuori da `keep_ids`;
+        con `brand` solo tra i prodotti di quel brand (M10)."""
         stmt = update(products_t).where(products_t.c.archived.is_(False))
+        if brand is not None:
+            stmt = stmt.where(products_t.c.brand == brand)
         keep = list(keep_ids)
         if keep:
             stmt = stmt.where(products_t.c.id.notin_(keep))
         with self.engine.begin() as conn:
             return conn.execute(stmt.values(archived=True)).rowcount
+
+
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        wanted = list(ids)
+        if not wanted:
+            return {}
+        stmt = (select(products_t.c.id, products_t.c.brand, products_t.c.hofj_updated_at)
+                .where(products_t.c.id.in_(wanted)))
+        with self.engine.connect() as conn:
+            return {r.id: (r.brand, r.hofj_updated_at) for r in conn.execute(stmt)}
+
+    def set_brand(self, ids: Iterable[str], brand: str, sport: str) -> None:
+        wanted = list(ids)
+        if not wanted:
+            return
+        with self.engine.begin() as conn:
+            conn.execute(update(products_t).where(products_t.c.id.in_(wanted))
+                         .values(brand=brand, sport=sport))
 
 
 class PostgresIntents:

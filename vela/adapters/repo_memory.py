@@ -2,7 +2,7 @@
 import threading
 from dataclasses import replace
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
                                 Product, Proposal, QuotaClass, Rejection)
@@ -38,12 +38,23 @@ class MemoryProducts:
         if p is not None:
             self._items[product_id] = replace(p, bookable=bookable, bookable_checked_at=checked_at)
 
-    def archive_missing(self, keep_ids: Iterable[str]) -> int:
+    def archive_missing(self, keep_ids: Iterable[str], brand: Optional[str] = None) -> int:
         keep = set(keep_ids)
-        gone = [p for p in self._items.values() if not p.archived and p.id not in keep]
+        gone = [p for p in self._items.values() if not p.archived and p.id not in keep
+                and (brand is None or p.brand == brand)]
         for p in gone:
             self._items[p.id] = replace(p, archived=True)
         return len(gone)
+
+    def sync_state(self, ids: Iterable[str]) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        found = (self._items.get(i) for i in ids)
+        return {p.id: (p.brand, p.hofj_updated_at) for p in found if p is not None}
+
+    def set_brand(self, ids: Iterable[str], brand: str, sport: str) -> None:
+        for i in ids:
+            p = self._items.get(i)
+            if p is not None:
+                self._items[i] = replace(p, brand=brand, sport=sport)
 
 
 class MemoryIntents:
