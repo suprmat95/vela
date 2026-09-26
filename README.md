@@ -124,10 +124,11 @@ errore esplicito.
 
 ## Deploy su Render
 
-`render.yaml` descrive un web service Docker e un Postgres gestito (piano free, Frankfurt).
+`render.yaml` descrive un web service Docker, lo static site della landing e un Postgres gestito
+(piano free, Frankfurt).
 
 1. Dashboard Render → New → Blueprint → questo repository e branch.
-2. Render crea `vela-db` e il servizio `vela`; `DATABASE_URL` è collegata al database.
+2. Render crea `vela-db`, il servizio `vela` e lo static site `vela-landing`; `DATABASE_URL` è collegata al database.
 3. Inserire nella dashboard le variabili marcate `sync: false`. Il Blueprint fissa
    `VELA_UPSTREAM_MODE=live` (M7, HofJ staging): servono `HOFJ_API_KEY`,
    `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRANDS=padel=staging.weebora.com,tennis=staging.tennis.weebora.com`,
@@ -164,6 +165,19 @@ serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri rice
 "Troppo caro" produce sempre una proposta più economica, anche fuori dall'area chiesta
 (dichiarandolo); se non ce n'è, Vela lo dice (M7).
 
+## Landing
+
+`landing/` è una pagina statica in italiano che spiega come raggiungere Vela: connector MCP in
+Claude, agente vocale ElevenLabs nel browser, numero di telefono. Non mostra viaggi né liste
+(`docs/superpowers/specs/2026-09-26-landing-design.md`). HTML, CSS e JS sono scritti a mano,
+senza build.
+
+- Anteprima: `python3 -m http.server -d landing 8080`, poi http://127.0.0.1:8080.
+- Configurazione: `landing/config.js` (URL MCP, agent id ElevenLabs, numero in formato E.164).
+  Con agent id o numero vuoti la sezione mostra "In arrivo" e lo script ElevenLabs non si carica.
+- Deploy: static site `vela-landing` in `render.yaml`. Si ricostruisce solo per modifiche sotto
+  `landing/`, che il servizio `vela` ignora.
+
 ## Struttura
 
 ```
@@ -176,6 +190,7 @@ vela/app.py     factory FastAPI
 alembic/        migrazioni
 fixtures/       catalogo registrato per replay e test, una fixture per host e brand (M1, M10)
 loadtest/       Locust (M13)
+landing/        pagina statica, static site Render `vela-landing`
 tests/          python3 -m unittest discover -s tests
 docs/           brief, spec, roadmap, decisioni, piani
 agent-log/      trascrizioni delle sessioni con gli agenti (vedi docs/agents-log.md)

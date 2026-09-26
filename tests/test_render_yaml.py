@@ -84,3 +84,9 @@ class ReadmeTest(unittest.TestCase):
         self.assertIn("python3 -m unittest discover -s tests", readme)
         self.assertIn("uv sync", readme)
         self.assertIn("docker build", readme)
+
+    def test_documents_the_landing(self):
+        readme = read("README.md")
+        self.assertIn("python3 -m http.server -d landing", readme)
+        self.assertIn("landing/config.js", readme)
+        self.assertIn("vela-landing", readme)

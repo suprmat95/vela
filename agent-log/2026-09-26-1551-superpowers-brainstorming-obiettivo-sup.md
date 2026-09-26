@@ -345,3 +345,13 @@ I tre test falliscono come previsto. Ora modifico `render.yaml` e `.dockerignore
 Test verdi. Aggiorno anche il commento in testa a `render.yaml`, che nominava solo Docker e Postgres, poi allineo spec e decisioni.
 
 - 🔧 Bash: Align spec, decisions and render.yaml header; run suite
+
+- 🔧 Bash: Commit task 3 and record completion
+
+Task 4: README. Parto dal test.
+
+- 🔧 Bash: Start task 4 and add failing README test
+
+- 🔧 Bash: Update README and run full suite
+
+- 🔧 Bash: Commit task 4, record it, build review package
