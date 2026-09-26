@@ -5,7 +5,7 @@ from decimal import Decimal
 from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT_OR_PERIOD,
                                 QUESTION_SPORT_OR_PERIOD_EN, detect_language,
                                 is_per_person, parse_budget, parse_intent, parse_pax,
-                                parse_period)
+                                parse_period, parse_sport)
 from vela.domain.models import Area, Period, TravelerProfile
 
 TODAY = date(2026, 9, 25)   # venerdì
@@ -100,6 +100,47 @@ class TableTest(unittest.TestCase):
                 self.assertEqual(c.budget, budget)
                 self.assertEqual(c.language, lang)
                 self.assertIsNone(r.question)
+
+
+# M17: esclusioni, poi "any", poi sinonimi, poi padel/tennis
+SPORT_TABLE = [
+    ("un weekend di padel a Valencia", "padel"),
+    ("tennis camp in Mallorca", "tennis"),
+    ("un viaggio sulla terra rossa a maggio", "tennis"),
+    ("giocare sulla Terra Rossa", "tennis"),
+    ("una settimana con Terrarossa in Puglia", "tennis"),
+    ("a clay court week in Spain", "tennis"),
+    ("playing on clay in May", "tennis"),
+    ("un weekend di paddle a Valencia", "padel"),
+    ("pádel en Madrid", "padel"),
+    ("un viaggio Weebora in Spagna", "padel"),
+    ("padel e tennis in Spagna", "any"),
+    ("tennis and padel in Portugal", "any"),
+    ("Padel o tennis? Indifferente, basta che sia al caldo", "any"),
+    ("indifferente", "any"),
+    ("tutti e due", "any"),
+    ("vanno bene entrambi gli sport", "any"),
+    ("lo sport non importa", "any"),
+    ("either is fine", "any"),
+    ("both sports are fine", "any"),
+    ("the sport doesn't matter", "any"),
+    ("beach tennis a Rimini", None),
+    ("a paddle tennis week", None),
+    ("beach tennis e padel", "padel"),
+    ("una vacanza a Maiorca a giugno", None),
+    ("siamo in due, per il ponte", None),
+]
+
+
+class SportTest(unittest.TestCase):
+    def test_sport_table(self):
+        for text, sport in SPORT_TABLE:
+            with self.subTest(text=text):
+                self.assertEqual(parse_sport(text), sport)
+
+    def test_both_of_us_is_not_both_sports(self):
+        self.assertIsNone(parse_sport("a trip for both of us"))
+        self.assertEqual(parse_sport("a padel trip for both of us"), "padel")
 
 
 class PeriodTest(unittest.TestCase):

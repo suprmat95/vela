@@ -115,9 +115,24 @@ def detect_language(text: str) -> str:
     return "en" if en > it else "it"
 
 
+# Decisioni M17: sport che non vendiamo tolti prima dei sinonimi ("paddle tennis" non è padel né
+# tennis); entrambi gli sport o una frase di indifferenza valgono `any`.
+_NOT_OUR_SPORTS = re.compile(r"\b(?:beach|paddle)[\s-]?tennis\b")
+_SPORT_WORDS = {
+    "padel": re.compile(r"(?<![\w])(?:padel|pádel|paddle|weebora)\b"),
+    "tennis": re.compile(r"\b(?:tennis|terra\s?rossa|clay)\b"),
+}
+_ANY_SPORT = re.compile(r"\b(?:indifferente|tutti e due|entramb[ie]|non importa|"
+                        r"either (?:is|one|sport|will do|way)|both sports|any sport|"
+                        r"doesn't matter|does not matter)\b")
+
+
 def parse_sport(text: str) -> Optional[str]:
-    m = re.search(r"\b(padel|tennis)\b", text.lower())
-    return m.group(1) if m else None
+    low = _NOT_OUR_SPORTS.sub(" ", text.lower())
+    found = [sport for sport, pattern in _SPORT_WORDS.items() if pattern.search(low)]
+    if len(found) == 2 or _ANY_SPORT.search(low):
+        return "any"
+    return found[0] if found else None
 
 
 _MONTH_RE = "|".join(sorted(MONTHS, key=len, reverse=True))
