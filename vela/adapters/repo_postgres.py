@@ -19,6 +19,7 @@ from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
+from vela.ports.jobs import DuplicateJob
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder, SyncState
 
@@ -236,6 +237,14 @@ class PostgresOrders:
         with self.engine.begin() as conn:
             conn.execute(update(orders_t).where(orders_t.c.id == order.id).values(**values))
 
+    def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
+        """Un solo `UPDATE ... WHERE status = expected`: tra due scritture concorrenti vince una."""
+        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(orders_t.c.id == order.id,
+                                                      orders_t.c.status == expected.value).values(**values))
+        return res.rowcount == 1
+
     def ids_with_status(self, status: OrderStatus) -> List[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(select(orders_t.c.id).where(orders_t.c.status == status.value)
@@ -305,8 +314,13 @@ class PostgresJobs:
         self.engine = engine
 
     def enqueue(self, job: Job) -> None:
-        with self.engine.begin() as conn:
-            conn.execute(jobs_t.insert().values(**_job_row(job)))
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(jobs_t.insert().values(**_job_row(job)))
+        except IntegrityError as exc:
+            if "uq_jobs_active_booking" in str(exc.orig):
+                raise DuplicateJob(job.order_id) from exc
+            raise
 
     def get(self, job_id: str) -> Optional[Job]:
         with self.engine.connect() as conn:

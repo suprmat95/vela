@@ -4,9 +4,11 @@ Tipi neutri (JSON, Numeric, String, Date, DateTime): `tests/test_migrations.py` 
 migrazioni anche su SQLite. Postgres è l'unico backend di produzione (RNF-01).
 """
 from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
-                        Numeric, String, Table, Text, UniqueConstraint)
+                        Numeric, String, Table, Text, UniqueConstraint, text)
 
 from vela.adapters.db import metadata
+
+ACTIVE_BOOKING_SQL = "kind = 'booking' AND status IN ('pending', 'running')"
 
 products_t = Table(
     "products", metadata,
@@ -113,6 +115,9 @@ jobs_t = Table(
     Column("locked_at", DateTime(timezone=True)),
     Column("last_error", Text),
     Index("ix_jobs_claim", "status", "kind", "run_after", "enqueued_at"),
+    # Un solo job `booking` attivo per ordine (RF-51, migrazione 0009).
+    Index("uq_jobs_active_booking", "order_id", unique=True,
+          postgresql_where=text(ACTIVE_BOOKING_SQL), sqlite_where=text(ACTIVE_BOOKING_SQL)),
 )
 
 quota_window_t = Table(

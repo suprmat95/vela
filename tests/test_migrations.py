@@ -29,14 +29,14 @@ def versions(url):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0008"])
+        self.assertEqual(heads, ["0009"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0008", res.stdout)
+        self.assertIn("0009", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -45,7 +45,7 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0008"])
+                self.assertEqual(versions(url), ["0009"])
                 with create_engine(url).connect() as conn:
                     tables = inspect(conn).get_table_names()
                     self.assertIn("orders", tables)
@@ -62,6 +62,8 @@ class SqliteUpgradeTest(unittest.TestCase):
                     quota_cols = {c["name"] for c in inspect(conn).get_columns("quota_window")}
                     self.assertTrue({"tokens", "refilled_at"} <= quota_cols)
                     self.assertNotIn("used", quota_cols)
+                    job_indexes = {i["name"]: i for i in inspect(conn).get_indexes("jobs")}
+                    self.assertTrue(job_indexes["uq_jobs_active_booking"]["unique"])
                 command.downgrade(alembic_config(), "base")
                 self.assertEqual(versions(url), [])
 
@@ -73,6 +75,37 @@ class SqliteUpgradeTest(unittest.TestCase):
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
         self.assertFalse(logger.disabled)
+
+    def test_downgrade_from_0009_removes_active_booking_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "head")
+                command.downgrade(alembic_config(), "0008")
+                with create_engine(url).connect() as conn:
+                    names = {i["name"] for i in inspect(conn).get_indexes("jobs")}
+        self.assertNotIn("uq_jobs_active_booking", names)
+
+    def test_upgrade_to_0009_keeps_the_oldest_active_booking_job(self):
+        """Job `booking` doppi già in tabella (la corsa di M13b): resta attivo il più vecchio,
+        gli altri diventano `dead`, e l'indice unico si crea."""
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "0008")
+                engine = create_engine(url)
+                with engine.begin() as conn:
+                    for jid, kind, status, at in (("b2", "booking", "pending", "2026-09-26 15:31:52.118"),
+                                                  ("b1", "booking", "running", "2026-09-26 15:31:52.113"),
+                                                  ("b3", "booking", "done", "2026-09-26 15:30:00.000"),
+                                                  ("p1", "purchase", "pending", "2026-09-26 15:31:52.100")):
+                        conn.execute(text("INSERT INTO jobs (id, kind, order_id, status, step, attempts, "
+                                          "enqueued_at, run_after) VALUES (:id, :kind, 'o1', :status, 0, 0, "
+                                          ":at, :at)"), {"id": jid, "kind": kind, "status": status, "at": at})
+                command.upgrade(alembic_config(), "0009")
+                with engine.connect() as conn:
+                    rows = dict(conn.execute(text("SELECT id, status FROM jobs")).all())
+        self.assertEqual(rows, {"b1": "running", "b2": "dead", "b3": "done", "p1": "pending"})
 
     def test_downgrade_from_0008_restores_used(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,4 +176,4 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0008"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0009"])

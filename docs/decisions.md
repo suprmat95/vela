@@ -781,6 +781,32 @@ scelte sono state prese con l'utente prima di scrivere codice.
 | Test aggiornati | Contratto della quota riscritto (`tests/quota_contract.py`), con finestra scorrevole, ancorata e a griglia simulate; `test_quota_rules`, `test_job_processor`, `LaunchBurstTest` (attesa 750 s / 13 minuti, attesa reale ≤ dichiarata e ≥ 75%), `test_usecases` (8 s), `test_health`, `test_config`, `test_hofj_http`, `test_migrations` (head 0007), `test_payment_check`, `test_fixtures_record`, `test_purchase_job` (orfani). In alcuni test l'orologio avanza qualche secondo tra un acquisto e l'altro | Fissavano la finestra a griglia e i numeri 87/108/17,4 |
 | Suite finale | 946 test, 56 saltati senza `DATABASE_URL`; verde anche su un Postgres locale usa e getta. Nessuna chiamata esterna | — |
 
+## 2026-09-26 — M13b: rilancio dopo M18
+
+Origine: roadmap M13b. Risultati in `loadtest/RESULTS.md` (colonne "prima" e "dopo").
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Giri del "dopo" | Gli stessi cinque giri del "prima", con gli stessi comandi dello script di M13a (recuperato dall'agent-log): A-500, B-1000, C-2500, D-1000-guasti, E-1000-rolling, `--duration 8 --arrival-minutes 5 --tail-minutes 3`, seme 13, compose pulito a ogni giro, immagini ricostruite una volta sul commit `a9d1f57`. 1k/10k/50k in 10 minuti restano una proiezione, ricalcolata con il ritmo del "dopo" (17,8 link/min) | Richiesta dell'utente: stesso numero di viaggiatori di M13a. `git diff 14ddd31..a9d1f57` su `loadtest/`, compose, Dockerfile ed entrypoint è vuoto: cambia solo `vela/` |
+| Criterio fallito | Tutti i giri si completano comunque; un criterio fallito si scrive con il numero, senza toccare test o codice, e si segnala all'utente prima del commit | Scelta dell'utente. Esito: nessun criterio fallito |
+| "Prenotazioni doppie" | Il criterio conta i booking distinti per `itineraryId` sul finto (upsert), non le `POST /v1/bookings`; le POST ripetute si riportano a parte | Le POST ripetute dopo un timeout sono una scelta di M5/M18 (upsert idempotente); il rischio è un secondo booking |
+| POST di booking doppie senza guasti | Riportate in `RESULTS.md` come regressione trovata (1, 4, 2 itinerari in A, C, E); la causa, due job `booking` per ordine da `mark_paid` concorrenti, è stata verificata sul DB di Vela in sola lettura durante D ed E. Correzione in una task separata (`task/booking-race`), approvata dall'utente: passaggio di stato atomico dell'ordine più indice unico parziale sui job `booking` attivi | M13b non cambia il codice. La corsa era annotata in M18 come teorica; con 10 worker è frequente |
+| p95 REST più alto dopo M18 | Riportato come misura con un'ipotesi (10 worker nello stesso processo uvicorn), senza indagare | Fuori scope; 0 errori e proposta sempre sotto 15 ms per Anna |
+
+## 2026-09-26 — Un solo job di prenotazione per ordine (task/booking-race)
+
+Origine: regressione misurata da M13b (`loadtest/RESULTS.md`, "Cosa cambia con M18", punto 6).
+Scelta dell'utente tra tre opzioni: A (passaggio di stato atomico) più B (indice unico); scartata
+C (`SELECT ... FOR UPDATE` in una transazione condivisa tra repository, cambio di architettura).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Passaggio di stato atomico (A) | Nuovo `OrderRepository.save_if_status(order, expected) -> bool`: su Postgres un solo `UPDATE ... WHERE id = ? AND status = ?`, in memoria sotto il lock. `mark_paid` ed `expire` lo usano; chi perde rilegge l'ordine e non accoda nulla | Corregge la causa: due conferme di pagamento concorrenti leggevano entrambe `awaiting_payment`. Sistema anche la corsa tra pagato e scaduto, in cui una scadenza letta prima del pagamento lo annullava. Porta interna: nessuna superficie MCP/REST cambia |
+| Indice unico (B) | Migrazione 0009: indice unico parziale `uq_jobs_active_booking` su `jobs(order_id)` per `kind = 'booking'` e `status` `pending` o `running` (Postgres e SQLite). `JobRepository.enqueue` solleva `DuplicateJob` (in memoria lo stesso controllo sotto il lock); `_enqueue_booking` lo tratta come "c'era già" | La garanzia sta nel database e vale anche con più istanze, per esempio `resume_bookings` al boot di due istanze. I job `done` e `dead` non contano: un ordine può riavere un job dopo un fallimento |
+| Doppioni già in tabella | La 0009, prima di creare l'indice, porta a `dead` i job `booking` attivi doppi, tenendo il più vecchio (`enqueued_at`, poi `id`), con `last_error` che lo dice | Senza questo passo la creazione dell'indice fallirebbe al boot su un DB che ha già la corsa. I doppioni prenotano lo stesso itinerario: tenerne uno non perde nulla |
+| Test | Contratto memoria/Postgres: `save_if_status`, secondo job `booking` attivo rifiutato (anche `running`), `dead`/`done` non bloccano, 8 thread su `save_if_status`, su `enqueue` e su `OrderService.mark_paid` (quest'ultimo falliva su Postgres prima della correzione). Dominio: letture vecchie in `mark_paid`, `expire` e `resume_bookings`. Migrazione: head 0009, indice, downgrade, doppioni a `dead` | I test di concorrenza sono passati 10 volte su 10 su un Postgres locale usa e getta |
+| Verifica sul banco | A-500 e C-2500 rilanciati identici sul commit `49cc1cb`: 0 itinerari con `POST /v1/bookings` ripetuta (erano 1 e 4), una POST per itinerario prenotato (67/67, 85/85), criteri di M13b tutti passati. Tabella in `loadtest/RESULTS.md` | Il test di contratto dice che la corsa è chiusa; il banco dice che era quella la causa delle POST doppie |
+
 ## 2026-09-26 — Lint con ruff
 
 Origine: riscrittura di `CLAUDE.md`, che deve dire come si fa il lint. Il repository non aveva un

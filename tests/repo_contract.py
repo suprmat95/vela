@@ -1,4 +1,6 @@
 """Contratto dei repository: eseguito su MemoryRepositories (sempre) e PostgresRepositories (con DATABASE_URL)."""
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
@@ -7,6 +9,7 @@ from support import NOW, make_product
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
                                 OrderStatus, Participant, Period, Proposal, Rejection,
                                 TravelerProfile)
+from vela.ports.jobs import DuplicateJob
 from vela.ports.repositories import DuplicateOrder, SyncState
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
@@ -33,6 +36,22 @@ def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):
 
 
 LEASE = 120
+THREADS = 8
+
+
+def all_at_once(fn, n=THREADS):
+    """Chiama `fn(i)` da `n` thread che partono insieme; restituisce i risultati o le eccezioni."""
+    barrier = threading.Barrier(n)
+
+    def run(i):
+        barrier.wait()
+        try:
+            return fn(i)
+        except Exception as exc:   # noqa: BLE001 - il test conta gli esiti
+            return exc
+
+    with ThreadPoolExecutor(n) as ex:
+        return list(ex.map(run, range(n)))
 
 
 class RepositoryContract:
@@ -209,6 +228,31 @@ class RepositoryContract:
         self.assertEqual(self.repos.orders.get_by_replacement("p9"), replaced)
         self.assertIsNone(self.repos.orders.get_by_replacement("p1"))
 
+    def test_save_if_status_applies_only_from_expected_status(self):
+        """Passaggio di stato atomico (task/booking-race): chi arriva secondo non sovrascrive."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        paid = replace(order(), status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi_1", paid_at=NOW)
+        self.assertTrue(self.repos.orders.save_if_status(paid, OrderStatus.AWAITING_PAYMENT))
+        expired = replace(order(), status=OrderStatus.EXPIRED)
+        self.assertFalse(self.repos.orders.save_if_status(expired, OrderStatus.AWAITING_PAYMENT))
+        self.assertEqual(self.repos.orders.get("o1"), paid)
+        self.assertFalse(self.repos.orders.save_if_status(replace(order("nope"), status=OrderStatus.EXPIRED),
+                                                          OrderStatus.AWAITING_PAYMENT))
+
+    def test_concurrent_save_if_status_has_one_winner(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        results = all_at_once(lambda i: self.repos.orders.save_if_status(
+            replace(order(), status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi_%d" % i),
+            OrderStatus.AWAITING_PAYMENT))
+        self.assertEqual(results.count(True), 1, results)
+        self.assertEqual(results.count(False), THREADS - 1, results)
+        winner = "pi_%d" % results.index(True)
+        self.assertEqual(self.repos.orders.get("o1").payment_ref, winner)
+
     # job (RF-27, RF-50)
     def seed_orders(self, n):
         self.seed()
@@ -296,6 +340,45 @@ class RepositoryContract:
         self.repos.jobs.claim(NOW, LEASE)
         self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.PURCHASE).id, "j1")
         self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.BOOKING))
+
+    def test_second_active_booking_job_for_an_order_is_refused(self):
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(job("b1", "o1", JobKind.BOOKING))
+        with self.assertRaises(DuplicateJob):
+            self.repos.jobs.enqueue(job("b2", "o1", JobKind.BOOKING))
+        self.assertIsNone(self.repos.jobs.get("b2"))
+        self.repos.jobs.claim(NOW, LEASE)                      # running: ancora attivo
+        with self.assertRaises(DuplicateJob):
+            self.repos.jobs.enqueue(job("b3", "o1", JobKind.BOOKING))
+        self.repos.jobs.enqueue(job("b4", "o2", JobKind.BOOKING))   # altro ordine
+        self.repos.jobs.save(replace(self.repos.jobs.get("b1"), status=JobStatus.DONE))
+        self.repos.jobs.enqueue(job("b5", "o1", JobKind.BOOKING))   # il primo è finito
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.BOOKING).id, "b5")
+
+    def test_dead_booking_job_does_not_block_a_new_one(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(replace(job("b1", "o1", JobKind.BOOKING), status=JobStatus.DEAD))
+        self.repos.jobs.enqueue(job("b2", "o1", JobKind.BOOKING))
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.BOOKING).id, "b2")
+
+    def test_concurrent_booking_enqueues_have_one_winner(self):
+        self.seed_orders(1)
+        results = all_at_once(lambda i: self.repos.jobs.enqueue(job("b%d" % i, "o1", JobKind.BOOKING)))
+        self.assertEqual(sum(r is None for r in results), 1, results)
+        self.assertEqual(sum(isinstance(r, DuplicateJob) for r in results), THREADS - 1, results)
+
+    def test_concurrent_mark_paid_enqueues_one_booking(self):
+        """Checkout e verifica del pagamento insieme (M13b): un solo job di prenotazione."""
+        from support import FakeHofJ
+        from vela.domain.orders import OrderService
+        self.seed_orders(1)
+        svc = OrderService(self.repos, FakeHofJ(), now=lambda: NOW)
+        results = all_at_once(lambda i: svc.mark_paid("o1", "pi_1"))
+        self.assertFalse([r for r in results if isinstance(r, Exception)], results)
+        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.PAID_PENDING_BOOKING)
+        first = self.repos.jobs.active_for_order("o1", JobKind.BOOKING)
+        self.repos.jobs.save(replace(first, status=JobStatus.DONE))
+        self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.BOOKING))   # nessun secondo job
 
     def test_position_counts_only_pending_purchases_before(self):
         self.seed_orders(4)
