@@ -8,6 +8,9 @@ Aggiornata il 2026-09-26 con M17 (contratto agente-tool, spec §4.11): M9 e M11 
 concluse, quindi il lavoro su parser e contratto dei tool è una task nuova in ondata 5.
 Aggiornata il 2026-09-26 per il multi-brand: M10 diventa "Sync multi-brand del catalogo"
 (padel = Weebora, tennis = Terrarossa), taglia L, casi d'uso in `docs/usecases/multi-brand.md`.
+Aggiornata il 2026-09-26 per la seconda lettura del twist
+(`docs/plans/2026-09-26-twist-seconda-lettura.md`): M13 diventa M13a e M13b, nuove M18 e M19,
+M15 allargata.
 
 ## Come usare questo file
 
@@ -29,9 +32,13 @@ Ondata 3   M8 OAuth  M5 HofJ reale   M6 Stripe
                  \       |        /
 Ondata 4          M7 Prima prenotazione reale   [Traguardo B]
                  /    |      |       \
-Ondata 5   M10 Sync  M12 ElevenLabs  M13 Load test  M14 Hardening  M17 Contratto agente-tool
-                 \      |       |       /               /
-Ondata 6          M15 Consegna (ARCHITECTURE, README, video)   [M16 A2A opzionale]
+Ondata 5   M10 Sync (conclusa)  M17 Contratto agente-tool (conclusa)  M12 ElevenLabs  M14 Hardening
+           M13a Banco di prova   M18 Quota a ritmo   M20 Accept con attesa
+                  \               /
+                   M13b Rilancio (dopo M13a e M18)
+                  /             \
+                 |               M19 Meno chiamate per link (opzionale, condizionata)
+Ondata 6          M15 Consegna (ARCHITECTURE, README, video; dopo M13b)   [M16 A2A opzionale]
 ```
 
 Traguardo A = M3 completata (prototipo replay su Render, testato da claude.ai).
@@ -51,19 +58,24 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M7 | Prima prenotazione reale end-to-end | S | M3, M4, M5, M6 | 4 / — |
 | M8 | OAuth 2.1 sulla superficie MCP | M | M3 | 3 / M5, M6 |
 | M9 | Parser completo, rifiuto con motivo, fallback Haiku | M | M2 | 2+ / tutte |
-| M10 | Sync multi-brand del catalogo da HofJ | L | M5 | 5 / M12, M13, M14 |
+| M10 | Sync multi-brand del catalogo da HofJ | L | M5 | 5 / M12, M13a, M14 |
 | M11 | Raffinamento della scelta (chooser v2) | M | M2 | 2+ / tutte |
-| M12 | Agente vocale ElevenLabs | S | M7, M8 | 5 / M10, M13, M14 |
-| M13 | Load test e numeri | S | M4, M7 | 5 / M10, M12, M14 |
-| M14 | Hardening: log JSON, health, dati personali, segreti | S | M7 | 5 / M10, M12, M13 |
-| M15 | Consegna: ARCHITECTURE.md, README, video | M | tutte | 6 / — |
+| M12 | Agente vocale ElevenLabs | S | M7, M8 | 5 / M10, M13a, M14 |
+| M13a | Banco di prova e numeri di partenza | M | M5, M10 | 5 / M18, M20; mergiare prima di M18 |
+| M13b | Rilancio dopo M18 | S | M13a, M18 | 5 / — |
+| M14 | Hardening: log JSON, health, dati personali, segreti | S | M7 | 5 / M10, M12, M13a |
+| M15 | Consegna: ARCHITECTURE.md, README, video | M | tutte, in particolare M13b | 6 / — |
 | M16 | (opzionale) Superficie A2A | M | M4, M8 | 6 / M15 |
-| M17 | Contratto agente-tool e sinonimi dello sport | M | M3, M4, M9, M11 | 5 / M10, M12, M13, M14 |
-| M20 | Accettazione con attesa breve quando la coda è vuota | S | M5 | 5 / dopo M18 |
+| M17 | Contratto agente-tool e sinonimi dello sport | M | M3, M4, M9, M11 | 5 / M10, M12, M13a, M14 |
+| M18 | Quota a ritmo costante | M | M5 | 5 / M13a, M20 |
+| M19 | Meno chiamate per link e ordini silenziosi (condizionata) | M | M18, M13b | 5 / — |
+| M20 | Accettazione con attesa breve quando la coda è vuota | S | M5 | 5 / M13a, M18; mergiare dopo M13b |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
-`vela/domain/usecases.py` (M10 per il router del carrello, M17 per i campi strutturati): chi arriva secondo fa rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
+`vela/domain/usecases.py` (M10 per il router del carrello, M17 per i campi strutturati) e
+`vela/config.py` (M13a per il modo `loadtest`, M18 per concorrenza e timeout, M20 per
+`accept_wait_seconds`): chi arriva secondo fa rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
 
 ---
 
@@ -538,34 +550,180 @@ voce; il link di pagamento viene consegnato per testo.
 
 ---
 
-## M13 — Load test e numeri
+## M13a — Banco di prova e numeri di partenza
 
-**Risultato.** `loadtest/locustfile.py` esercita il flusso completo in replay; `RESULTS.md`
-riporta i numeri richiesti da RNF-10.
+**Risultato.** Un load test lanciabile da chiunque con `docker compose up` e un comando, che
+colpisce solo la nostra edge; `loadtest/RESULTS.md` con la colonna "prima" misurata sul codice
+attuale. Il test dimostra un confine: le chiamate a HofJ al minuto restano sotto 108 con
+1.000, 10.000 e 50.000 viaggiatori. Decisione del 2026-09-26 in `docs/decisions.md` ("Twist,
+seconda lettura").
 
 **Scope.**
-- Locust su REST: intento → proposta → rifiuto → accettazione (`queued`) → stato finché
-  `awaiting_payment` → checkout replay → stato finché `confirmed`.
-- Esecuzione locale e contro Render; `GET /v1/quota` reale prima e dopo (2 chiamate).
-- Scenario "twist" (RNF-10, spec §4.10): 50.000 viaggiatori in dieci minuti, adapter replay
-  con quota simulata 120/min e latenza 2-6 s per chiamata. Misure: p95 dei cinque casi
-  d'uso, acquisti completati al minuto (atteso ≈ 20), scarto tra attesa stimata e reale,
-  tempo tra pagamento simulato e prenotazione (atteso < 60 s), errori di quota (atteso 0).
-- `RESULTS.md`: utenti, RPS, p50/p95/p99, errori, `limitPerMinute`, latenza del flusso reale
-  misurata in M7, più la tabella dello scenario twist e la risposta alla domanda del twist
-  ("regge?") con i numeri.
+- Finto HofJ HTTP in `loadtest/fake_hofj/`: app ASGI asincrona, un processo; stato da
+  `ReplayHofJ` con latenza 0 e quota illimitata; sopra, uno strato di regole con le rotte del
+  carrello, `/v1/quota`, `POST /v1/bookings`, lista e dettaglio prodotti dalle 4 fixture per il
+  sync di M10; forme reali dell'envelope e degli errori.
+- Il finto applica le **regole di HofJ, non le nostre**: quota per chiave, 120/min, con
+  `--window anchored` (default, come misurato in `docs/api/quota-health.md`) o `rolling`;
+  `--background-rpm` per gli altri usi della chiave; latenza 2-6 s su `POST /v1/itineraries` e
+  tarata su `scripts/rest_flow.py` per gli altri endpoint, `--latency pessimistic`; guasti per
+  endpoint: esegui-e-resta-appeso oltre 15 s, appeso senza eseguire, 5xx, 502 di prodotto;
+  seme fisso; registro JSONL di ogni chiamata; `/_fake/stats` e `/_fake/reset` fuori quota.
+  Le verifiche si fanno sul registro del finto, non sui log di Vela.
+- Modo `VELA_UPSTREAM_MODE=loadtest`: HofJ via HTTP verso il finto, pagamenti finti, checkout
+  di replay; rifiuta host diversi da localhost o `fake-hofj`. Serve perché il modo `live`
+  richiede `STRIPE_SECRET_KEY` e non monta il checkout finto (`vela/app.py`), e perché
+  `render.yaml` punta a HofJ staging: un load test contro Render porterebbe il carico a HofJ.
+- `docker-compose.yml` con vela, postgres, fake-hofj.
+- Scenario Locust a modello aperto: 50.000 arrivi in 10 minuti, imbuto parametrico (100%
+  proposta, 30% "troppo caro", 20% accetta, stato ogni 30-60 s, 60% paga); sentinelle Marco
+  (accetta al minuto 1, confermato entro il 7) e Anna (arriva al 6, proposta < 500 ms e attesa
+  dichiarata); giri a 1k, 10k, 50k.
+- `loadtest/report.py`, `loadtest/RESULTS.md`, `loadtest/README.md`.
+- Non tocca `vela/domain/quota.py` né il `QuotaStore` (M18 in parallelo).
+
+**Misure del report.** Massimo di chiamate in qualsiasi 60 s; numero di 429; chiamate per
+endpoint e al minuto nei tre giri; link al minuto; Marco pagamento → confermato; scarto p95
+tra attesa dichiarata e reale; prenotazioni per `itineraryId`; itinerari orfani; età della
+coda; p50/p95/p99 dei cinque casi d'uso.
 
 **Test di completamento.**
-- Locust headless termina senza errori; p95 < 500 ms sui cinque casi d'uso; quota reale
-  invariata; scenario twist con zero errori di quota, ≈ 20 acquisti/min, prenotazione entro
-  60 s dal pagamento; `RESULTS.md` compilato.
+- Test unitari del finto: finestra ancorata e scorrevole ai bordi; esegui-e-appeso sul booking
+  → un solo codice.
+- Test di contratto del vero `HofJHttp` contro il finto via transport ASGI.
+- Scenario eseguito e `RESULTS.md` compilato anche se i numeri sono cattivi: sono il "prima".
+  Le previsioni della seconda lettura (deriva del contatore, ~12 acquisti/min con 4 worker) si
+  confermano o si smentiscono qui.
+- Nessuna chiamata a HofJ né a Stripe.
 
-**Copre.** RNF-05, RNF-10 (incluso lo scenario twist), §10.5.
+**Copre.** RNF-05, RNF-10, §10.5.
+
+**Taglia.** M. **Dipende da** M5, M10. **Ondata** 5, parallela con M18 e M20; mergiare prima
+di M18.
 
 **Prompt.**
-> Leggi docs/spec.md (§4.10, RNF-05, RNF-08, RNF-10, §10.5) e docs/roadmap.md M13.
-> Obiettivo: load test Locust in replay con lo scenario twist (quota e latenza simulate) e
-> risultati documentati. Test: M13.
+> Leggi docs/spec.md (§4.8, §4.10, RNF-05, RNF-08, RNF-10, §10.5), docs/decisions.md
+> ("2026-09-26 — Twist, seconda lettura"), docs/plans/2026-09-26-twist-seconda-lettura.md
+> (sezioni 3.5, 5, 6), docs/api/quota-health.md, docs/api/internal-checkout.md,
+> vela/adapters/replay.py, vela/adapters/hofj_http.py, vela/app.py, render.yaml,
+> scripts/rest_flow.py e docs/roadmap.md M13a. Obiettivo: finto HofJ HTTP con le regole di
+> HofJ (finestra ancorata di default), modo `loadtest`, docker compose, scenario Locust a
+> modello aperto con le sentinelle Marco e Anna, report e colonna "prima" di RESULTS.md sul
+> codice attuale. Non toccare `vela/domain/quota.py`. Nessuna chiamata a HofJ né a Stripe.
+> Test: M13a.
+
+---
+
+## M13b — Rilancio dopo M18
+
+**Risultato.** Lo stesso scenario di M13a (seme, imbuto, finestre `anchored` e `rolling`, tre
+giri) rilanciato sul codice con M18; `loadtest/RESULTS.md` con le colonne "prima" e "dopo" e una
+frase per ogni differenza. I due risultati affiancati sono la prova del "diff nel pensiero".
+
+**Scope.**
+- Nessuna modifica allo scenario né al finto rispetto a M13a.
+- Se un criterio fallisce (429 > 0, più di 108 chiamate in 60 s, Marco oltre il minuto 7,
+  prenotazioni doppie) si riporta il dato, non si aggiusta il test.
+
+**Test di completamento.**
+- `RESULTS.md` con "prima" e "dopo" per entrambe le finestre e i tre giri; ogni criterio
+  riportato come passato o fallito con il numero.
+
+**Copre.** RNF-05, RNF-10, §10.5.
+
+**Taglia.** S. **Dipende da** M13a, M18. **Ondata** 5.
+
+**Prompt.**
+> Leggi docs/roadmap.md M13a, M13b e M18, loadtest/README.md e loadtest/RESULTS.md.
+> Obiettivo: rilanciare lo scenario di M13a senza cambiarlo sul codice con M18 e compilare la
+> colonna "dopo" con una frase per differenza. Se un criterio fallisce, riportare il dato
+> senza aggiustare il test. Test: M13b.
+
+---
+
+## M18 — Quota a ritmo costante
+
+**Risultato.** Nessun intervallo di 60 s contiene più di 108 chiamate HofJ, qualunque sia la
+regola della finestra di HofJ (ancorata come misurato, a griglia o scorrevole come dicono
+brief e OAS). Corregge la deriva del contatore a griglia di `vela/domain/quota.py` rispetto
+alla finestra ancorata di HofJ (effetto previsto, da confermare con M13a) e porta concorrenza e
+timeout al livello richiesto dalla latenza. Decisione del 2026-09-26 in `docs/decisions.md`
+("Twist, seconda lettura").
+
+**Scope.**
+- `QuotaStore` come token bucket condiviso in Postgres: ritmo r, capienza B, con
+  B + 60·r ≤ 108 (esempio B = 8, r = 100/60); stesse classi `booking`/`purchase`/`sync` e
+  priorità, riserva `booking`, prenotazione atomica di blocchi.
+- 429 → bucket svuotato e una sola rilettura di `/v1/quota` (1 token `booking`), mai ripetizione
+  immediata.
+- `next_window_start` e attesa stimata (RF-48) aggiornati al ritmo del bucket.
+- `worker_concurrency` ~10 (legge di Little: ~6-9 chiamate contemporanee con 2-6 s di
+  latenza); il ritmo lo decide il bucket, non il numero di thread.
+- Timeout del client HofJ a 20 s (`TIMEOUT_SECONDS` in `vela/adapters/hofj_http.py`), più di
+  quello di HofJ verso il brand (15 s).
+- Timeout su `POST /v1/itineraries` contato come itinerario orfano (campo o log) e messo nel
+  budget; `POST /v1/bookings` resta ripetuto perché upsert idempotente su `itineraryId`.
+- Lease dei job (`job_lease_seconds`) rivisto per 5 chiamate × 20 s.
+- `/health` con età della coda e stato del bucket.
+
+**Test di completamento.**
+- Contratto condiviso memoria/Postgres del bucket: mai più di 108 in una finestra scorrevole
+  simulata di 60 s, anche con finestre HofJ ancorate a istanti diversi.
+- 8 thread su Postgres (saltato senza `DATABASE_URL`).
+- Riserva `booking` rispettata a coda piena.
+- 429 senza ripetizione immediata.
+- `LaunchBurstTest` aggiornato.
+- Nessuna chiamata esterna.
+
+**Copre.** RF-36..RF-38, RF-47, RF-48, RNF-04.
+
+**Taglia.** M. **Dipende da** M5. **Ondata** 5, parallela con M13a e M20; mergiare dopo M13a.
+
+**Prompt.**
+> Leggi docs/spec.md (RF-36..RF-38, RF-47, RF-48, RNF-04), docs/decisions.md ("2026-09-26 —
+> Twist, seconda lettura"), docs/plans/2026-09-26-twist-seconda-lettura.md (sezioni 3.1-3.3),
+> docs/api/quota-health.md, vela/domain/quota.py, vela/domain/purchase.py,
+> vela/domain/booking.py, vela/adapters/hofj_http.py, vela/config.py e docs/roadmap.md M18.
+> Obiettivo: token bucket condiviso in Postgres con B + 60·r ≤ 108, concorrenza ~10, client a
+> 20 s, orfani contati, lease rivisto, `/health` con età della coda. Nessuna chiamata
+> esterna. Test: M18.
+
+---
+
+## M19 — Meno chiamate per link e ordini silenziosi (condizionata)
+
+**Risultato.** Le chiamate HofJ si spendono su chi pagherà (look-to-book): se HofJ lo consente,
+chi non paga costa 2 chiamate invece di 5 e i link al minuto passano da ~17 a ~43 (stima,
+da misurare con lo scenario di M13a); gli ordini in coda il cui viaggiatore non dà più segni di
+vita non consumano quota. Proposta del 2026-09-26 in `docs/decisions.md` ("Twist, seconda
+lettura").
+
+**Scope.**
+- Primo passo, verifica su staging con 2-3 chiamate dichiarate (lanciate dal terminale
+  dell'utente): `PUT customer` e `PUT pax` sono accettati dopo il pagamento? Il totale resta
+  invariato dopo i pax? (Domanda 10 in `docs/hofj-questions.md`.)
+- Se sì: il job d'acquisto si ferma a itinerario + totale + link; cliente e pax passano nel
+  job di booking (riserva `booking` a 4 chiamate per ordine pagato).
+- Scadenza degli ordini in coda senza richieste di stato da N minuti.
+- Se la verifica dice no: solo il trade-off documentato in `ARCHITECTURE.md` (M15).
+
+**Test di completamento.**
+- Job d'acquisto a 2 chiamate e job di booking a 4 con porte in memoria; ordine silenzioso
+  scaduto senza chiamate HofJ; scenario di M13a rilanciato con i link al minuto.
+- Chiamate a staging solo quelle dichiarate nel primo passo.
+
+**Copre.** RF-46, RF-47 (ripartizione del budget), RF-51.
+
+**Taglia.** M. **Dipende da** M18, M13b (cambia i numeri). **Ondata** 5, condizionata.
+
+**Prompt.**
+> Leggi docs/decisions.md ("2026-09-26 — Twist, seconda lettura"),
+> docs/plans/2026-09-26-twist-seconda-lettura.md (sezione 3.4), docs/hofj-questions.md
+> (domanda 10), docs/api/internal-checkout.md, vela/domain/purchase.py,
+> vela/domain/booking.py, loadtest/RESULTS.md e docs/roadmap.md M19. Obiettivo: prima la
+> verifica su staging (2-3 chiamate, dichiarate e lanciate dall'utente); se HofJ accetta
+> cliente e pax dopo il pagamento, spostarli nel job di booking; scadenza degli ordini
+> silenziosi. Se la verifica dice no, solo il trade-off. Test: M19.
 
 ---
 
@@ -603,6 +761,14 @@ personali, verifica che nessun segreto sia nel repo né negli agent-log.
 - `ARCHITECTURE.md`: decisioni e compromessi (da `docs/decisions.md`), vincoli del prototipo
   (RF-13), prossimi passi: adapter A2A (agent card, mapping dei task sui 5 casi d'uso, RF-44),
   email del codice (RF-26), OAuth per REST.
+- `ARCHITECTURE.md`, sezione twist con le 5 richieste del brief (fonte:
+  `docs/plans/2026-09-26-twist-seconda-lettura.md` e `docs/decisions.md`, "2026-09-26 — Twist,
+  seconda lettura"): (1) l'architettura e il diff nel pensiero (sezione 4 del piano); (2) il
+  budget di quota per browse, cart, hotel, booking e cosa si sacrifica per primo (sezione 5);
+  (3) cosa degrada e cosa no, con il minuto sei visto da Marco e Anna (sezione 6); (4)
+  l'upsert idempotente di `POST /v1/bookings` e dove ci contiamo già, con il riferimento a
+  `BookingJob.run` (sezione 3.3); (5) il load test con i numeri "prima" e "dopo" di
+  `loadtest/RESULTS.md` (M13a, M13b). Più i precedenti documentati (sezione 7 del piano).
 - `README.md`: variabili, avvio, test, deploy, load test, come collegare Claude ed ElevenLabs.
 - Video 3-5 min: acquisto reale con Claude e con ElevenLabs.
 - Checklist finale dei 7 criteri di §10 in `docs/acceptance.md`.
@@ -613,9 +779,13 @@ personali, verifica che nessun segreto sia nel repo né negli agent-log.
 
 **Copre.** RF-13 (documentazione), RF-26, RF-44, spec §9.
 
+**Dipende da** tutte, in particolare M13b (i numeri del load test).
+
 **Prompt.**
-> Leggi docs/brief.md (Deliverables), docs/spec.md (§9, §10, RF-44, RF-26), docs/decisions.md
-> e docs/roadmap.md M15. Obiettivo: ARCHITECTURE.md, README, video, checklist finale. Test: M15.
+> Leggi docs/brief.md (Deliverables e "The twist"), docs/spec.md (§9, §10, RF-44, RF-26),
+> docs/decisions.md, docs/plans/2026-09-26-twist-seconda-lettura.md, loadtest/RESULTS.md e
+> docs/roadmap.md M15. Obiettivo: ARCHITECTURE.md con la sezione twist (5 richieste del brief e
+> precedenti), README, video, checklist finale. Test: M15.
 
 ---
 
@@ -755,7 +925,7 @@ chiamare HofJ né Stripe (RF-45). Decisione del 2026-09-26 in `docs/decisions.md
 
 **Copre.** RF-45 (aggiornato), RNF-04.
 
-**Taglia.** S (1-2 h). **Dipende da** M5. **Ondata** 5, dopo M18 (le misure di M13b restano
+**Taglia.** S (1-2 h). **Dipende da** M5. **Ondata** 5, mergiare dopo M13b (le misure di M13b restano
 confrontabili con M13a solo se questa modifica arriva dopo).
 
 **Prompt.**
@@ -798,24 +968,24 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 | RF-28..RF-31 | M10 |
 | RF-32 | M1, M10 (una fixture per host e brand) |
 | RF-33..RF-35 | M5 |
-| RF-36..RF-38 | M5 |
+| RF-36..RF-38 | M5, M18 |
 | RF-39 | M2, M17 |
 | RF-40 | M4, M17 |
 | RF-41 | M3 (Claude), M12 (ElevenLabs), M17 (descrizioni dei tool) |
 | RF-42 | M2, M17 |
 | RF-43 | M4 (REST), M8 (MCP OAuth) |
 | RF-44 | M15 (documentazione), M16 (opzionale) |
-| RF-45..RF-51 | M5 (RF-45 anche M20) |
+| RF-45..RF-51 | M5 (RF-45 anche M20; RF-47 anche M18) |
 | RF-52..RF-55 | M17 |
 | RF-56 | M10 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
-| RNF-04 | M5 |
-| RNF-05 | M13 |
+| RNF-04 | M5, M18 |
+| RNF-05 | M13a, M13b |
 | RNF-06 | M0, M4, M14 |
 | RNF-07 | M0, M6, M14 |
 | RNF-08 | M2 |
 | RNF-09 | ogni task (suite `unittest` senza servizi esterni; DB test saltati senza `DATABASE_URL`) |
-| RNF-10 | M13 |
+| RNF-10 | M13a, M13b |
 | RNF-11 | M0 |
 | RNF-12 | M9 (interruttore Haiku), M14 (catalogo in memoria) |
 | RNF-13 | M3 (MCP stateless), M8 |
@@ -824,7 +994,7 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 | §9 consegne | M15 |
 | §10.1, .3, .4, .7 | M7 (poi M14, M15) |
 | §10.2 | M12 |
-| §10.5 | M13 |
+| §10.5 | M13a, M13b |
 | §10.6 | M2, M3, M4 |
 
 Tutti i 56 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri

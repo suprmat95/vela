@@ -74,3 +74,17 @@ Ora la spec.
 - 🔧 Bash: Read spec requirement texts
 
 - 🔧 Bash: Update spec requirements and commit
+
+Ora la roadmap: leggo le parti da toccare.
+
+- 🔧 Bash: Read roadmap header, graph, table, M13-M15
+
+- 🔧 Bash: Read M5, M20 and requirements matrix
+
+- 🔧 Bash: Check how roadmap marks completed tasks
+
+Applico le modifiche alla roadmap.
+
+- 🔧 Bash: Apply roadmap edits and find leftover M13 references
+
+- 🔧 Bash: Check remaining M13 reference and new graph
