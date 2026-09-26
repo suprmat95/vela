@@ -121,7 +121,6 @@ quota_window_t = Table(
     Column("window_start", DateTime(timezone=True), nullable=False),
     Column("window_end", DateTime(timezone=True), nullable=False),
     Column("limit_per_minute", Integer, nullable=False),
-    Column("used", Integer, nullable=False, default=0),      # finestra a griglia (M5), non più letta da M18
     Column("needs_refresh", Boolean, nullable=False, default=False),
     Column("tokens", Float, nullable=False),                  # token bucket (M18), può essere negativo
     Column("refilled_at", DateTime(timezone=True), nullable=False),

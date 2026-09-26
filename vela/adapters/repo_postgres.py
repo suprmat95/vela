@@ -368,7 +368,7 @@ QUOTA_ROW = 1
 
 
 def _bucket_row(b: QuotaBucket) -> dict:
-    return {"window_start": b.window_start, "window_end": b.window_end, "used": 0,
+    return {"window_start": b.window_start, "window_end": b.window_end,
             "limit_per_minute": b.limit_per_minute, "needs_refresh": b.needs_refresh,
             "tokens": b.tokens, "refilled_at": b.refilled_at}
 
