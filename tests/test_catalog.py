@@ -94,3 +94,14 @@ class IsTripTest(unittest.TestCase):
         self.assertFalse(is_trip(make_product(2, destination="Weebora", country="IT")))
         self.assertFalse(is_trip(replace(make_product(3), slug="weebora-gift-card")))
         self.assertTrue(is_trip(make_product(4, destination=None, country=None)))
+
+    def test_gift_card_of_any_brand_is_not_a_trip(self):
+        from support import make_product
+        from vela.domain.catalog import is_trip
+        self.assertFalse(is_trip(make_product(1, slug="giftcard", destination="Roma")))
+        self.assertFalse(is_trip(make_product(2, slug="terrarossa-gift", destination="Roma",
+                                              title="Terrarossa Gift Card")))
+        self.assertFalse(is_trip(make_product(3, destination="Terrarossa", country="IT",
+                                              brand="terrarossa.com")))
+        self.assertTrue(is_trip(make_product(4, title="Giftcard a parte, tennis a Roma",
+                                             slug="tennis-roma")))

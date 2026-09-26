@@ -117,10 +117,16 @@ def select_fixture(fixtures_dir, base_url: str) -> str:
                        % (wanted, ", ".join(found) or "nessuna"))
 
 
-BRAND_DESTINATIONS = ("Weebora",)
+BRAND_DESTINATIONS = ("Weebora", "Terrarossa")
+GIFT_CARD_SLUGS = ("gift-card", "giftcard")
 
 
 def is_trip(product: Product) -> bool:
-    """Falso per i prodotti del catalogo che non sono viaggi: la destinazione è il brand
-    (Weebora Gift Card) o lo slug è quello di una gift card (decisione M11)."""
-    return product.destination not in BRAND_DESTINATIONS and "gift-card" not in product.slug
+    """Falso per i prodotti del catalogo che non sono viaggi: la destinazione è un brand
+    (Weebora Gift Card) o il prodotto è una gift card di qualunque brand, riconosciuta dallo
+    slug o dal titolo (decisioni M11 e M10)."""
+    if product.destination in BRAND_DESTINATIONS:
+        return False
+    if any(slug in product.slug for slug in GIFT_CARD_SLUGS):
+        return False
+    return "gift card" not in product.title.lower()
