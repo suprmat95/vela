@@ -23,7 +23,7 @@ TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "sport": {"type": ["string", "null"], "enum": ["padel", "tennis", None]},
+            "sport": {"type": ["string", "null"], "enum": ["padel", "tennis", "any", None]},
             "area": {"type": ["string", "null"],
                      "description": "Paese, regione o città come scritto nel testo."},
             "period_start": {"type": ["string", "null"], "description": "Inizio, YYYY-MM-DD."},
@@ -38,9 +38,12 @@ TOOL = {
 }
 SYSTEM = ("Estrai i criteri di un viaggio di padel o tennis dal testo del viaggiatore, scritto in "
           "italiano o in inglese. Chiama sempre record_criteria. Usa null per ogni campo che il "
-          "testo non dice: non inventare. Le date sono nel formato YYYY-MM-DD e non precedono la "
-          "data di oggi indicata nel messaggio. Il budget è il totale massimo in euro per tutto il "
-          "gruppo.")
+          "testo non dice: non inventare. Sport: \"terra rossa\", \"Terrarossa\" e \"clay\" "
+          "indicano il tennis, \"paddle\" e \"Weebora\" il padel; usa any se al viaggiatore va "
+          "bene l'uno o l'altro (\"indifferente\", \"tutti e due\", padel e tennis insieme); "
+          "beach tennis e paddle tennis non sono né padel né tennis, quindi null. Le date sono nel "
+          "formato YYYY-MM-DD e non precedono la data di oggi indicata nel messaggio. Il budget è "
+          "il totale massimo in euro per tutto il gruppo.")
 
 
 class HaikuExtractor:
