@@ -332,3 +332,57 @@ Sto ancora leggendo il codice per scrivere il piano con codice reale. Ultimi con
 Piano scritto. Verifico al volo con un'esecuzione di prova le parti più delicate: le regex del numero e la traslitterazione GSM-7.
 
 - 🔧 Bash: Sanity-check phone normalization and GSM-7 logic from the plan
+
+- 🔧 Bash: Commit the plan and spec alignment
+
+Il piano è scritto e committato in `docs/plans/2026-09-26-sms-twilio.md` (commit `e106b9c`). Per ora solo documenti: il codice non l'ho ancora toccato.
+
+**Scelte emerse leggendo il codice**, già riportate anche nella spec:
+- **Testi degli SMS:** vanno in `vela/domain/sms_text.py` invece che in `say.py`, perché `say.py` dichiara di non contenere URL.
+- **Accodamento:** l'aggiunta dei job SMS sta in `vela/domain/notify.py`, per evitare un import circolare tra `sms.py` e `purchase.py`.
+- **Frasi dell'agente:** cambiano solo se il numero è valido. Con un numero non valido restano quelle di oggi, quindi i test esistenti non dovrebbero rompersi.
+- **Variabili Twilio:** le tre variabili entrano anche nell'elenco delle variabili d'ambiente in §6 della spec, oltre che in `render.yaml` e nel README.
+
+**I 10 task**, ognuno con i test scritti prima e un proprio commit:
+1. Normalizzazione del numero.
+2. Testi degli SMS, solo caratteri GSM-7.
+3. Nuovi tipi di job e priorità di prelievo.
+4. Porta `Notifier`, SMS finti e `SmsJob`.
+5. Accodamento nei job di acquisto e prenotazione, collegamento al worker e test del flusso completo (esattamente 2 SMS).
+6. Adapter Twilio con `httpx`.
+7. Configurazione, `render.yaml` e README.
+8. Frasi dell'agente e istruzioni MCP.
+9. Documenti.
+10. Test reale, solo con il tuo OK e le variabili Twilio impostate da te.
+
+Ho già provato a parte le regole del numero e la conversione dei caratteri GSM-7 con i casi dei test: danno i risultati attesi. La suite vera però non gira ancora, perché il codice non c'è.
+
+**Come eseguirlo:**
+- **Con subagenti (consiglio questa):** un subagente per task, con una revisione indipendente dopo ognuno e una revisione finale di tutto il branch. I task dipendono l'uno dalle interfacce dell'altro e alla fine c'è l'invio di SMS reali, quindi conviene fermare un errore al task in cui nasce.
+- **Nativo:** eseguo io tutti i task in questa sessione e alla fine una sola revisione dell'intero branch. È più rapido e costa meno, ma non c'è revisione indipendente fino alla fine.
+
+Il piano copre quello che vuoi? E quale modalità usiamo?
+
+## Utente 16:24
+
+ok avvialo con subagenti
+
+## Agente 16:24
+
+- 🔧 Skill superpowers:subagent-driven-development
+
+Uso subagent-driven-development. Preparo il workspace e il registro di avanzamento.
+
+- 🔧 Bash: Resolve SDD workspace and list skill files
+
+- 🔧 Bash: Check workspace ignore status and read prompt templates
+
+- 🔧 Bash: Preflight checks on test helpers and name clashes
+
+- 🔧 Bash: Create SDD ledger with preflight scan
+
+- 🔧 Bash: Extract Task 1 brief and record base
+
+- 🔧 Agent: Implement Task 1: phone normalization
+
+Il Task 1 (normalizzazione del numero) è in corso con un subagente; aspetto il suo rapporto per passarlo alla revisione.
