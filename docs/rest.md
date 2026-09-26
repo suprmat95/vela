@@ -20,7 +20,8 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 
 ### Campi strutturati (M17, RF-52..55)
 
-`Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?}`, gli stessi
+`Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?,
+"duration_min_nights"?, "duration_max_nights"?}` (la durata da M21-A), gli stessi
 nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
 già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
 viaggiatore. Un client che manda solo testo funziona come prima.
@@ -32,6 +33,7 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `period_start`, `period_end` | date `YYYY-MM-DD`, servono entrambe | una sola, non ISO, inizio dopo la fine, fine passata |
 | `pax` | intero | fuori da 1..20 |
 | `budget` | numero, totale massimo in euro per il gruppo | non positivo |
+| `duration_min_nights`, `duration_max_nights` | interi, notti del viaggio (M21-A, RF-58): weekend 1..3, ponte o weekend lungo 2..4, una settimana 6..8, N giorni = N−1 notti. Basta uno dei due; uno solo sostituisce tutta la durata letta nel testo | fuori da 1..30, minimo maggiore del massimo, non interi |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
 
 - **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
@@ -40,6 +42,12 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   `/v1/intents` `pax` al primo livello vince su `profile.pax`, che resta il default.
 - **Campo invalido**: scartato senza bloccare la richiesta e dichiarato all'inizio del `say`
   (nessun 422). Un tipo JSON sbagliato (es. `"pax": "tre"`) resta un 422.
+- **Durata** (RF-58, RF-59): criterio morbido, non esclude mai. Ordina subito dopo il budget;
+  se il viaggio proposto non la rispetta, motivazione e `say` lo dicono con la durata vera
+  ("Non ho weekend compatibili: questo dura 5 notti, dal 9 al 14 ottobre."). Nel rifiuto
+  "troppo lungo"/"too long" chiede al massimo una notte in meno della proposta, "troppo
+  corto"/"too short" almeno una in più. "Un weekend" è solo durata; "questo/prossimo weekend"
+  è anche un periodo.
 - **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
   è `question` "Padel o tennis?" e nessun intento viene salvato.
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
@@ -59,7 +67,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 |---|---|---|
 | `intent_created` | 201 | intento salvato con i criteri estratti |
 | `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
-| `proposal` | 200 | una proposta |
+| `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A) |
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine in coda (M5, RF-45): `order_id`, `status` `queued`, `position`, `wait_seconds`. Nessun link: arriva con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |

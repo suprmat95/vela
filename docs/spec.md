@@ -405,8 +405,8 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 
 Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisioni in
 `docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
-(UC-A..UC-F), implementazione in roadmap M21. Nessuno di questi requisiti è ancora
-implementato.
+(UC-A..UC-F), implementazione in roadmap M21. RF-58 e RF-59 (durata) sono implementati da
+M21-A; gli altri non ancora.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).

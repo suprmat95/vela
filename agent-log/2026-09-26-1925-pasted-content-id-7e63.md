@@ -261,3 +261,13 @@ Some tests pass even before implementing, because the text already carries the d
 All RED. Now the surfaces:
 
 - 🔧 Bash: Add duration fields to MCP and REST, run suite
+
+Green. Commit the surfaces, then the docs.
+
+- 🔧 Bash: Commit surfaces and read docs/rest.md
+
+- 🔧 Bash: Update docs/rest.md and inspect decisions.md
+
+Now `decisions.md` (a new M21-A section) and the "not yet implemented" note in spec §4.12:
+
+- 🔧 Bash: Record decisions and update spec note
