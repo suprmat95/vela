@@ -834,3 +834,30 @@ Lo screenshot è bianco, probabilmente per lo scroll animato verso `#voce`. Rifa
 - 🔧 Read /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-landingpage/ca44d875-66ad-4a44-bd45-90968a7d332a/scratchpad/vp.png
 
 - 🔧 Bash: Commit the voice and phone config
+
+Ho inserito agent id e numero di telefono e ho committato su `task/landingpage` (`232ad1c`). Il numero funziona; il widget vocale invece non sono riuscito a vederlo comparire.
+
+**Cosa ho verificato in Chrome headless:**
+- **Telefono:** nella card compare **+1 719 745 4407**, il link è `tel:+17197454407` e "In arrivo" sparisce.
+- **Voce:** "In arrivo" sparisce, nella pagina c'è `<elevenlabs-convai agent-id="agent_6201m3ex2qykf5e8d35653z5jfa5">` e lo script di ElevenLabs viene caricato da unpkg.
+- **Widget:** negli screenshot non compare, né nella card né come pulsante in basso a destra. Non so se sia un limite di Chrome headless o una restrizione dell'agente.
+
+**Da controllare tu:** apri http://127.0.0.1:8080 nel tuo Chrome e guarda in basso a destra.
+- Se il pulsante non c'è, nella dashboard ElevenLabs verifica le impostazioni di sicurezza dell'agente: se c'è una lista di domini autorizzati, deve contenere `127.0.0.1`/`localhost` per la prova e poi il dominio `*.onrender.com` di `vela-landing`.
+- Verifica anche che l'agente sia pubblico, cioè che non richieda autenticazione.
+
+**Un problema di layout:** il widget ElevenLabs di default è un pulsante flottante in basso a destra della pagina, non dentro la card. Così la card "A voce" resta con il solo testo "Parla con l'agente vocale di Vela direttamente da questa pagina" e sotto uno spazio vuoto (si vede nello screenshot). Ti propongo di cambiare il testo in "Premi il pulsante in basso a destra e parla con Vela." Più avanti si può valutare di spostare il widget dentro la card.
+
+**Cosa non ho fatto:**
+- Non ho unito questo commit in `master` né l'ho pushato. Online la landing mostrerà "In arrivo" finché non lo facciamo.
+- Lo script del widget si scarica da unpkg senza una versione fissata, quindi carica sempre l'ultima disponibile. Ora che il widget è attivo converrebbe fissarla.
+
+Vuoi che cambi il testo della card e che poi faccia merge e push?
+
+## Utente 16:53
+
+"Parla con l'agente vocale di Vela direttamente da questa pagina." il widget pero è in basso a destra si piu chiaro
+
+## Agente 16:53
+
+- 🔧 Bash: Reword the voice card text, test and commit
