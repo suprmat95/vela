@@ -1018,3 +1018,82 @@ None.
 - 🔧 Agent: Implement Task 8: agent phrases and MCP
 
 Task 7 (configurazione Twilio) approvato. In corso il Task 8: frasi dell'agente e istruzioni MCP.
+
+## Utente 17:18
+
+<task-notification>
+<task-id>ad3999152459bcb96</task-id>
+<tool-use-id>toolu_01Hp8i3BNTC3Qg1begsDMknu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/ad3999152459bcb96.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 8: agent phrases and MCP" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Status: DONE
+Commits: 1915890 "Tell the traveler the link arrives by SMS and stop the agent from polling"
+Tests: full suite `uv run python -m unittest discover -s tests` → 971 tests, OK (skipped=48); targeted suite (test_say, test_sms_flow, test_mcp_tools) → 81 tests, OK
+Concerns: running the three test modules via the brief's exact dotted-module command fails on `ModuleNotFoundError: No module named 'support'` (pre-existing issue, no `tests/__init__.py`), worked around locally with `PYTHONPATH=tests`; no pre-existing tests needed phrase updates (all profiles with phones in the existing suite use invalid numbers, so old phrases are pinned correctly)
+Report: /Users/matteodospina/orca/workspaces/vela/task-twilio-setup/.superpowers/sdd/2026-09-26-sms-twilio/task-8-report.md</result>
+<usage><subagent_tokens>105316</subagent_tokens><tool_uses>41</tool_uses><duration_ms>257486</duration_ms></usage>
+</task-notification>
+
+## Agente 17:18
+
+- 🔧 Bash: Build Task 8 review package
+
+- 🔧 Agent: Review Task 8 (spec + quality)
+
+L'implementazione del Task 8 è finita: suite completa verde, 971 test. Nessun test esistente è stato cambiato, perché tutti i profili già presenti nei test hanno numeri non validi e quindi mantengono le frasi di prima. La revisione del Task 8 è in corso.
+
+## Utente 17:20
+
+<task-notification>
+<task-id>a44fff7430c01a061</task-id>
+<tool-use-id>toolu_017vufnwhhed1D1oFzpApu2u</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-twilio-setup/576016cb-6ef3-43a1-9dc0-e73d62ca456a/tasks/a44fff7430c01a061.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 8 (spec + quality)" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>### Spec Compliance
+- ✅ `say_queued` announces both SMS (queue message + confirmation) with the last 4 digits of the normalized phone when `phone_tail` is given, and no longer invites the user to ask for status in that branch (`vela/domain/say.py:181-201` in new file, diff lines ~183-201). Without a valid number it falls back to the unchanged "ask me" phrase (`test_queued_without_valid_phone_is_unchanged`).
+- ✅ `awaiting_payment` mentions the SMS only when `phone_tail` is truthy, via new `_AWAITING_AMOUNT_SMS` dict (`vela/domain/say.py:148-163`).
+- ✅ MCP `INSTRUCTIONS` and both `DESCRIPTIONS` entries now state Vela texts the link and confirmation and that `get_order_status` is called only when the user asks, not polled (`vela/surfaces/mcp.py:306-355`). No tool name, argument model, or response field was touched — confirmed by diff scope (only the three string constants changed).
+- ✅ No URLs/markdown introduced in the new phrases (verified by reading the literal strings; also covered by `test_sms_phrases_have_no_url`).
+- ✅ No new dependencies added; diff touches only `say.py`, `usecases.py`, `mcp.py`, and the three test files listed in the brief.
+- ✅ Implementation matches the brief's prescribed code verbatim (function bodies, docstrings, comments `# RF-45`, `# RF-16`), including parameter placement (`phone_tail` appended last, defaulting to `None`, so existing callers like `vela/surfaces/replay.py:35` remain valid without modification — verified via `grep` for other `say_queued`/`say_status` call sites).
+- ✅ Tests added exactly as specified, in the right files/classes, and are meaningful (assert exact phrase text, absence of "SMS" for invalid numbers, absence of "http").
+
+No compliance gaps found; nothing needed a ⚠️.
+
+### Strengths
+- Extremely faithful, minimal diff — exactly the files/lines the brief named, no scope creep (no MCP schema, DB, or interface changes beyond the pre-approved optional-kwarg additions).
+- Correctly reasoned about backward compatibility: `phone_tail` is a trailing default-`None` parameter on both `say_queued` and `say_status`, verified against all other call sites (`vela/surfaces/replay.py`) so nothing else breaks.
+- Report is honest and specific: it flags a pre-existing, unrelated test-layout quirk (`PYTHONPATH=tests` workaround) instead of silently working around it, and explicitly reasons through why no pre-existing test needed updating (checked every `TravelerProfile` phone used with `accept_proposal`/`get_order_status`).
+- `phone.tail`/`normalize_it` (Task 1 dependency) confirmed to behave as claimed (returns `None` for invalid numbers like `"+390000"`), so the "keeps today's phrase" fallback is exercised correctly by existing tests.
+
+### Issues
+
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None.
+
+#### Minor (Nice to Have)
+- `get_order_status` now computes `tail = phone.tail(order.traveler.phone)` unconditionally on every call, even for statuses (`REPLACED`, `CONFIRMED`, `CANCELLED`, `FAILED`, etc.) where it's never consumed by `say_status`. Cheap and harmless, and it's exactly what the brief specified (plan-mandated), but it's a small bit of always-computed, sometimes-unused work.
+- `_AWAITING_AMOUNT` and `_AWAITING_AMOUNT_SMS` duplicate most of their template text; also plan-mandated (matches the brief's exact snippet), consistent with the file's existing per-language dict style.
+
+### Assessment
+**Task quality:** Approved
+**Reasoning:** The diff implements every element of the brief and the stated spec constraints precisely, touches no MCP tool schema, adds no dependencies, preserves backward compatibility for other callers, and is backed by tests that check real string output rather than incidental behavior.</result>
+<usage><subagent_tokens>67480</subagent_tokens><tool_uses>5</tool_uses><duration_ms>117466</duration_ms></usage>
+</task-notification>
+
+## Agente 17:20
+
+- 🔧 Bash: Record Task 8 completion and extract Task 9 brief
+
+- 🔧 Bash: Record ruling for Task 9 decisions content
+
+- 🔧 Agent: Implement Task 9: documentation
+
+Il Task 8 (frasi dell'agente e istruzioni MCP) è approvato. Ora è in corso il Task 9, i documenti: `docs/sms.md`, RF-19 e RF-57 in `docs/spec.md` e il registro delle decisioni.

@@ -647,3 +647,12 @@ Origine: brainstorming "setup Twilio". Design in
 | Contratto dell'agente | `say_queued` annuncia gli SMS (ultime 4 cifre del numero); `awaiting_payment` dice che il link è arrivato via SMS; istruzioni MCP: non interrogare `get_order_status`, chiamarlo solo se l'utente chiede. Campi e tool invariati | L'agente smette di sollecitare lo stato; il viaggiatore sa cosa aspettarsi |
 | Testo degli SMS | Titolo, date, persone, totale reale (o codice), link; solo GSM-7 con traslitterazione del titolo; SMS 1 su 2-3 segmenti, nessun link corto | Un redirect `/pay/<id>` sarebbe un endpoint in più non richiesto |
 | Doppioni | Un solo job attivo per ordine e tipo; accettato il raro doppio invio se il processo muore tra invio e salvataggio | Eliminarlo richiede un registro degli invii (schema) |
+
+## 2026-09-26 — SMS: esecuzione
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Moduli dei testi | Testi degli SMS in `vela/domain/sms_text.py`, non in `say.py`; accodamento in `vela/domain/notify.py` | `say.py` promette frasi senza URL; `notify.py` evita l'import circolare tra `sms.py` e `purchase.py` |
+| Suite finale | 971 test, 48 saltati, verde con `uv run python`. Nessuna chiamata a Twilio | — |
+| Test esistenti adattati | `tests/test_payment_check.py`: il `new_id` fisso diventa un iteratore di due id, perché il passo del link ora accoda due job (verifica del pagamento e `sms_link`); l'asserzione sul job di verifica è invariata. | Effetto collaterale atteso dei nuovi job, nessuna asserzione indebolita |
+| Test esistenti adattati | `tests/test_job_processor.py` (`test_purchase_fifo`): il processore costruito a mano riceve i gestori SMS e il ciclo fisso di 3 giri diventa al massimo 6 con uscita anticipata, perché i job SMS (priorità 2) passano tra un acquisto e l'altro; l'asserzione FIFO è invariata. | Effetto collaterale atteso dei nuovi job, nessuna asserzione indebolita |

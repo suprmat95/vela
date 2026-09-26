@@ -134,9 +134,10 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   dell'ordine e dell'itinerario HofJ.
 - **RF-19** La risposta di `get_order_status` per un ordine `awaiting_payment` contiene l'URL
   del link, l'importo, l'id ordine e una frase pronta da leggere al viaggiatore. La risposta di
-  accettazione contiene solo id ordine, stato `queued`, attesa stimata e frase (RF-45). È
-  compito dell'agente consegnare il link nel canale del viaggiatore (messaggio, SMS, lettura ad
-  alta voce dell'importo con link inviato via testo).
+  accettazione contiene solo id ordine, stato `queued`, attesa stimata e frase (RF-45). Vela manda
+  il link con il riepilogo via SMS al telefono del viaggiatore principale appena l'ordine è
+  `awaiting_payment` (decisione del 2026-09-26, `docs/sms.md`); l'agente non interroga lo stato
+  di sua iniziativa e chiama `get_order_status` solo quando il viaggiatore lo chiede.
 - **RF-20** Vela verifica il pagamento per interrogazione, senza webhook: un job del worker legge
   con la chiave Stripe fornita da HofJ lo stato della Checkout Session di ogni ordine
   `awaiting_payment` (ogni 60 s, e subito quando il viaggiatore chiede lo stato). A pagamento
@@ -171,6 +172,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-27** All'avvio Vela riprende gli ordini in stato `paid_pending_booking` e completa la
   prenotazione (RF-23, RF-24), e riprende i job d'acquisto degli ordini `queued` dal primo
   passo non completato (RF-46), senza ricreare itinerari già creati.
+- **RF-57** Quando l'ordine è `confirmed`, Vela manda al viaggiatore principale un SMS con
+  titolo, date, persone e codice di prenotazione. L'esito dell'invio di un SMS non cambia mai
+  lo stato dell'ordine (decisione del 2026-09-26, `docs/sms.md`).
 
 ### 4.6 Catalogo e sincronizzazione
 
@@ -411,8 +415,9 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 - Variabili d'ambiente: `HOFJ_API_KEY`, `HOFJ_BASE_URL`, `HOFJ_BRANDS` (sport → brand,
   es. `padel=weebora.com,tennis=terrarossa.com`), `DATABASE_URL`,
   `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `VELA_API_TOKEN`, `VELA_UPSTREAM_MODE`,
-  `ANTHROPIC_API_KEY` (opzionale), `VELA_PUBLIC_URL`.
-- Chiamate esterne a pagamento o con limiti (HofJ, Stripe, Anthropic) vanno dichiarate prima
+  `ANTHROPIC_API_KEY` (opzionale), `VELA_PUBLIC_URL`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_FROM` (opzionali, SMS).
+- Chiamate esterne a pagamento o con limiti (HofJ, Stripe, Anthropic, Twilio) vanno dichiarate prima
   di eseguirle, con il numero di chiamate previsto.
 
 ## 7. Fuori scope
