@@ -120,3 +120,41 @@ Ora il modo `VELA_UPSTREAM_MODE=loadtest` in `vela/app.py`, test prima.
 - 🔧 Bash: Find docs mentioning upstream mode and load test
 
 - 🔧 Bash: Update README and commit loadtest mode
+
+Modo `loadtest` fatto (commit `2b2012b`). Passo allo scenario Locust: prima guardo le risposte REST di accept e stato.
+
+- 🔧 Bash: Find accept/status response fields in REST surface
+
+- 🔧 Bash: Read REST handlers and order result models
+
+- 🔧 Bash: Check health payload, sample intents, and FastHttp API
+
+- 🔧 Bash: Check how health counts catalog products
+
+- 🔧 Bash: Compare active list items with fixture details
+
+- 🔧 Bash: Probe candidate intent sentences on production fixtures
+
+Scelte 4 frasi che producono proposta e, dopo "troppo caro", un'altra proposta sul catalogo di produzione. Scrivo `scenario.py` (puro) e i suoi test.
+
+- 🔧 Bash: Write scenario module and its tests, run them
+
+- 🔧 Bash: Fix sport assertion via product repo and rerun
+
+- 🔧 Bash: Show scenario test error types
+
+- 🔧 Bash: Fix proposal id access and rerun
+
+No response requested.
+
+## Utente 15:27
+
+❯ continua
+
+## Agente 15:27
+
+- 🔧 Bash: Check working tree state after interruption
+
+Riprendo: la correzione del test non era stata applicata, e `app.py` è identico all'ultimo commit.
+
+- 🔧 Bash: Fix proposal id access and rerun scenario tests
