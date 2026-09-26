@@ -241,3 +241,81 @@ class RootLoggingTest(unittest.TestCase):
         finally:
             root.handlers[:] = saved_handlers
             root.setLevel(saved_level)
+
+
+class AgentToolContractTest(McpCase):
+    """M17: campi strutturati (RF-52), descrizioni (RF-41), UC1, UC4, UC7, UC8."""
+
+    FIELDS = {"sport", "area", "period_start", "period_end", "pax", "budget"}
+
+    async def tools(self):
+        async with Client(self.server) as client:
+            return {t.name: t for t in (await client.list_tools()).tools}
+
+    async def test_structured_fields_are_optional_arguments(self):
+        tools = await self.tools()
+        intent = tools["create_intent"].input_schema
+        reject = tools["reject_proposal"].input_schema
+        self.assertLessEqual(self.FIELDS, set(intent["properties"]))
+        self.assertLessEqual(self.FIELDS | {"direction"}, set(reject["properties"]))
+        self.assertNotIn("direction", intent["properties"])
+        self.assertEqual(intent["required"], ["text"])
+        self.assertEqual(reject["required"], ["proposal_id"])
+
+    def test_descriptions_route_changes_through_reject_proposal(self):
+        texts = dict(DESCRIPTIONS, instructions=INSTRUCTIONS)
+        for name, text in texts.items():
+            with self.subTest(name=name):
+                self.assertNotIn("rephrase", text.lower())
+                self.assertNotIn("reformulat", text.lower())
+        self.assertIn("Padel or tennis", DESCRIPTIONS["create_intent"])
+        for name in ("create_intent", "get_proposal", "reject_proposal"):
+            with self.subTest(name=name):
+                self.assertIn("reject_proposal", DESCRIPTIONS[name])
+                self.assertIn("never", DESCRIPTIONS[name].lower())
+        for piece in ("north", "south", "rejected_proposal_id", "cooler", "warmer"):
+            self.assertIn(piece, DESCRIPTIONS["reject_proposal"])
+        self.assertIn("reject_proposal", INSTRUCTIONS)
+
+    async def test_uc1_fields_reach_the_intent(self):
+        d = await self.ok("create_intent", text=INTENT, sport="padel", area="Spagna",
+                          period_start="2026-10-01", period_end="2026-10-31", pax=2, budget=800)
+        c = d["criteria"]
+        self.assertEqual((c["sport"], c["area"]["name"], c["pax"], c["budget"]),
+                         ("padel", "Spagna", 2, "800.00"))
+        self.assertTrue(d["say"].startswith("Ho capito: un viaggio di padel in Spagna"))
+
+    async def test_uc4_reject_with_direction_keeps_the_intent(self):
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia"),
+                                        make_product(2, price=450, destination="Madrid")])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(first["product"]["destination"], "Siviglia")
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
+                          reason="Troppo caldo, vorrei un posto più fresco", direction="north")
+        self.assertEqual(d["intent_id"], intent["intent_id"])
+        self.assertEqual(d["product"]["destination"], "Madrid")
+
+    async def test_uc7_invalid_field_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text="Padel a Atlantide, siamo in tre.", sport="padel",
+                          area="Atlantide", pax=3, budget=1000)
+        self.assertIsNone(d["criteria"]["area"])
+        self.assertTrue(d["say"].startswith("Non conosco il luogo Atlantide."))
+
+    async def test_uc7_sport_outside_the_values_is_declared(self):
+        d = await self.ok("create_intent", text="una vacanza per due", sport="golf")
+        self.assertEqual(d["question"], "Padel o tennis?")
+        self.assertIn("golf", d["say"])
+
+    async def test_uc8_field_wins_over_text(self):
+        with self.assertLogs("vela.domain.usecases", "INFO"):
+            d = await self.ok("create_intent", text="Tennis a Roma a maggio, siamo in due",
+                              sport="padel")
+        self.assertEqual(d["criteria"]["sport"], "padel")
+
+    async def test_no_match_after_reject_carries_the_proposal_to_restart_from(self):
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia")])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no")
+        self.assertEqual(d["rejected_proposal_id"], first["proposal_id"])

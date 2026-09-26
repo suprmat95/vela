@@ -16,7 +16,7 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import BaseModel, Field
 
 from vela.domain import say
-from vela.domain.models import Participant, TravelerProfile
+from vela.domain.models import Participant, StructuredFields, TravelerProfile
 from vela.domain.usecases import NotFound, Vela
 from vela.ports.payments import PaymentsError
 
@@ -34,8 +34,10 @@ INSTRUCTIONS = (
     "and never search or suggest trips yourself. After every tool call, speak the `say` field "
     "to the user verbatim, in the user's language. Never read URLs aloud: when there is a "
     "payment link, tell the user it is in the chat. Call get_proposal right after create_intent "
-    "returns an intent_id. Accepting a proposal puts the order in a queue: the payment link comes "
-    "later from get_order_status."
+    "returns an intent_id. Once a proposal exists, every change the user asks for (place, dates, "
+    "sport, budget, people, somewhere cooler or warmer) goes through reject_proposal on that "
+    "proposal, never through a new create_intent. Accepting a proposal puts the order in a "
+    "queue: the payment link comes later from get_order_status."
 )
 
 _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compare options, "
@@ -43,20 +45,32 @@ _VOICE = (" Speak the `say` field verbatim. Never list alternatives, never compa
 
 DESCRIPTIONS = {
     "create_intent": (
-        "Start a trip request from the user's own words (sport, place, period, number of people, "
-        "budget). Pass the user's sentence verbatim in `text`; add traveler details only if the "
-        "user already gave them. Returns either `intent_id` (then call get_proposal immediately) "
-        "or `question` (ask the user exactly that question, then call create_intent again with "
-        "the original sentence plus the answer)." + _VOICE),
+        "Start a trip request from the user's own words. If the user has not said padel, tennis "
+        "or that either is fine, first ask \"Padel or tennis?\" and wait for the answer. Pass "
+        "the user's sentence verbatim in `text`, plus every criterion you already understood as "
+        "a field: `sport` (padel, tennis, or any when either is fine), `area`, `period_start` and "
+        "`period_end`, `pax`, `budget`. Leave out what the user did not say: never guess. Add "
+        "traveler details only if the user already gave them. Returns either `intent_id` (then "
+        "call get_proposal immediately) or `question` (ask the user exactly that question, then "
+        "call create_intent again with the original sentence plus the answer). Use it only "
+        "before a proposal exists: after a proposal never call it again, every change goes "
+        "through reject_proposal." + _VOICE),
     "get_proposal": (
         "Get the single trip Vela proposes for an intent. Returns one proposal (`proposal_id`, "
-        "`product`, dates, price from) or, when nothing fits, `failed_criterion`: then ask the "
-        "user to rephrase the request. After speaking the proposal, ask if the user likes it."
-        + _VOICE),
+        "`product`, dates, price from) or, when nothing fits, `failed_criterion`: then no "
+        "proposal exists yet, so ask the user which criterion to change and call create_intent "
+        "with the changed criteria. After speaking the proposal, ask if the user likes it; from "
+        "then on every change goes through reject_proposal, never a new create_intent." + _VOICE),
     "reject_proposal": (
-        "The user said no to the current proposal. Pass the user's reason in their own words "
-        "(e.g. 'troppo caro', 'preferisco il mare'). Returns the next single proposal, or "
-        "`failed_criterion` when nothing else fits." + _VOICE),
+        "The user said no to the current proposal or wants to change something about it (place, "
+        "dates, sport, budget, people). Always use this tool for changes after a proposal, never "
+        "a new create_intent: the intent keeps what the user already turned down. Pass the "
+        "user's reason in their own words in `reason`, plus only the criteria that changed as "
+        "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget`), and "
+        "`direction`: north when the user wants somewhere cooler, south when they want somewhere "
+        "warmer. Returns the next single proposal, or `failed_criterion` with "
+        "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
+        "reject_proposal again on `rejected_proposal_id` with the updated fields." + _VOICE),
     "accept_proposal": (
         "Call only after the user explicitly says yes to the current proposal. Pass the details "
         "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
@@ -88,6 +102,16 @@ LastName = Annotated[Optional[str], Field(description="Main traveler's last name
 Email = Annotated[Optional[str], Field(description="Main traveler's email, only if the user said it.")]
 Phone = Annotated[Optional[str], Field(description="Main traveler's phone number, only if the user said it.")]
 Pax = Annotated[Optional[int], Field(description="Number of travelers, only if the user said it.")]
+Sport = Annotated[Optional[str], Field(
+    description="padel, tennis, or any when the user said either is fine. Only if the user said it.")]
+Area = Annotated[Optional[str], Field(
+    description="Place the user named: country, region or city, e.g. Spagna, Maiorca, Madrid.")]
+PeriodStart = Annotated[Optional[str], Field(description="First day of the period, YYYY-MM-DD.")]
+PeriodEnd = Annotated[Optional[str], Field(description="Last day of the period, YYYY-MM-DD.")]
+Budget = Annotated[Optional[float], Field(
+    description="Maximum total budget in euros for the whole group, only if the user said it.")]
+Direction = Annotated[Optional[str], Field(
+    description="north when the user wants somewhere cooler, south when somewhere warmer.")]
 Participants = Annotated[Optional[List[ParticipantArg]],
                          Field(description="First and last name of each traveler other than the main one.")]
 IntentId = Annotated[str, Field(description="The intent_id returned by create_intent.")]
@@ -135,19 +159,26 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
             return fail(say.say_error())
 
     @server.tool(description=DESCRIPTIONS["create_intent"])
-    def create_intent(text: Text, first_name: FirstName = None, last_name: LastName = None,
-                      email: Email = None, phone: Phone = None, pax: Pax = None,
+    def create_intent(text: Text, sport: Sport = None, area: Area = None,
+                      period_start: PeriodStart = None, period_end: PeriodEnd = None,
+                      pax: Pax = None, budget: Budget = None, first_name: FirstName = None,
+                      last_name: LastName = None, email: Email = None, phone: Phone = None,
                       participants: Participants = None) -> CallToolResult:
         profile = traveler_profile(first_name, last_name, email, phone, pax, participants)
-        return run("create_intent", lambda v: v.create_intent(text, profile))
+        fields = StructuredFields(sport, area, period_start, period_end, pax, budget)
+        return run("create_intent", lambda v: v.create_intent(text, profile, fields))
 
     @server.tool(description=DESCRIPTIONS["get_proposal"])
     def get_proposal(intent_id: IntentId) -> CallToolResult:
         return run("get_proposal", lambda v: v.get_proposal(intent_id))
 
     @server.tool(description=DESCRIPTIONS["reject_proposal"])
-    def reject_proposal(proposal_id: ProposalId, reason: Reason = "") -> CallToolResult:
-        return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason))
+    def reject_proposal(proposal_id: ProposalId, reason: Reason = "", sport: Sport = None,
+                        area: Area = None, period_start: PeriodStart = None,
+                        period_end: PeriodEnd = None, pax: Pax = None, budget: Budget = None,
+                        direction: Direction = None) -> CallToolResult:
+        fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction)
+        return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
     @server.tool(description=DESCRIPTIONS["accept_proposal"])
     def accept_proposal(proposal_id: ProposalId, first_name: FirstName = None,
