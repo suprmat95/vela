@@ -16,8 +16,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, StringConstraints
 
 from vela.domain.models import (IntentCreated, IntentQuestion, MissingTravelerData, NoMatch,
-                                OrderQueued, OrderStatusResponse, ProposalMade, TravelerProfile,
-                                profile_from_dict)
+                                OrderQueued, OrderStatusResponse, ProposalMade, StructuredFields,
+                                TravelerProfile, profile_from_dict)
 from vela.domain.usecases import Vela
 from vela.surfaces.problems import domain_unavailable, rest_not_configured, unauthorized
 
@@ -72,13 +72,29 @@ def to_profile(p: Optional[ProfileIn]) -> Optional[TravelerProfile]:
     return None if p is None else profile_from_dict(p.model_dump())
 
 
-class IntentIn(BaseModel):
+class FieldsIn(BaseModel):
+    """RF-52: stessi nomi e valori del tool MCP. Nessun vincolo di dominio qui: un valore fuori
+    dai limiti è scartato dal dominio e detto nel `say` (RF-53), non è un 422."""
+    sport: Optional[str] = None
+    area: Optional[str] = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    pax: Optional[int] = None
+    budget: Optional[float] = None
+
+    def fields(self, direction: Optional[str] = None) -> StructuredFields:
+        return StructuredFields(self.sport, self.area, self.period_start, self.period_end,
+                                self.pax, self.budget, direction)
+
+
+class IntentIn(FieldsIn):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
     profile: Optional[ProfileIn] = None
 
 
-class RejectIn(BaseModel):
+class RejectIn(FieldsIn):
     reason: Optional[str] = None
+    direction: Optional[str] = None
 
 
 class AcceptIn(BaseModel):
@@ -90,7 +106,7 @@ router = APIRouter(prefix="/v1", tags=["v1"], dependencies=[Depends(require_toke
 
 @router.post("/intents")
 def create_intent(body: IntentIn, vela: Vela = Depends(get_vela)) -> JSONResponse:
-    return reply(vela.create_intent(body.text, to_profile(body.profile)))
+    return reply(vela.create_intent(body.text, to_profile(body.profile), body.fields()))
 
 
 @router.get("/intents/{intent_id}/proposal")
@@ -102,7 +118,8 @@ def get_proposal(intent_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse
 def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
                     vela: Vela = Depends(get_vela)) -> JSONResponse:
     reason = body.reason if body is not None else None
-    return reply(vela.reject_proposal(proposal_id, reason or ""))
+    fields = body.fields(body.direction) if body is not None else None
+    return reply(vela.reject_proposal(proposal_id, reason or "", fields))
 
 
 @router.post("/proposals/{proposal_id}/accept")

@@ -353,3 +353,76 @@ class OrderStatusPaymentTest(unittest.TestCase):
         self.assertEqual((r["currency"], r["total_differs"]), ("EUR", False))
         self.assertEqual(r["total"], r["price_from_total"])
         assert_single_product(self, r)
+
+
+SIVIGLIA_MADRID = [make_product(1, price=300, destination="Siviglia"),
+                   make_product(2, price=450, destination="Madrid")]
+
+
+class AgentToolContractTest(unittest.TestCase):
+    """M17: gli stessi campi strutturati del tool MCP nel corpo JSON (RF-40, RF-52)."""
+
+    def test_uc1_fields_reach_the_intent(self):
+        c, vela = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": INTENT, "sport": "padel", "area": "Spagna", "period_start": "2026-10-01",
+            "period_end": "2026-10-31", "pax": 2, "budget": 800})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["sport"], crit["area"]["name"], crit["pax"], crit["budget"]),
+                         ("padel", "Spagna", 2, "800.00"))
+
+    def test_uc4_reject_with_direction_keeps_the_intent(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        intent = new_intent(c)
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        self.assertEqual(first["product"]["destination"], "Siviglia")
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "Troppo caldo, vorrei un posto più fresco", "direction": "north"})
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        self.assertEqual((d["outcome"], d["intent_id"]), ("proposal", intent["intent_id"]))
+        self.assertEqual(d["product"]["destination"], "Madrid")
+
+    def test_uc7_invalid_values_are_declared_not_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": "Padel a Atlantide, siamo in tre.", "sport": "padel", "area": "Atlantide",
+            "pax": 30, "budget": 1000})
+        self.assertEqual(r.status_code, 201, r.text)
+        d = r.json()
+        self.assertIsNone(d["criteria"]["area"])
+        self.assertEqual(d["criteria"]["pax"], 3)
+        self.assertTrue(d["say"].startswith("Non conosco il luogo Atlantide."))
+        self.assertIn("30", d["say"])
+
+    def test_wrong_json_type_is_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "pax": "tre"})
+        self.assertEqual(r.status_code, 422)
+
+    def test_uc8_field_wins_over_text(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        with self.assertLogs("vela.domain.usecases", "INFO"):
+            r = c.post("/v1/intents", headers=AUTH,
+                       json={"text": "Tennis a Roma a maggio, siamo in due", "sport": "padel"})
+        self.assertEqual(r.json()["criteria"]["sport"], "padel")
+
+    def test_profile_pax_stays_the_default(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH,
+                   json={"text": "padel a ottobre", "pax": 3, "profile": {"pax": 2}})
+        self.assertEqual(r.json()["criteria"]["pax"], 3)
+
+    def test_no_match_after_reject_carries_rejected_proposal_id(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID[:1])
+        intent = new_intent(c)
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "no"}).json()
+        self.assertEqual((d["outcome"], d["rejected_proposal_id"]), ("no_match", first["proposal_id"]))
+        d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "a novembre", "period_start": "2026-11-01",
+                         "period_end": "2026-11-30"}).json()
+        self.assertEqual(d["outcome"], "no_match")
+        self.assertEqual(d["failed_criterion"], "dates")
