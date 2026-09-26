@@ -8,7 +8,10 @@ aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). RF-28..32, 
 aggiornati il 2026-09-26 per il catalogo multi-brand (roadmap M10). RF-36, RF-47, RNF-04,
 RNF-10 aggiornati il 2026-09-26 per la seconda lettura del twist
 (`docs/plans/2026-09-26-twist-seconda-lettura.md`). RF-36..38, RF-47, RF-48 e RF-50 aggiornati il
-2026-09-26 con M18 (token bucket con soglia per le prenotazioni). Origine: `docs/brief.md` e
+2026-09-26 con M18 (token bucket con soglia per le prenotazioni). RF-02, RF-04, RF-06..09,
+RF-12, RF-14, RF-39..41, RF-49, RF-52..54, §7 e §4.12 (RF-58..75) aggiornati il 2026-09-26 per la scelta
+v3 (roadmap M21, `docs/usecases/scelta.md`): descrivono il comportamento dopo M21, le parti
+marcate "(M21)" non sono ancora implementate. Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -61,11 +64,15 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
 - **RF-01** Vela accetta un intento come testo libero, in italiano o in inglese, più un profilo
   viaggiatore opzionale (nome, cognome, email, telefono, numero di persone) e i campi
-  strutturati opzionali di RF-52 (sport, area, periodo, persone, budget).
+  strutturati opzionali di RF-52 (sport, area, periodo, persone, budget e, da M21, durata,
+  livello, lezioni, camere, lettura del budget).
 - **RF-02** Da un intento Vela estrae: sport (`padel`, `tennis`, oppure `any` quando il
   viaggiatore dice che gli va bene l'uno o l'altro), area geografica (paese, regione o
-  città, se presente), periodo (data o intervallo, mese, stagione, "weekend"), numero di
-  persone, budget totale massimo, lingua dell'intento.
+  città, se presente), periodo (data o intervallo, mese, stagione, "questo/prossimo
+  weekend"), numero di persone, budget massimo, lingua dell'intento. (M21) Estrae inoltre:
+  durata in notti (RF-58; "un weekend" è una durata, non più un periodo), livello di gioco e
+  desiderio di lezioni (RF-62), numero di camere (RF-65), lettura del budget a persona o
+  totale (RF-69). I criteri completi sono nella tabella di §4.12.
 - **RF-03** L'estrazione avviene con un parser deterministico (regole e dizionari it/en), dopo
   i campi strutturati passati dall'agente (precedenza di RF-53). Se dopo campi e parser manca
   ancora lo sport, e la variabile `ANTHROPIC_API_KEY` è presente, Vela invoca un modello
@@ -75,8 +82,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   una sola domanda chiara per l'agente da porre al viaggiatore, e nessun intento viene
   salvato. Indispensabili: lo sport, sempre ("Padel o tennis?"; "indifferente" o "tutti e due"
   è una risposta valida e vale `any`, cioè nessun filtro sport), poi il numero di persone
-  (default 1 se il profilo lo indica, altrimenti chiesto). Se mancano entrambi si chiede prima
-  lo sport. Il periodo non è indispensabile: senza periodo il chooser considera tutte le date
+  (default 1 se il profilo lo indica, altrimenti chiesto), poi (M21) il numero di camere
+  quando le persone sono più di 2 ("In quante camere?", RF-65; con 1 o 2 persone il default è
+  1 camera). Una domanda alla volta, in quest'ordine: sport, persone, camere. Il periodo non è indispensabile: senza periodo il chooser considera tutte le date
   disponibili.
 - **RF-05** Ogni intento è persistito con un identificativo e i criteri estratti, così che
   proposte e rifiuti successivi vi si riferiscano.
@@ -84,21 +92,33 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 ### 4.2 Proposta
 
 - **RF-06** Per un intento Vela restituisce sempre **una sola** proposta: titolo del viaggio,
-  destinazione, struttura alberghiera, date proposte, numero di persone, prezzo "a partire da"
-  con valuta, una motivazione di una o due frasi che lega la scelta all'intento.
+  destinazione, struttura alberghiera, date proposte, numero di persone, (M21) numero di
+  camere e di notti, prezzo "a partire da" con valuta, una motivazione di una o due frasi che
+  lega la scelta all'intento e dichiara i criteri morbidi non rispettati (area, budget, durata,
+  livello).
 - **RF-07** La scelta è deterministica: si scartano i prodotti archiviati, non prenotabili,
   già rifiutati per lo stesso intento, con sport diverso, con date non compatibili con
-  `minDate`/`maxDate` e disponibilità, con pax fuori da `minPax`/`maxPax`; tra i restanti si
-  ordina per aderenza all'area geografica, rispetto del budget, prezzo crescente.
+  `minDate`/`maxDate` e disponibilità, con pax fuori da `minPax`/`maxPax`; (M21) anche i
+  prodotti che richiedono più camere di quelle chieste (RF-66), in un'area esclusa (RF-73),
+  con l'hotel di un rifiuto `hotel` (RF-72), riservati a un livello diverso (RF-64). Un
+  prodotto rifiutato con `keep_product` resta candidato senza le finestre rifiutate (RF-74).
+  Tra i restanti si ordina come in RF-60 (dal 2026-09-26 in poi: area, budget, durata,
+  livello, partenza, `featured`, prezzo, id), un solo candidato per gruppo di prodotti
+  equivalenti (RF-61).
 - **RF-08** Il viaggiatore può rifiutare una proposta con un motivo in testo libero, più i
   campi strutturati di RF-52 e una direzione (`north`, `south`). Vela aggiorna i criteri
   dell'intento con campi e motivo, con la precedenza di RF-53 ("troppo caro" abbassa il budget,
   "più a sud" o "a novembre" cambiano area o periodo, `direction` sposta l'area con `geo.move`)
   e restituisce un'altra proposta singola. Ogni cambiamento dopo una proposta passa da qui
-  (RF-55).
+  (RF-55). (M21) Ogni rifiuto ha un tipo (RF-71). Due eccezioni dichiarate: con
+  `keep_product` la proposta successiva è lo stesso prodotto con altre date (RF-74); un motivo
+  che non si classifica, senza `reject_kind`, non produce una proposta ma una domanda chiusa, e
+  il rifiuto non viene registrato (RF-75).
 - **RF-09** Non esiste un limite al numero di proposte per intento. Quando non resta nessun
   prodotto compatibile, Vela dice quale criterio non riesce a soddisfare e chiede quale
-  criterio cambiare; non propone mai un prodotto già rifiutato. Il cambiamento passa da
+  criterio cambiare; non propone mai un prodotto già rifiutato, salvo con altre date dopo un
+  rifiuto con `keep_product` (RF-74, M21). Criteri che possono fallire (`failed_criterion`):
+  quelli di RF-07, più `rooms`, `place`, `hotel`, `level` (M21). Il cambiamento passa da
   `reject_proposal` sull'ultima proposta rifiutata (RF-55); solo un "niente di compatibile"
   restituito da `get_proposal` prima di ogni proposta si risolve con un nuovo `create_intent`.
 - **RF-10** Nessuna risposta di Vela contiene mai più di un prodotto. Le risposte non
@@ -110,12 +130,15 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
 - **RF-12** Il viaggiatore accetta una proposta tramite il proprio agente. All'accettazione Vela
   richiede, se non già nel profilo: nome, cognome, email, telefono del viaggiatore principale;
-  nome e cognome di ogni altro partecipante. Nient'altro viene chiesto.
+  nome e cognome di ogni altro partecipante. Nient'altro viene chiesto. (M21) Il numero di
+  camere non è un dato del viaggiatore: arriva con l'intento (RF-65) e `accept_proposal` lo
+  accetta solo come correzione facoltativa.
 - **RF-13** Indirizzo, paese e altri campi richiesti da HofJ ma non chiesti al viaggiatore sono
   compilati con valori di default dichiarati nella configurazione e documentati in
   `ARCHITECTURE.md` come vincolo del prototipo.
 - **RF-14** Il job d'acquisto (RF-46) crea l'itinerario HofJ (`POST /v1/itineraries` con prodotto,
-  data di inizio, adulti, camere, valuta EUR), imposta il cliente (`PUT .../customer`), legge
+  data di inizio, adulti, camere dell'ordine (RF-67, M21; prima era sempre 1), valuta EUR),
+  imposta il cliente (`PUT .../customer`), legge
   gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`).
 - **RF-15** Vela accetta la sistemazione di default dell'itinerario. Non sceglie hotel
   alternativi né aggiunge attività: il prodotto HofJ è già "esperienza + hotel".
@@ -250,15 +273,16 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   |---|---|---|
   | `create_intent` | testo, profilo opzionale, campi strutturati opzionali (RF-52) | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
   | `get_proposal` | id intento | una proposta (RF-06) oppure "niente di compatibile" (RF-09) |
-  | `reject_proposal` | id proposta, motivo, campi strutturati e direzione opzionali (RF-52) | la proposta successiva (RF-08) oppure "niente di compatibile" con l'id della proposta da cui ripartire (RF-55) |
-  | `accept_proposal` | id proposta, dati viaggiatore mancanti | id ordine, stato `queued`, posizione e attesa stimata, frase da leggere (RF-45) |
+  | `reject_proposal` | id proposta, motivo, campi strutturati, direzione, tipo di rifiuto e `keep_product` opzionali (RF-52) | la proposta successiva (RF-08) oppure "niente di compatibile" con l'id della proposta da cui ripartire (RF-55) oppure (M21) una domanda chiusa con l'id della proposta, che resta aperta (RF-75) |
+  | `accept_proposal` | id proposta, dati viaggiatore mancanti, camere opzionali (M21, RF-65) | id ordine, stato `queued`, posizione e attesa stimata, frase da leggere (RF-45) |
   | `get_order_status` | id ordine | stato, attesa stimata oppure link e importo oppure codice oppure proposta sostitutiva, frase da leggere (RF-25) |
 
 - **RF-40** REST: `POST /v1/intents`, `GET /v1/intents/{id}/proposal`,
   `POST /v1/proposals/{id}/reject`, `POST /v1/proposals/{id}/accept`,
   `GET /v1/orders/{id}`. JSON, errori in formato RFC 7807, `GET /health` senza autenticazione.
   I corpi di `POST /v1/intents` e `POST /v1/proposals/{id}/reject` accettano i campi
-  strutturati di RF-52, con gli stessi nomi e valori del tool MCP.
+  strutturati di RF-52, con gli stessi nomi e valori del tool MCP; (M21) il corpo di
+  `POST /v1/proposals/{id}/accept` accetta `rooms`.
 - **RF-41** MCP: server remoto con trasporto Streamable HTTP su `/mcp`, cinque tool con gli
   stessi nomi di RF-39, descrizioni scritte per un modello che parla con un umano a voce:
   ogni tool dice esplicitamente di non elencare alternative e di leggere la frase pronta.
@@ -267,7 +291,11 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   obbligatorio (l'agente indovinerebbe invece di chiedere) e RF-04 fa da rete di sicurezza. Le
   descrizioni di `get_proposal`, `create_intent` e `reject_proposal` dicono che dopo una
   proposta ogni cambiamento passa da `reject_proposal` con i campi aggiornati (RF-55) e non
-  invitano mai a riformulare con un nuovo `create_intent`.
+  invitano mai a riformulare con un nuovo `create_intent`. (M21) La descrizione di
+  `create_intent` dice di chiedere il numero di camere prima di chiamarlo quando le persone
+  sono più di 2 e il viaggiatore non l'ha detto; quella di `reject_proposal` dice di passare il
+  tipo di rifiuto quando è chiaro, di porre la domanda chiusa se il server la restituisce e di
+  passare `reject_kind="other"` se il viaggiatore non sa dire cosa non va.
   La descrizione di `accept_proposal` dice che la risposta è un'attesa, non un link, e che il
   link va letto con `get_order_status` dopo l'attesa dichiarata o quando il viaggiatore lo
   chiede. Compatibile con Claude (claude.ai, Claude Desktop) ed ElevenLabs Conversational AI.
@@ -318,7 +346,8 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   alle prenotazioni, così la stima è prudente. Ricalcolata a ogni `get_order_status`. Non
   esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
 - **RF-49** `reject_proposal` sulla proposta di un ordine `queued` porta l'ordine a
-  `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08).
+  `cancelled`, lo toglie dalla coda e restituisce la proposta successiva (RF-08). (M21) Non
+  vale per la domanda chiusa di RF-75: senza rifiuto registrato l'ordine resta `queued`.
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
   tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
   istanza configurabile (default 10, M18). Un job è idempotente e ripartibile (RF-27).
@@ -338,23 +367,32 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 - **RF-52** `create_intent` e `reject_proposal` accettano, su MCP e REST con lo stesso
   contratto, campi strutturati opzionali: `sport` (`padel` | `tennis` | `any`), `area` (nome
   di un luogo), `period_start` e `period_end` (date ISO), `pax` (intero), `budget` (totale in
-  EUR). `reject_proposal` accetta inoltre `direction` (`north` | `south`). `text` e `reason`
+  EUR, o a persona con `budget_scope`). (M21) Inoltre: `duration_min_nights`,
+  `duration_max_nights` (interi 1..30), `level` (`beginner` | `intermediate` | `advanced`),
+  `wants_coaching` (booleano), `rooms` (intero 1..pax), `budget_scope` (`per_person` |
+  `total`). `reject_proposal` accetta inoltre `direction` (`north` | `south`) e, (M21),
+  `reject_kind` (RF-71) e `keep_product` (booleano). `accept_proposal` accetta (M21) `rooms`.
+  `text` e `reason`
   restano e vanno sempre passati con le parole del viaggiatore. La modifica è additiva: un
   client che manda solo testo funziona come prima (parser e fallback), più la domanda sullo
   sport di RF-04.
 - **RF-53** Precedenza sul server, campo per campo: campo strutturato valido > parser
   deterministico > fallback Haiku (solo su `create_intent`, RF-03). Un campo invalido (sport
   fuori dai tre valori, area sconosciuta a `geo`, date impossibili o passate, pax fuori da
-  1..20, budget non positivo) viene scartato senza bloccare la richiesta, e il `say` lo dice.
+  1..20, budget non positivo; da M21 anche durata fuori da 1..30 o con minimo oltre il
+  massimo, `level`, `budget_scope` o `reject_kind` fuori elenco, `rooms` fuori da 1..pax)
+  viene scartato senza bloccare la richiesta, e il `say` lo dice.
   Se testo e campo valido indicano valori diversi vince il campo, e il conflitto va nei log
   (RNF-06). Se in un rifiuto ci sono sia `area` sia `direction`, vince `area` e il conflitto va
   nei log; una `direction` che `geo.move` non sa applicare viene scartata e dichiarata.
 - **RF-54** Il `say` di `create_intent` (intento creato) e di `reject_proposal` ripete sempre i
-  criteri capiti: sport (o "padel o tennis indifferente"), area, periodo, persone, budget. Così
+  criteri capiti: sport (o "padel o tennis indifferente"), area, periodo, persone, budget e,
+  da M21, durata, livello e lezioni, camere, luoghi esclusi, lettura del budget (RF-70). Così
   il viaggiatore sente, e può correggere, anche un campo inventato dall'agente. Dichiara inoltre
   i campi scartati (RF-53) e, per un motivo di rifiuto che non si traduce in nessun criterio
   ("hotel con spa"), che Vela non sa filtrare per quel motivo e ha escluso solo la proposta
-  rifiutata.
+  rifiutata. (M21) Quest'ultima frase vale solo con `reject_kind="other"` esplicito: senza
+  tipo, un motivo che non si classifica produce la domanda di RF-75.
 - **RF-55** Dopo una proposta ogni cambiamento (luogo, periodo, sport, budget, persone, "più
   fresco") passa da `reject_proposal` sulla proposta corrente con i campi aggiornati, mai da un
   nuovo `create_intent`: l'intento conserva i rifiuti. "Più fresco" si traduce in `north`,
@@ -362,6 +400,130 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
   Un "niente di compatibile" restituito da `reject_proposal` riporta l'id della proposta appena
   rifiutata: un nuovo `reject_proposal` su quella proposta aggiorna i criteri e propone di
   nuovo, senza registrare un secondo rifiuto (nessuna modifica di schema).
+
+### 4.12 Scelta v3: criteri, ordinamento, camere, rifiuti
+
+Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisioni in
+`docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
+(UC-A..UC-F), implementazione in roadmap M21. Nessuno di questi requisiti è ancora
+implementato.
+
+**Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
+restituiti nella risposta `intent_created` (interfaccia pubblica).
+
+| Criterio | Valori | Fonte | Tipo | Dal |
+|---|---|---|---|---|
+| `sport` | `padel` \| `tennis` \| `any` | campo, parser, Haiku | filtro duro | M2, M17 |
+| `area` | luogo di `geo` | campo, parser | morbido (ordinamento) | M2 |
+| `period` | inizio, fine | campo, parser | filtro duro (partenza nel periodo) | M2 |
+| `pax` | 1..20 | campo, parser, profilo | filtro duro (`minPax`/`maxPax`) | M2 |
+| `budget` | EUR, tetto sul totale | campo, parser | morbido | M2 |
+| `budget_scope` | `per_person` \| `total` | campo, parser, regola RF-69 | interpretazione di `budget` | M21 |
+| `duration_min_nights`, `duration_max_nights` | 1..30 | campo, parser | morbido | M21 |
+| `level` | `beginner` \| `intermediate` \| `advanced` | campo, parser | morbido; duro solo con esclusione esplicita (RF-64) | M21 |
+| `wants_coaching` | booleano | campo, parser | morbido | M21 |
+| `rooms` | 1..pax | campo, parser, default 1 con pax ≤ 2 | filtro duro con `maxPaxPerRoom` (RF-66) | M21 |
+| `excluded_areas` | lista di luoghi di `geo` | rifiuto `place` | filtro duro | M21 |
+| `language` | `it` \| `en` | parser | — | M2 |
+
+Durata, livello, lezioni e lettura del budget sono criteri morbidi: da soli non escludono mai
+un prodotto (eccezione: RF-64). Il tetto di prezzo dopo un rifiuto per prezzo (decisione M7) e
+l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'intento.
+
+**Etichette del prodotto.** Calcolate dal sync e salvate in colonne nuove di `products`
+(migrazioni di M21, roadmap M21-B, M21-C, M21-D): `levels` (insieme ⊆ {`beginner`, `intermediate`, `advanced`, `all`}),
+`levels_exclusive`, `coaching`, `max_pax_per_room`, `featured`, `special_offer`.
+
+- **RF-58** (UC-A) Vela estrae dal testo o riceve come campi una durata in notti
+  (`duration_min_nights`, `duration_max_nights`): "weekend" 1..3, "ponte" 2..4, "una
+  settimana" 6..8, "N giorni" N−1, "N notti" N, intervalli e "almeno N notti". Le notti di un
+  prodotto sono `defaultDurationInDays` − 1, o la lunghezza della finestra fissa. La durata
+  ordina, non esclude.
+- **RF-59** (UC-A) Se il prodotto proposto non rispetta la durata chiesta, la motivazione e il
+  `say` lo dicono con la durata vera ("Non ho weekend compatibili: questo dura 5 notti").
+- **RF-60** (UC-B) Dopo i filtri duri i candidati si ordinano per: area (decrescente), totale
+  entro budget, durata compatibile, livello e lezioni compatibili, distanza della partenza
+  dall'inizio del periodo (o da oggi senza periodo), `featured` o `isSpecialOffer`, prezzo
+  crescente, id. Senza budget il prezzo decide solo a parità di tutto il resto.
+- **RF-61** (UC-B) Prodotti equivalenti (stesso hotel, stesso titolo normalizzato, stessa
+  destinazione, prezzo entro il 5%) sono un solo candidato: quello con l'id numerico più basso
+  tra quelli rimasti dopo i filtri duri. La trappola 900078 non vince sul 78.
+- **RF-62** (UC-C) Vela estrae dal testo o riceve come campi `level` e `wants_coaching`.
+- **RF-63** (UC-C) Il sync etichetta ogni prodotto leggendo `description` e `shortDescription`
+  (it/en): livelli, esclusività esplicita del livello, presenza di lezioni o coach. Nessuna
+  parola sul livello = livello sconosciuto, compatibile con tutti.
+- **RF-64** (UC-C) Un prodotto è escluso per livello solo se la descrizione lo riserva
+  esplicitamente ad altri livelli ("solo per avanzati", "advanced players only"); se il
+  filtro azzera i candidati, `failed_criterion` è `level`. Negli altri casi il livello e le
+  lezioni ordinano (RF-60) e il `say` dice se il prodotto proposto li rispetta.
+- **RF-65** (UC-D) `create_intent`, `reject_proposal` e `accept_proposal` accettano `rooms`.
+  Con più di 2 persone e senza camere, né nei campi né nel testo, `create_intent` restituisce la
+  domanda "In quante camere?" / "How many rooms?" e non salva l'intento (RF-04); con 1 o 2
+  persone il default è 1 camera. `rooms` su `accept_proposal` è una correzione: sotto il
+  minimo del prodotto (RF-66) la risposta è una domanda e nessun ordine viene creato.
+- **RF-66** (UC-D) Un prodotto con `maxPaxPerRoom` richiede almeno ceil(pax /
+  `maxPaxPerRoom`) camere; con meno camere chieste è escluso (`failed_criterion` `rooms` se
+  nessuno resta). Il `say` della proposta dice il limite quando conta ("camere da massimo 2
+  persone: per 5 servono 3 camere").
+- **RF-67** (UC-D) L'ordine salva il numero di camere e il job d'acquisto lo passa a
+  `POST /v1/itineraries` (RF-14).
+- **RF-68** (UC-D) Un viaggiatore da solo per cui restano solo prodotti con `minPax` ≥ 2
+  riceve "niente di compatibile" con `failed_criterion` `pax` e un `say` che spiega che quei
+  viaggi partono da 2 persone.
+- **RF-69** (UC-E) Il budget si legge a persona o totale, in quest'ordine: campo
+  `budget_scope`; "a testa", "a persona", "each", "per person" → a persona; "in tutto",
+  "totale", "in total" → totale; cifra sola con più di una persona → a persona se, letta come
+  totale, non copre neanche il totale del prodotto compatibile più economico (filtri duri senza
+  budget) e letta a persona sì, altrimenti totale; con una persona totale. Nei criteri
+  `budget` resta il tetto sul totale e `budget_scope` registra la lettura.
+- **RF-70** (UC-E) Il `say` di `create_intent` e `reject_proposal` dichiara sempre la lettura
+  del budget ("ho inteso 600 euro a persona, 1.800 in tutto").
+- **RF-71** (UC-F) Ogni rifiuto ha un tipo: `price`, `place`, `hotel`, `dates`, `duration`,
+  `sport`, `pax`, `level`, `direction`, `other`. Il campo `reject_kind` vince sul testo; senza
+  campo il tipo si ricava dal motivo con regole it/en. Il tipo si salva sul rifiuto (migrazione
+  0013, M21-F).
+- **RF-72** (UC-F) Dopo un rifiuto `hotel` sono esclusi dalle proposte dell'intento tutti i
+  prodotti con lo stesso hotel del prodotto rifiutato.
+- **RF-73** (UC-F) Un rifiuto `place` ("Estepona no, ma la Spagna va bene") aggiunge il luogo a
+  `excluded_areas` e mantiene l'area dell'intento. Senza `area` il luogo escluso è quello del
+  prodotto rifiutato; con `area` si cambia luogo come oggi. Nel testo un luogo negato ("X no",
+  "tranne X", "not X") è un'esclusione, non la nuova area.
+- **RF-74** (UC-F) Un rifiuto `dates` con `keep_product` (campo, o nel testo "questo mi piace
+  ma", "quando altro è disponibile", "same trip", "when else") esclude solo la finestra
+  proposta: la proposta successiva è lo stesso prodotto con la prima partenza valida diversa,
+  nel periodo dei criteri o in quello nuovo. Nessuna partenza → "niente di compatibile" con
+  `failed_criterion` `dates` e l'id della proposta (RF-55); un nuovo `reject_proposal` con
+  `keep_product=false` aggiorna lo stesso rifiuto e cerca un altro prodotto.
+- **RF-75** (UC-F) Un motivo che non si classifica, senza `reject_kind`, non registra il
+  rifiuto, non cambia i criteri, non cancella un ordine `queued` (eccezione a RF-49) e
+  restituisce una domanda chiusa con l'id della proposta, che resta aperta: "Cosa non ti
+  convince: il posto, l'hotel, le date o il prezzo?". Con `reject_kind="other"` esplicito il
+  rifiuto si registra ed esclude solo il prodotto (RF-54). Eccezione dichiarata a RF-08.
+
+**Cambi di interfaccia pubblica di M21.** MCP e REST cambiano insieme, con gli stessi nomi.
+
+| Cambio | Dove | Tipo |
+|---|---|---|
+| `duration_min_nights`, `duration_max_nights`, `level`, `wants_coaching`, `rooms`, `budget_scope` in ingresso | `create_intent`, `reject_proposal` | additivo |
+| `reject_kind`, `keep_product` in ingresso | `reject_proposal` | additivo |
+| `rooms` in ingresso | `accept_proposal` | additivo |
+| Criteri nuovi in uscita (tabella sopra) | `intent_created` | additivo |
+| `rooms`, `nights` in uscita | `proposal` | additivo |
+| `failed_criterion` `rooms`, `place`, `hotel`, `level` | `no_match` | additivo (valori nuovi) |
+| Domanda "In quante camere?" con pax > 2 senza camere | `create_intent` | **non additivo**: `pax=5` oggi crea l'intento, dopo M21 riceve `question` |
+| `question` con `proposal_id` | `reject_proposal` | **non additivo**: esito nuovo per un motivo non classificabile |
+| `question` con il minimo di camere | `accept_proposal` | **non additivo**: esito nuovo |
+| "Un weekend" è una durata, non più un periodo | parser | **cambio di comportamento** |
+| Luogo negato nel motivo → esclusione invece di nuova area | `reject_proposal` | **cambio di comportamento** |
+| Ordinamento RF-60 | `get_proposal`, `reject_proposal` | **cambio di comportamento**: la proposta per lo stesso intento può cambiare |
+| Descrizioni dei tool (RF-41) | MCP | cambio di testo |
+
+**Cambio di schema** (da approvare all'inizio di ogni task, decisione 2026-09-26): una
+migrazione per task di M21. 0010 (M21-B): `products.featured`, `products.special_offer`. 0011
+(M21-D): `products.max_pax_per_room`, `orders.rooms` (intero, default 1). 0012 (M21-C):
+`products.levels`, `products.levels_exclusive`, `products.coaching`. 0013 (M21-F):
+`rejections.kind` (testo, nullo per i rifiuti di prima), `rejections.keep_product` (booleano,
+default falso).
 
 ## 5. Requisiti non funzionali
 
@@ -436,7 +598,8 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 ## 7. Fuori scope
 
 Voli, transfer, noleggio auto; interfaccia web o app propria; scelta di hotel alternativi o
-attività aggiuntive nell'itinerario; pagamento a rate, promo code, valute diverse da EUR;
+attività aggiuntive nell'itinerario (escludere i prodotti di un hotel rifiutato, RF-72, è una
+scelta tra prodotti, non dentro l'itinerario); pagamento a rate, promo code, valute diverse da EUR;
 autenticazione dell'utente finale HofJ (`X-End-User-Authorization`) e quindi `GET /v1/trips`;
 cancellazioni e modifiche dopo la prenotazione; multi-tenant (i brand HofJ di padel e tennis
 sono invece in scope, RF-28); A2A entro le 24 ore
