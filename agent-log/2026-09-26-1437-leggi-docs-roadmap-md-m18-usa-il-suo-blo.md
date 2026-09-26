@@ -365,3 +365,52 @@ SQLite is green. I'm trying the Postgres run once more without the deletion step
 - 🔧 Bash: Run suite on a throwaway local Postgres
 
 - 🔧 Bash: Commit column drop and merge into master
+
+Ho tolto la colonna `quota_window.used` e mergiato su `master` (`85b6700`). Niente push.
+
+- **Migrazione `0008`:** toglie la colonna; il downgrade la rimette con valore 0.
+- **Codice:** schema e adapter Postgres non la scrivono più.
+- **Test:** quelli delle migrazioni ora si aspettano `0008` come ultima versione. Ce n'è uno nuovo che controlla il downgrade.
+- **`docs/decisions.md`:** la voce M18 registra la rimozione.
+
+La suite è verde sia senza Postgres (946 test, 56 saltati) sia su un Postgres locale temporaneo, che ho già fermato. La prima volta avevo messo tutto in un solo comando e l'hai negato; l'ho rilanciato senza la cancellazione della cartella, quindi quella cartella è ancora nella scratchpad.
+
+Con questo M18 è chiusa e non restano dubbi aperti. La prossima task secondo la roadmap è M13b, il rilancio del load test dopo M18. Parte però solo quando M13a è su `master`, e per ora non lo è.
+
+## Utente 16:48
+
+vai adesso puoi mergiare
+
+## Agente 16:48
+
+Qui M18 è già su `master`. Suppongo che tu intenda di mergiare M13a, così M13b può partire. Prima controllo lo stato del branch `task/m13a`.
+
+- 🔧 Bash: Inspect task/m13a relative to master
+
+- 🔧 Bash: See how m13a reached master
+
+Attenzione: `master` è cambiato mentre lavoravo. Controllo che fine hanno fatto i miei merge di M18.
+
+- 🔧 Bash: Check master reflog for M18 merges
+
+- 🔧 Bash: Merge current master into task/m18
+
+- 🔧 Bash: Locate conflict markers
+
+- 🔧 Bash: View conflict boundaries
+
+- 🔧 Bash: Resolve decisions conflict keeping both entries
+
+Conflict resolved: M13a's entry first, then M18's. Now I'm checking that M13a's code doesn't use the old quota API (`used`, `sync_from_snapshot` without `now`, and so on).
+
+- 🔧 Bash: Find old quota API usage from M13a
+
+- 🔧 Bash: Inspect loadtest package and app wiring
+
+M13a's fake HofJ applies its own quota and doesn't touch Vela's quota store. Running the full suite on the merged tree.
+
+- 🔧 Bash: Run the full suite after merging master
+
+1045 tests green. I'm running them on the temporary Postgres too, since the merged code includes M13a's.
+
+- 🔧 Bash: Run merged suite on throwaway Postgres

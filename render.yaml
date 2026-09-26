@@ -1,4 +1,4 @@
-# Blueprint Render: web service Docker + Postgres gestito (spec RNF-11).
+# Blueprint Render: web service Docker, static site della landing e Postgres gestito (spec RNF-11).
 # Le variabili con `sync: false` vanno inserite a mano nella dashboard, mai nel repo.
 services:
   - type: web
@@ -7,6 +7,9 @@ services:
     region: frankfurt
     plan: free
     healthCheckPath: /health
+    buildFilter:
+      ignoredPaths:
+        - landing/**
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -30,6 +33,17 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+
+  # Landing statica (docs/superpowers/specs/2026-09-26-landing-design.md): si ricostruisce solo
+  # per modifiche sotto landing/.
+  - type: web
+    name: vela-landing
+    runtime: static
+    buildCommand: echo "Landing statica, nessun build"
+    staticPublishPath: ./landing
+    buildFilter:
+      paths:
+        - landing/**
 
 databases:
   - name: vela-db
