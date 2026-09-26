@@ -21,6 +21,11 @@ class NormalizeTest(unittest.TestCase):
     def test_foreign_number_is_kept(self):
         self.assertEqual(normalize_it("+44 20 7946 0958"), "+442079460958")
 
+    def test_bracketed_zero_after_the_country_code_is_dropped(self):
+        # M2: "(0)" scritto dopo il prefisso non diventa uno zero in più
+        self.assertEqual(normalize_it("+39 (0)333 1234567"), "+393331234567")
+        self.assertEqual(normalize_it("0039 (0)333 1234567"), "+393331234567")
+
     def test_landline_keeps_leading_zero(self):
         self.assertEqual(normalize_it("02 1234 5678"), "+390212345678")
 

@@ -16,7 +16,8 @@ def normalize_it(raw: Optional[str]) -> Optional[str]:
     """Numero in E.164, o `None` se dopo la pulizia non è `+` seguito da 8-15 cifre."""
     if not raw:
         return None
-    number = _SEPARATORS.sub("", raw)
+    # "+39 (0)333…": lo "(0)" dopo il prefisso non si compone; tolto prima dei separatori
+    number = _SEPARATORS.sub("", raw.replace("(0)", ""))
     if number.startswith("00"):
         number = "+" + number[2:]
     elif not number.startswith("+"):

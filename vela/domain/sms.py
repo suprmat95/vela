@@ -3,8 +3,9 @@
 Il job d'acquisto accoda `sms_link` quando l'ordine diventa `awaiting_payment`; il job di
 prenotazione accoda `sms_confirmed` alla conferma. Nessuna chiamata a HofJ, nessuna quota.
 Un ordine che non è più nello stato atteso (pagato, annullato, scaduto) chiude il job senza
-invio, e così un numero che non si normalizza. Errore temporaneo: nuovo tentativo dopo 30 s,
-2 min, 10 min, poi `dead`; errore definitivo: `dead` subito. L'ordine non cambia mai per colpa
+invio, e così un numero che non si normalizza; proposta o prodotto mancanti lo chiudono `dead`.
+Errore temporaneo: nuovo tentativo dopo 30 s, 2 min, 10 min, poi `dead`; errore definitivo:
+`dead` subito. L'ordine non cambia mai per colpa
 di un SMS. Nei log il numero è mascherato e il testo (che contiene il link) non compare.
 """
 import logging
@@ -13,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Sequence
 
 from vela.domain import phone, sms_text
-from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus
+from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus, Proposal
 from vela.domain.purchase import JobResult
 from vela.ports.notifier import Notifier, NotifierError, NotifierRejected
 from vela.ports.repositories import Repositories
@@ -38,8 +39,15 @@ class SmsJob:
         if to is None:
             log.warning("sms %s saltato: numero non valido (ordine %s)", job.kind.value, order.id)
             return self._close(job, JobStatus.DONE)
+        proposal = self.repos.proposals.get(order.proposal_id)
+        product = self.repos.products.get(order.product_id)
+        if proposal is None or product is None:   # mai un job `running` per sempre
+            log.warning("sms %s non inviato: proposta o prodotto mancante (ordine %s)",
+                        job.kind.value, order.id)
+            return self._close(job, JobStatus.DEAD, LookupError("proposta o prodotto mancante"))
         try:
-            message_id = self.notifier.send_sms(to, self._body(job.kind, order))
+            message_id = self.notifier.send_sms(to, self._body(job.kind, order, proposal,
+                                                               product.title))
         except NotifierRejected as exc:
             log.warning("sms %s rifiutato per %s (ordine %s): %s", job.kind.value, phone.mask(to),
                         order.id, exc)
@@ -59,11 +67,9 @@ class SmsJob:
                  order.id, message_id)
         return self._close(job, JobStatus.DONE)
 
-    def _body(self, kind: JobKind, order: Order) -> str:
+    def _body(self, kind: JobKind, order: Order, proposal: Proposal, title: str) -> str:
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
-        proposal = self.repos.proposals.get(order.proposal_id)
-        title = self.repos.products.get(order.product_id).title
         if kind == JobKind.SMS_LINK:
             return sms_text.payment_link(title, proposal.start_date, proposal.end_date, order.pax,
                                          order.total, order.payment_url, lang)

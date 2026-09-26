@@ -11,6 +11,7 @@ from vela.app import build_worker
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.models import OrderStatus, Participant, TravelerProfile
 from vela.domain.usecases import Vela
+from vela.ports.hofj import UpstreamError
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 TRAVELER = TravelerProfile("Anna", "Rossi", "anna@x.it", "333 123 4567",
@@ -28,10 +29,10 @@ class Clock:
 class Flow:
     """FakeSms sta al posto di Twilio: la Vela nasce con `sms_enabled=True` come in produzione."""
 
-    def __init__(self, traveler=TRAVELER, sms_enabled=True):
+    def __init__(self, traveler=TRAVELER, sms_enabled=True, hofj_class=ReplayHofJ):
         self.clock = Clock()
         self.repos = MemoryRepositories()
-        hofj = ReplayHofJ(now=self.clock)
+        hofj = self.hofj = hofj_class(now=self.clock)
         self.repos.products.upsert_many(hofj.load_catalog())
         self.payments = FakePayments("http://test", now=self.clock)
         self.vela = Vela(self.repos, hofj, self.payments, DEFAULT_TRAVELER, now=self.clock,
@@ -54,6 +55,20 @@ class Flow:
         raise AssertionError("ordine non %s in %d secondi simulati" % (status.value, max_seconds))
 
 
+class BookingFailsOnceHofJ(ReplayHofJ):
+    """La prima prenotazione fallisce con un errore temporaneo di HofJ, la seconda riesce."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.booking_failures = 0
+
+    def create_booking(self, itinerary_id, proof):
+        if not self.booking_failures:
+            self.booking_failures += 1
+            raise UpstreamError("HofJ POST /v1/bookings: 502")
+        return super().create_booking(itinerary_id, proof)
+
+
 class SmsFlowTest(unittest.TestCase):
     def test_link_then_confirmation_exactly_once(self):
         f = Flow()
@@ -71,6 +86,20 @@ class SmsFlowTest(unittest.TestCase):
         f.worker.drain()
         self.assertEqual(len(f.sms.sent), 2)
         self.assertTrue(f.sms.sent[1][1].startswith("Vela: prenotazione confermata!"))
+        self.assertIn(order.booking_code, f.sms.sent[1][1])
+
+    def test_booking_retried_after_upstream_error_still_texts_twice(self):
+        # M4: il nuovo tentativo di prenotazione non duplica né perde gli SMS
+        f = Flow(hofj_class=BookingFailsOnceHofJ)
+        order_id = f.accept().order_id
+        order = f.run_until(order_id, OrderStatus.AWAITING_PAYMENT)
+        f.payments.pay(order)
+        order = f.run_until(order_id, OrderStatus.CONFIRMED)
+        for _ in range(5):
+            f.worker.drain()
+        self.assertEqual(f.hofj.booking_failures, 1)
+        self.assertEqual(len(f.sms.sent), 2)
+        self.assertIn(order.payment_url, f.sms.sent[0][1])
         self.assertIn(order.booking_code, f.sms.sent[1][1])
 
     def test_invalid_phone_books_without_sms(self):

@@ -1,5 +1,6 @@
 """Job SMS (decisione 2026-09-26): stato atteso, numero, tentativi, niente dati in chiaro nei log."""
 import unittest
+from unittest import mock
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
@@ -92,6 +93,26 @@ class SkipTest(unittest.TestCase):
         self.assertEqual((s.sms.sent, result.job.status), ([], JobStatus.DONE))
         self.assertIn("numero non valido", logs.output[0])
         self.assertIn("o1", logs.output[0])
+
+
+class MissingDataTest(unittest.TestCase):
+    """M1: proposta o prodotto spariti non lasciano il job `running` per sempre."""
+
+    def test_missing_proposal_or_product_closes_the_job_dead(self):
+        for repo in ("proposals", "products"):
+            with self.subTest(repo=repo):
+                s = Setup()
+                with mock.patch.object(getattr(s.repos, repo), "get", return_value=None), \
+                        self.assertLogs("vela.domain.sms", "WARNING") as logs:
+                    result = s.run()
+                self.assertEqual(result.job.status, JobStatus.DEAD)
+                self.assertIsNone(result.job.locked_at)
+                self.assertEqual(s.repos.jobs.get("s1"), result.job)
+                self.assertEqual(s.sms.sent, [])
+                text = "\n".join(logs.output)
+                self.assertIn("o1", text)
+                self.assertNotIn("4567", text)
+                self.assertNotIn(URL, text)
 
 
 class RetryTest(unittest.TestCase):

@@ -33,6 +33,17 @@ tentativo dopo 30 s, 2 min, 10 min, poi `dead`. Altro 4xx di Twilio: `dead` subi
 cambia mai lo stato dell'ordine. Nei log il numero è mascherato (`+39******4567`) e il testo
 non compare.
 
+## Rollback
+
+Il codice precedente a questa funzione non sa leggere le righe dei job `sms_link` e
+`sms_confirmed`. Prima di tornare a una versione precedente, segnare come `done` i job SMS
+ancora `pending` o `running`:
+
+```sql
+UPDATE jobs SET status = 'done', locked_at = NULL
+WHERE kind IN ('sms_link', 'sms_confirmed') AND status IN ('pending', 'running');
+```
+
 ## Test manuale
 
 Costo: 2 SMS Twilio, circa 4-5 segmenti in tutto (il primo SMS, con il link Stripe vero, da solo
