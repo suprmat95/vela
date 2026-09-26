@@ -141,3 +141,45 @@ Ruff ora è pulito. Lancio la suite di test:
 Faccio due commit piccoli: prima lo strumento, poi le correzioni.
 
 - 🔧 Bash: Commit ruff setup and violation fixes
+
+- 🔧 Bash: Show files in the two new commits
+
+Il Task A è fatto: ruff è installato e configurato, e `uv run ruff check .` non trova più violazioni. Ho fatto due commit sul branch `task/claude-md`, senza push.
+
+**Cosa ho fatto**
+- **Primo commit, lo strumento:** `ruff` 0.16.9 è nel gruppo `dev` di `pyproject.toml`. Le regole sono fissate a mano (`E4, E7, E9, F`) e la cartella `agent-log/` è esclusa. Ho aggiunto la voce "Lint con ruff" in `docs/decisions.md` e una riga "Lint" nella sezione Test del README. Ruff non entra nell'immagine Docker, che installa senza le dipendenze dev.
+- **Secondo commit, le correzioni:** ho sistemato le 36 violazioni già presenti:
+  - import inutilizzati rimossi;
+  - import spostati in cima in `tests/support.py` e `tests/test_usecases.py`;
+  - 5 lambda assegnate a variabili diventate `def`;
+  - la variabile `l` rinominata `line`;
+  - un'istruzione per riga in `scripts/quota_probe.py`.
+
+  I test passano: 1045, con 56 saltati perché senza `DATABASE_URL` quelli Postgres non girano.
+- L'hook ha aggiunto la trascrizione in `agent-log/` al primo commit, come previsto.
+
+**Un incidente, già rimediato:** al primo `--fix` non avevo scritto le regole in modo esplicito. Il default di ruff 0.16 comprende molte più regole di quelle che avevo misurato, e ha modificato 118 file. Non avevo ancora fatto commit, e il working tree all'inizio era pulito. Ho annullato tutte quelle modifiche tranne `pyproject.toml` e `uv.lock`, poi ho fissato le regole. Per questo la config ha un commento che rimanda a `docs/decisions.md`.
+
+**Il dubbio che mi resta:** i test Postgres non li ho eseguiti. Le modifiche lì sono solo import rimossi o spostati, ma se vuoi la certezza vanno lanciati con `DATABASE_URL` impostata.
+
+**Prossimo: Task B**, la riscrittura di `CLAUDE.md` come nel design già approvato. Tono da senior a junior, in inglese, sezioni: cosa è Vela, come è organizzato il codice, test, build, lint (`uv run ruff check .`), e le regole attuali con lo stesso significato. Procedo?
+
+## Utente 17:42
+
+vai
+
+## Agente 17:42
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/master/CLAUDE.md
+
+Controllo un paio di fatti sull'architettura prima di scriverli nel file:
+
+- 🔧 Bash: Check layer dependencies and app entry points
+
+Confermato: `domain` e `ports` non importano mai `adapters` o `surfaces`. Scrivo il file:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/master/CLAUDE.md
+
+Verifico che i comandi citati funzionino e che nessun test legga `CLAUDE.md`:
+
+- 🔧 Bash: Check references, lint, tests and cited paths
