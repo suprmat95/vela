@@ -3,8 +3,9 @@
 Data: 2026-09-25. Stato: bozza da rivedere; RF-43 e RNF-09 aggiornati il 2026-09-25 con la
 roadmap (`docs/roadmap.md`); §4.10, RF-14, RF-16, RF-17, RF-19, RF-25, RF-27, RF-37, RF-39,
 RF-41, RNF-04, RNF-05, RNF-10, RNF-12, RNF-13 e §10.1 aggiornati il 2026-09-25 per il twist
-(50.000 viaggiatori in dieci minuti). Origine: `docs/brief.md` e intervista del 2026-09-25
-(decisioni in `docs/decisions.md`).
+(50.000 viaggiatori in dieci minuti). RF-01..04, RF-08, RF-09, RF-39..42 e §4.11 (RF-52..55)
+aggiornati il 2026-09-26 per il contratto agente-tool (roadmap M17). Origine: `docs/brief.md` e
+intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
 
@@ -55,17 +56,24 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 ### 4.1 Intento
 
 - **RF-01** Vela accetta un intento come testo libero, in italiano o in inglese, più un profilo
-  viaggiatore opzionale (nome, cognome, email, telefono, numero di persone).
-- **RF-02** Da un intento Vela estrae: sport (padel, tennis), area geografica (paese, regione o
+  viaggiatore opzionale (nome, cognome, email, telefono, numero di persone) e i campi
+  strutturati opzionali di RF-52 (sport, area, periodo, persone, budget).
+- **RF-02** Da un intento Vela estrae: sport (`padel`, `tennis`, oppure `any` quando il
+  viaggiatore dice che gli va bene l'uno o l'altro), area geografica (paese, regione o
   città, se presente), periodo (data o intervallo, mese, stagione, "weekend"), numero di
   persone, budget totale massimo, lingua dell'intento.
-- **RF-03** L'estrazione avviene con un parser deterministico (regole e dizionari it/en). Se il
-  parser non ricava almeno lo sport oppure il periodo, e la variabile `ANTHROPIC_API_KEY` è
-  presente, Vela invoca un modello piccolo e veloce (Claude Haiku 4.5) per compilare lo stesso
-  schema. Se la variabile manca, il fallback è disattivato e non produce errore.
+- **RF-03** L'estrazione avviene con un parser deterministico (regole e dizionari it/en), dopo
+  i campi strutturati passati dall'agente (precedenza di RF-53). Se dopo campi e parser manca
+  ancora lo sport, e la variabile `ANTHROPIC_API_KEY` è presente, Vela invoca un modello
+  piccolo e veloce (Claude Haiku 4.5) per compilare lo stesso schema. Se la variabile manca, il
+  fallback è disattivato e non produce errore.
 - **RF-04** Se dopo l'estrazione manca ancora un'informazione indispensabile, Vela restituisce
-  una sola domanda chiara per l'agente da porre al viaggiatore. Indispensabili: sport oppure
-  periodo (almeno uno), numero di persone (default 1 se il profilo lo indica, altrimenti chiesto).
+  una sola domanda chiara per l'agente da porre al viaggiatore, e nessun intento viene
+  salvato. Indispensabili: lo sport, sempre ("Padel o tennis?"; "indifferente" o "tutti e due"
+  è una risposta valida e vale `any`, cioè nessun filtro sport), poi il numero di persone
+  (default 1 se il profilo lo indica, altrimenti chiesto). Se mancano entrambi si chiede prima
+  lo sport. Il periodo non è indispensabile: senza periodo il chooser considera tutte le date
+  disponibili.
 - **RF-05** Ogni intento è persistito con un identificativo e i criteri estratti, così che
   proposte e rifiuti successivi vi si riferiscano.
 
@@ -78,12 +86,17 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   già rifiutati per lo stesso intento, con sport diverso, con date non compatibili con
   `minDate`/`maxDate` e disponibilità, con pax fuori da `minPax`/`maxPax`; tra i restanti si
   ordina per aderenza all'area geografica, rispetto del budget, prezzo crescente.
-- **RF-08** Il viaggiatore può rifiutare una proposta con un motivo in testo libero. Vela
-  aggiorna i criteri dell'intento con il motivo ("troppo caro" abbassa il budget, "più a sud"
-  o "a novembre" cambiano area o periodo) e restituisce un'altra proposta singola.
+- **RF-08** Il viaggiatore può rifiutare una proposta con un motivo in testo libero, più i
+  campi strutturati di RF-52 e una direzione (`north`, `south`). Vela aggiorna i criteri
+  dell'intento con campi e motivo, con la precedenza di RF-53 ("troppo caro" abbassa il budget,
+  "più a sud" o "a novembre" cambiano area o periodo, `direction` sposta l'area con `geo.move`)
+  e restituisce un'altra proposta singola. Ogni cambiamento dopo una proposta passa da qui
+  (RF-55).
 - **RF-09** Non esiste un limite al numero di proposte per intento. Quando non resta nessun
-  prodotto compatibile, Vela dice quale criterio non riesce a soddisfare e chiede di
-  riformulare l'intento; non propone mai un prodotto già rifiutato.
+  prodotto compatibile, Vela dice quale criterio non riesce a soddisfare e chiede quale
+  criterio cambiare; non propone mai un prodotto già rifiutato. Il cambiamento passa da
+  `reject_proposal` sull'ultima proposta rifiutata (RF-55); solo un "niente di compatibile"
+  restituito da `get_proposal` prima di ogni proposta si risolve con un nuovo `create_intent`.
 - **RF-10** Nessuna risposta di Vela contiene mai più di un prodotto. Le risposte non
   contengono elenchi di alternative, tabelle, né inviti a "scegliere tra".
 - **RF-11** Le proposte si leggono solo dal catalogo in cache locale (sezione 4.6). Nessuna
@@ -207,24 +220,33 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
   | Caso d'uso | Ingresso | Uscita |
   |---|---|---|
-  | `create_intent` | testo, profilo opzionale | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
+  | `create_intent` | testo, profilo opzionale, campi strutturati opzionali (RF-52) | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
   | `get_proposal` | id intento | una proposta (RF-06) oppure "niente di compatibile" (RF-09) |
-  | `reject_proposal` | id proposta, motivo | la proposta successiva (RF-08) |
+  | `reject_proposal` | id proposta, motivo, campi strutturati e direzione opzionali (RF-52) | la proposta successiva (RF-08) oppure "niente di compatibile" con l'id della proposta da cui ripartire (RF-55) |
   | `accept_proposal` | id proposta, dati viaggiatore mancanti | id ordine, stato `queued`, posizione e attesa stimata, frase da leggere (RF-45) |
   | `get_order_status` | id ordine | stato, attesa stimata oppure link e importo oppure codice oppure proposta sostitutiva, frase da leggere (RF-25) |
 
 - **RF-40** REST: `POST /v1/intents`, `GET /v1/intents/{id}/proposal`,
   `POST /v1/proposals/{id}/reject`, `POST /v1/proposals/{id}/accept`,
   `GET /v1/orders/{id}`. JSON, errori in formato RFC 7807, `GET /health` senza autenticazione.
+  I corpi di `POST /v1/intents` e `POST /v1/proposals/{id}/reject` accettano i campi
+  strutturati di RF-52, con gli stessi nomi e valori del tool MCP.
 - **RF-41** MCP: server remoto con trasporto Streamable HTTP su `/mcp`, cinque tool con gli
   stessi nomi di RF-39, descrizioni scritte per un modello che parla con un umano a voce:
   ogni tool dice esplicitamente di non elencare alternative e di leggere la frase pronta.
+  La descrizione di `create_intent` dice di chiedere lo sport prima di chiamarlo se il
+  viaggiatore non ha detto padel, tennis o indifferente; lo schema non rende `sport`
+  obbligatorio (l'agente indovinerebbe invece di chiedere) e RF-04 fa da rete di sicurezza. Le
+  descrizioni di `get_proposal`, `create_intent` e `reject_proposal` dicono che dopo una
+  proposta ogni cambiamento passa da `reject_proposal` con i campi aggiornati (RF-55) e non
+  invitano mai a riformulare con un nuovo `create_intent`.
   La descrizione di `accept_proposal` dice che la risposta è un'attesa, non un link, e che il
   link va letto con `get_order_status` dopo l'attesa dichiarata o quando il viaggiatore lo
   chiede. Compatibile con Claude (claude.ai, Claude Desktop) ed ElevenLabs Conversational AI.
 - **RF-42** Ogni risposta dei casi d'uso include un campo `say`: una frase in lingua
   dell'intento, pronta per essere letta ad alta voce, senza markdown, senza URL letti per
-  esteso (l'URL sta in un campo separato).
+  esteso (l'URL sta in un campo separato). Il `say` di `create_intent` e `reject_proposal`
+  segue anche RF-54.
 - **RF-43** La superficie REST usa un bearer token statico da configurazione
   (`VELA_API_TOKEN`). La superficie MCP usa OAuth 2.1 (authorization server nella stessa app:
   metadata, registrazione dinamica, PKCE, token in Postgres), perché i connector custom di
@@ -274,6 +296,42 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   pagamento (RF-20), salvo
   errori di RF-24: la riserva `booking` garantisce che la prenotazione avvenga anche a coda
   d'acquisto piena.
+
+### 4.11 Contratto agente-tool
+
+Origine: conversazione osservata il 2026-09-26. Il viaggiatore rifiuta una proposta ("troppo
+caldo, vorrei un posto più freddo"); l'agente "riformula" con un nuovo `create_intent` invece di
+`reject_proposal`, il nuovo intento non ha rifiuti, il chooser è deterministico e torna la
+stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chiesto. Decisioni in
+`docs/decisions.md` (2026-09-26), casi d'uso in `docs/usecases/agente-tool.md`.
+
+- **RF-52** `create_intent` e `reject_proposal` accettano, su MCP e REST con lo stesso
+  contratto, campi strutturati opzionali: `sport` (`padel` | `tennis` | `any`), `area` (nome
+  di un luogo), `period_start` e `period_end` (date ISO), `pax` (intero), `budget` (totale in
+  EUR). `reject_proposal` accetta inoltre `direction` (`north` | `south`). `text` e `reason`
+  restano e vanno sempre passati con le parole del viaggiatore. La modifica è additiva: un
+  client che manda solo testo funziona come prima (parser e fallback), più la domanda sullo
+  sport di RF-04.
+- **RF-53** Precedenza sul server, campo per campo: campo strutturato valido > parser
+  deterministico > fallback Haiku (solo su `create_intent`, RF-03). Un campo invalido (sport
+  fuori dai tre valori, area sconosciuta a `geo`, date impossibili o passate, pax fuori da
+  1..20, budget non positivo) viene scartato senza bloccare la richiesta, e il `say` lo dice.
+  Se testo e campo valido indicano valori diversi vince il campo, e il conflitto va nei log
+  (RNF-06). Se in un rifiuto ci sono sia `area` sia `direction`, vince `area` e il conflitto va
+  nei log; una `direction` che `geo.move` non sa applicare viene scartata e dichiarata.
+- **RF-54** Il `say` di `create_intent` (intento creato) e di `reject_proposal` ripete sempre i
+  criteri capiti: sport (o "padel o tennis indifferente"), area, periodo, persone, budget. Così
+  il viaggiatore sente, e può correggere, anche un campo inventato dall'agente. Dichiara inoltre
+  i campi scartati (RF-53) e, per un motivo di rifiuto che non si traduce in nessun criterio
+  ("hotel con spa"), che Vela non sa filtrare per quel motivo e ha escluso solo la proposta
+  rifiutata.
+- **RF-55** Dopo una proposta ogni cambiamento (luogo, periodo, sport, budget, persone, "più
+  fresco") passa da `reject_proposal` sulla proposta corrente con i campi aggiornati, mai da un
+  nuovo `create_intent`: l'intento conserva i rifiuti. "Più fresco" si traduce in `north`,
+  "più caldo" in `south`; il server usa `geo.move` e il catalogo non contiene dati climatici.
+  Un "niente di compatibile" restituito da `reject_proposal` riporta l'id della proposta appena
+  rifiutata: un nuovo `reject_proposal` su quella proposta aggiorna i criteri e propone di
+  nuovo, senza registrare un secondo rifiuto (nessuna modifica di schema).
 
 ## 5. Requisiti non funzionali
 

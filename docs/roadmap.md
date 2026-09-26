@@ -4,6 +4,8 @@ Data: 2026-09-25. Origine: `docs/spec.md` e intervista del 2026-09-25 (decisioni
 `docs/decisions.md`, sezione "Roadmap in macro task"). Aggiornata il 2026-09-25 per il twist
 (50.000 viaggiatori in dieci minuti, spec §4.10): M2 era già conclusa, quindi coda d'acquisto,
 scheduler della quota e accettazione asincrona entrano in M5, lo scenario di carico in M13.
+Aggiornata il 2026-09-26 con M17 (contratto agente-tool, spec §4.11): M9 e M11 erano già
+concluse, quindi il lavoro su parser e contratto dei tool è una task nuova in ondata 5.
 
 ## Come usare questo file
 
@@ -25,8 +27,8 @@ Ondata 3   M8 OAuth  M5 HofJ reale   M6 Stripe
                  \       |        /
 Ondata 4          M7 Prima prenotazione reale   [Traguardo B]
                  /    |      |       \
-Ondata 5   M10 Sync  M12 ElevenLabs  M13 Load test  M14 Hardening
-                 \      |       |       /
+Ondata 5   M10 Sync  M12 ElevenLabs  M13 Load test  M14 Hardening  M17 Contratto agente-tool
+                 \      |       |       /               /
 Ondata 6          M15 Consegna (ARCHITECTURE, README, video)   [M16 A2A opzionale]
 ```
 
@@ -54,10 +56,11 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M14 | Hardening: log JSON, health, dati personali, segreti | S | M7 | 5 / M10, M12, M13 |
 | M15 | Consegna: ARCHITECTURE.md, README, video | M | tutte | 6 / — |
 | M16 | (opzionale) Superficie A2A | M | M4, M8 | 6 / M15 |
+| M17 | Contratto agente-tool e sinonimi dello sport | M | M3, M4, M9, M11 | 5 / M10, M12, M13, M14 |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
-`vela/domain/orders.py` (M5, M6) e `vela/domain/intent.py` (M9, M11): chi arriva secondo fa
-rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
+`vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
+`vela/domain/chooser.py` (M10, M17: `sport=any`): chi arriva secondo fa rebase prima del merge. Ogni task finisce con merge su `master` e test verdi.
 
 ---
 
@@ -561,19 +564,105 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 
 ---
 
+## M17 — Contratto agente-tool e sinonimi dello sport
+
+**Risultato.** L'agente passa a Vela i criteri che ha già capito come campi strutturati, e
+ogni cambiamento dopo una proposta passa da `reject_proposal` sullo stesso intento: il caso
+osservato il 2026-09-26 ("troppo caldo, vorrei un posto più freddo" → nuovo `create_intent` →
+stessa proposta) non si ripete. Lo sport è sempre chiesto; "indifferente" vale `any`. Il `say`
+ripete i criteri capiti. I client che mandano solo testo funzionano come prima, più la domanda
+sullo sport. Casi d'uso in `docs/usecases/agente-tool.md` (UC1-UC9).
+
+**Scope.**
+- Campi strutturati opzionali su `create_intent` e `reject_proposal` (RF-52), MCP e REST con lo
+  stesso contratto: `sport` (`padel` | `tennis` | `any`), `area`, `period_start`,
+  `period_end`, `pax`, `budget`; `direction` (`north` | `south`) solo sul rifiuto. `text` e
+  `reason` restano. Modifica additiva; `docs/rest.md` aggiornato.
+- Precedenza e validazione (RF-53) in `usecases.py`, `intent.py`, `refine.py`: campo valido >
+  parser > Haiku (solo `create_intent`); campo invalido scartato e dichiarato; conflitto
+  testo/campo e `area`/`direction` nei log.
+- RF-04 nuovo: sport sempre indispensabile, `question` "Padel o tennis?" / "Padel or tennis?"
+  prima di pax, nessun intento salvato; RF-03: Haiku parte quando manca lo sport; lo schema di
+  `adapters/haiku.py` accetta `any`.
+- `sport=any` nei criteri (valore nuovo nel JSON di `intents.criteria`, nessuna migrazione) e
+  nel chooser: nessun filtro sport. `None` resta "non detto".
+- `say` (RF-54): criteri capiti sempre ripetuti, campi scartati, motivo non traducibile.
+- Descrizioni dei tool MCP (RF-41): chiedere lo sport prima di `create_intent`; dopo una
+  proposta ogni cambiamento via `reject_proposal`; `get_proposal` e `create_intent` non
+  suggeriscono più di riformulare; "più fresco" → `north`, "più caldo" → `south`.
+- "Niente di compatibile" dopo un rifiuto (RF-55): la risposta riporta l'id della proposta
+  rifiutata; un secondo `reject_proposal` su quella proposta aggiorna i criteri senza un nuovo
+  rifiuto (vincolo `uq_rejections_proposal_id` invariato).
+- Parser, decisioni aperte da chiudere nel brainstorm (raccomandazione in grassetto):
+  - Sinonimi ("terra rossa", "clay", "Terrarossa" → tennis; "paddle", "Weebora" → padel):
+    **A) dizionario fisso in `intent.py`**, deterministico e testabile; B) dizionario ricavato
+    dai titoli del catalogo (lega il parser al catalogo); C) solo Haiku.
+  - "padel e tennis" nella stessa frase (oggi vince il primo): **A) `any`**, è quello che il
+    viaggiatore ha detto; B) domanda "Padel o tennis?"; C) il primo, come oggi.
+  - "beach tennis", "paddle tennis": **A) esclusioni controllate prima dei sinonimi → sport non
+    riconosciuto → domanda**; B) frase dedicata "non vendiamo beach tennis", solo se il caso
+    capita davvero.
+  - Nomi di tornei (es. Internazionali di Roma → tennis, solo se il catalogo li vende):
+    **A) fuori da M17: l'agente li risolve col campo `sport`, Haiku come riserva**; B) lista
+    fissa attiva solo se un titolo del catalogo la contiene; C) nomi estratti dai titoli del
+    catalogo. B e C tra i prossimi passi.
+  - "più fresco", "più freddo", "cooler" / "più caldo", "warmer" nel motivo di rifiuto:
+    **A) `refine.py` li traduce in north/south come rete di sicurezza per i client solo testo**;
+    B) solo tramite `direction` passato dall'agente.
+
+**Test di completamento.**
+- UC1-UC9 di `docs/usecases/agente-tool.md` come test dei casi d'uso con repository in memoria,
+  e i casi UC1, UC4, UC7, UC8 anche come test MCP (`test_mcp_tools`) e REST (`test_rest`).
+- UC4 in particolare: dopo "troppo caldo" con `direction=north` la proposta è diversa da quella
+  rifiutata e l'intento è lo stesso.
+- Tabelle parser: sinonimi, "padel e tennis" → `any`, "beach tennis"/"paddle tennis" non
+  diventano tennis, "più fresco" → north.
+- Precedenza: campo > parser > Haiku (client finto, nessuna chiamata reale); campo invalido
+  scartato e presente nel `say`; conflitto nei log (`assertLogs`).
+- RF-04: senza sport → `question` e nessun intento nel repository; `any` → nessun filtro sport.
+- Client solo testo: i test di parser, rifiuto e flusso esistenti restano verdi (modifica
+  additiva), salvo quelli che fissavano "sport oppure periodo", aggiornati e elencati in
+  `docs/decisions.md`.
+- `no_match` dopo un rifiuto → secondo `reject_proposal` sulla stessa proposta → nuova proposta,
+  un solo rifiuto registrato.
+- Descrizioni MCP: nessuna contiene l'invito a riformulare con `create_intent` dopo una proposta.
+- Manuale: in claude.ai, il dialogo del 2026-09-26 ripetuto in replay (UC4), registrato in
+  `docs/acceptance.md`.
+
+**Copre.** RF-01, RF-02 (sport `any`, sinonimi), RF-03, RF-04, RF-08, RF-09, RF-39..42
+(contratto aggiornato), RF-52..55.
+
+**Taglia.** M (3-4 h). **Dipende da** M3, M4, M9, M11 (tutte su `master`). **Ondata** 5, in
+parallelo con M10 (unico file comune `chooser.py` per `sport=any`), M12 (se M12 parte prima,
+il prompt ElevenLabs va riletto dopo il merge di M17: le descrizioni dei tool cambiano), M13,
+M14.
+
+**Prompt.**
+> Leggi docs/spec.md (RF-01..04, RF-08, RF-09, RF-39..42, §4.11), docs/usecases/agente-tool.md,
+> docs/decisions.md (2026-09-26, contratto agente-tool), vela/surfaces/mcp.py,
+> vela/surfaces/rest.py, vela/domain/intent.py, vela/domain/refine.py,
+> vela/domain/usecases.py, vela/domain/chooser.py, vela/domain/say.py e docs/roadmap.md M17.
+> Obiettivo: campi strutturati su `create_intent` e `reject_proposal` (MCP e REST), precedenza
+> campo > parser > Haiku, sport sempre chiesto con `any`, `say` che ripete i criteri, descrizioni
+> dei tool che mandano ogni cambiamento dopo una proposta su `reject_proposal`, sinonimi dello
+> sport. Prima chiudi le decisioni aperte sul parser. Nessuna chiamata ad Anthropic nei test.
+> Test: M17.
+
+---
+
 ## Matrice dei requisiti
 
 | Requisito | Macro task |
 |---|---|
-| RF-01 | M2 |
-| RF-02 | M2 (minimo), M9 (completo) |
-| RF-03 | M9 |
-| RF-04 | M2, M9 |
+| RF-01 | M2, M17 (campi strutturati) |
+| RF-02 | M2 (minimo), M9 (completo), M17 (sport `any`, sinonimi) |
+| RF-03 | M9, M17 (precedenza, fallback senza sport) |
+| RF-04 | M2, M9, M17 (sport sempre indispensabile) |
 | RF-05 | M2 |
 | RF-06 | M2, M11 |
 | RF-07 | M2 (v1), M11 (completo) |
-| RF-08 | M2 (base), M9 |
-| RF-09 | M2, M11 |
+| RF-08 | M2 (base), M9, M17 (campi e direzione) |
+| RF-09 | M2, M11, M17 (niente di compatibile dopo un rifiuto) |
 | RF-10 | M2, M3, M4 |
 | RF-11 | M2 |
 | RF-12 | M2 |
@@ -591,13 +680,14 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 | RF-32 | M1, M10 |
 | RF-33..RF-35 | M5 |
 | RF-36..RF-38 | M5 |
-| RF-39 | M2 |
-| RF-40 | M4 |
-| RF-41 | M3 (Claude), M12 (ElevenLabs) |
-| RF-42 | M2 |
+| RF-39 | M2, M17 |
+| RF-40 | M4, M17 |
+| RF-41 | M3 (Claude), M12 (ElevenLabs), M17 (descrizioni dei tool) |
+| RF-42 | M2, M17 |
 | RF-43 | M4 (REST), M8 (MCP OAuth) |
 | RF-44 | M15 (documentazione), M16 (opzionale) |
 | RF-45..RF-51 | M5 |
+| RF-52..RF-55 | M17 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5 |
 | RNF-05 | M13 |
@@ -617,5 +707,5 @@ di M8. Test: client A2A finto che completa il flusso in replay. Copre RF-44 (imp
 | §10.5 | M13 |
 | §10.6 | M2, M3, M4 |
 
-Tutti i 51 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
+Tutti i 55 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
 di §10 hanno almeno una macro task.
