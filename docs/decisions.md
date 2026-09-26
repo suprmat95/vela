@@ -488,3 +488,31 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m7-prima-prenotazione-reale
 | "Troppo caro" (Task 6b) | Dopo un rifiuto per prezzo (parole di RF-08 o una cifra nel motivo, `refine.is_price_reason`) il chooser esclude i prodotti con totale ≥ quello della proposta rifiutata: filtro `price` prima di `rejected`, tetto = totale più basso tra le proposte rifiutate per prezzo, ricavato dai rifiuti (`RejectionRepository.list_for_intent`). L'ordinamento non cambia (area prima), quindi può arrivare un altro paese, dichiarato dalla motivazione. Niente di più economico → `no_match` con `failed_criterion` `price` e frase it/en | Trovato da `scripts/rest_flow.py` contro il replay: con il chooser v2 (M11) la prima proposta è già la più economica dell'area, e dopo "troppo caro" arrivava la successiva nell'area, più cara (558 → 600 €), contro §10.1. Scelta dell'utente tra tetto di prezzo, budget come esclusione e nessun cambio. Il tetto non sta nei `Criteria` perché finiscono nella risposta pubblica `intent_created` |
 | Test aggiornati dal Task 6b | `test_filter_order` (nuovo filtro `price`), `test_no_match_covers_every_criterion` e `test_no_match` (6 frasi), `test_reject_gives_a_different_product` (dopo "troppo caro" il prodotto 1 a 300 € invece del 4 a 390 €), `test_too_expensive_lowers_budget` (resta solo la verifica del budget, la scelta passa al nuovo test) | Fissavano il comportamento cambiato da questa decisione |
 | Test Postgres | `archive_missing` e `list_for_intent` su Postgres non eseguiti in questo worktree (`DATABASE_URL` assente): 42 saltati | Da eseguire prima del merge dove l'URL è disponibile |
+
+## 2026-09-26 — Contratto tra l'agente e i tool MCP
+
+Origine: conversazione osservata in claude.ai. Il viaggiatore ha rifiutato una proposta ("troppo
+caldo, vorrei un posto più freddo") e l'agente ha "riformulato" con `create_intent` invece di
+`reject_proposal`: il nuovo intento non aveva rifiuti, il chooser è deterministico ed è tornata
+la stessa proposta. "Più freddo" non era capito né da `intent.py` né da `refine.py`, e lo sport
+non era mai stato chiesto (con il periodo presente la vecchia RF-04 non lo richiedeva).
+Requisiti in `docs/spec.md` §4.11 (RF-52..55), casi d'uso in `docs/usecases/agente-tool.md`,
+implementazione in roadmap M17.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Campi strutturati | Opzionali su `create_intent` e `reject_proposal`, MCP e REST con lo stesso contratto: `sport` (`padel` \| `tennis` \| `any`), `area`, `period_start`, `period_end`, `pax`, `budget`. `text` e `reason` restano e si passano sempre | L'agente ha già capito i criteri; farli ricostruire dal parser perde informazione. Modifica additiva: i client solo testo funzionano come prima |
+| Precedenza | Sul server: campo strutturato valido > parser deterministico > fallback Haiku. Campo invalido (es. area sconosciuta a `geo`) scartato senza bloccare, e dichiarato nel `say`. Conflitto testo/campo: vince il campo, conflitto nei log | Il campo è la lettura dell'agente, più ricca del parser; lo scarto e il `say` evitano che un errore dell'agente blocchi il viaggiatore |
+| `say` con i criteri capiti | Il `say` di `create_intent` e `reject_proposal` ripete sempre sport, area, periodo, persone, budget | Il viaggiatore sente e corregge eventuali campi inventati dall'agente |
+| RF-04 | Lo sport è sempre indispensabile (non più "sport oppure periodo"). Se manca: `question` "Padel o tennis?" e nessun intento salvato. "Indifferente" / "tutti e due" è valido → `sport=any` → nessun filtro sport nel chooser | Senza sport la proposta è un tiro a caso tra due prodotti diversi |
+| Descrizioni dei tool | Prima di `create_intent`, se il viaggiatore non ha detto padel, tennis o indifferente, l'agente lo chiede. Lo schema non rende `sport` obbligatorio | Con il campo obbligatorio l'agente indovinerebbe invece di chiedere; il server resta la rete di sicurezza |
+| Cambiamenti dopo una proposta | Ogni cambiamento (luogo, periodo, sport, budget, "più fresco") passa da `reject_proposal` con i campi aggiornati, mai da un nuovo `create_intent`. Le descrizioni di `get_proposal` e `create_intent` non suggeriscono più di "riformulare" | Un nuovo intento perde i rifiuti e ripropone lo stesso prodotto: è il difetto osservato |
+| Direzione | `reject_proposal` accetta `direction` (`north` \| `south`); l'agente traduce "più fresco" → `north`, "più caldo" → `south`; il server usa `geo.move` | Nessun dato climatico nel catalogo: la latitudine è l'approssimazione disponibile |
+| Rappresentazione di "indifferente" | Valore `"any"` nei criteri (anche nella risposta pubblica `intent_created`, nel JSON di `intents.criteria` senza migrazione); `None` resta "non detto" | Con `None` il server non distinguerebbe "non chiesto" da "indifferente" |
+| Periodo | Non più indispensabile: con lo sport e senza periodo l'intento si crea senza domanda. Se mancano sport e persone si chiede prima lo sport | Conseguenza della nuova RF-04; una sola domanda alla volta |
+| "Niente di compatibile" dopo un rifiuto | La risposta di `reject_proposal` riporta l'id della proposta appena rifiutata; un secondo `reject_proposal` su quella proposta aggiorna i criteri e propone di nuovo senza registrare un nuovo rifiuto. Un "niente di compatibile" da `get_proposal` prima di ogni proposta si risolve con un nuovo `create_intent` | Il vincolo `uq_rejections_proposal_id` impedisce un secondo rifiuto; così non cambia lo schema e i rifiuti non si perdono |
+| `area` e `direction` insieme | Vince `area`, conflitto nei log; una `direction` che `geo.move` non sa applicare viene scartata e dichiarata nel `say` | Il luogo esplicito è più preciso di una direzione |
+| Fallback Haiku sul rifiuto | Nessuno: Haiku resta solo su `create_intent` | Come oggi; il rifiuto ha i campi strutturati |
+| `docs/rest.md` | Aggiornato in M17, insieme al codice | Descrive il contratto implementato, non quello pianificato |
+| Collocazione | Task nuova M17, ondata 5, parallela a M10 (unico file comune `chooser.py` per `sport=any`), M12, M13, M14 | M9 e M11 sono concluse |
+| Decisioni aperte sul parser | Sinonimi, "padel e tennis", "beach tennis"/"paddle tennis", tornei, "più fresco" nel testo: opzioni e raccomandazioni in roadmap M17, da chiudere nel brainstorm di M17 | Non ancora decise |
