@@ -18,7 +18,7 @@ from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
-from vela.domain.catalog import select_fixture
+from vela.domain.catalog import select_fixtures
 from vela.domain.models import NoMatch, ProposalMade
 from vela.domain.usecases import Vela
 
@@ -46,12 +46,16 @@ class StagingFixtureTest(unittest.TestCase):
             cls.catalog = json.load(fh)
 
     def test_recorded_on_staging_in_english_for_the_staging_brand(self):
-        self.assertEqual((self.catalog["base_url"], self.catalog["locale"], self.catalog["brand"]),
-                         (STAGING, "en", "staging.weebora.com"))
+        self.assertEqual((self.catalog["base_url"], self.catalog["locale"], self.catalog["brand"],
+                          self.catalog["sport"]),
+                         (STAGING, "en", "staging.weebora.com", "padel"))
 
     def test_live_on_staging_selects_it_and_production_keeps_the_m1_fixture(self):
-        self.assertEqual(os.path.basename(select_fixture(FIXTURES, STAGING)), "catalog-staging.json")
-        self.assertEqual(os.path.basename(select_fixture(FIXTURES, "https://api.hofj.com")), "catalog.json")
+        staging = [os.path.basename(p) for p in select_fixtures(FIXTURES, STAGING)]
+        production = [os.path.basename(p) for p in select_fixtures(FIXTURES, "https://api.hofj.com")]
+        self.assertIn("catalog-staging.json", staging)
+        self.assertNotIn("catalog.json", staging)
+        self.assertIn("catalog.json", production)
 
     def test_no_trap_product(self):
         self.assertEqual([p["id"] for p in self.catalog["products"] if p.get("vela_trap")], [])

@@ -28,7 +28,7 @@ from vela.adapters.stripe_links import StripePayments, build_stripe_client
 from vela.adapters.worker import Worker
 from vela.config import DEFAULT_TRAVELER, Settings
 from vela.domain.booking import BookingJob
-from vela.domain.catalog import fixture_meta, select_fixture
+from vela.domain.catalog import fixture_meta, select_fixtures
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import JobKind, Product
 from vela.domain.payment_check import PaymentCheckJob
@@ -79,10 +79,10 @@ def build_hofj(settings: Settings) -> Tuple[object, CatalogLoader]:
     if not settings.stripe_secret_key:
         raise RuntimeError("VELA_UPSTREAM_MODE=live richiede STRIPE_SECRET_KEY: il pagamento finto "
                            "non esiste contro HofJ vero")
-    fixture = select_fixture(FIXTURES_DIR, settings.hofj_base_url)
+    fixtures = select_fixtures(FIXTURES_DIR, settings.hofj_base_url)
     hofj = HofJHttp(settings.hofj_base_url, settings.hofj_api_key, settings.hofj_brand,
-                    locale=fixture_meta(fixture)["locale"])
-    return hofj, ReplayHofJ(fixture).load_catalog
+                    locale=fixture_meta(fixtures[0])["locale"])
+    return hofj, ReplayHofJ(fixtures).load_catalog
 
 
 def build_vela(settings: Settings, engine: Engine) -> Tuple[Vela, CatalogLoader]:

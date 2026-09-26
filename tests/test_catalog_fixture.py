@@ -33,7 +33,7 @@ class CatalogFixtureTest(unittest.TestCase):
     def test_header(self):
         self.assertEqual(self.catalog["locale"], "it")
         self.assertRegex(self.catalog["recorded_at"], r"^\d{4}-\d{2}-\d{2}T")
-        self.assertIn(type(self.catalog["brand"]), (str, type(None)))
+        self.assertEqual((self.catalog["brand"], self.catalog["sport"]), ("weebora.com", "padel"))
         self.assertTrue(self.catalog["base_url"].startswith("https://"))
 
     def test_every_active_product_has_a_detail_and_vice_versa(self):

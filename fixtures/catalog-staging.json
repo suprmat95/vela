@@ -2,6 +2,7 @@
  "recorded_at": "2026-09-25T20:10:31.874531+00:00",
  "locale": "en",
  "brand": "staging.weebora.com",
+ "sport": "padel",
  "base_url": "https://staging.api.hofj.com",
  "products": [
   {

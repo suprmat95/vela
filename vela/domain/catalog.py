@@ -1,13 +1,15 @@
 """Dal formato della fixture (`docs/fixtures.md`) ai `Product` del dominio (RF-28).
 
-Lo sport non è un campo dell'API: si cerca `padel`/`tennis` in titolo, slug, descrizione breve
-e descrizione, in quest'ordine; senza segnale il prodotto è padel (decisione M2).
+Lo sport non è un campo dell'API: viene dal brand del catalogo (una fixture per brand, con
+`brand` e `sport` nei metadati, decisione M10). Solo per una fixture senza `sport` si cerca
+`padel`/`tennis` in titolo, slug, descrizione breve e descrizione, in quest'ordine; senza segnale
+il prodotto è padel (decisione M2).
 """
 import json
 import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 from vela.domain.models import Availability, Product
 
@@ -36,7 +38,9 @@ def _hotel_name(entry: dict) -> Optional[str]:
     return name.strip() if name else None
 
 
-def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datetime) -> Product:
+def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datetime,
+                       brand: Optional[str] = None, sport: Optional[str] = None) -> Product:
+    """Un `Product` da un item o un dettaglio HofJ; `sport` (dal brand) prevale sul testo."""
     category = entry.get("category") or {}
     venue = entry.get("venue") or {}
     destination = entry.get("destination") or {}
@@ -48,8 +52,8 @@ def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datet
         title=(entry.get("title") or "").strip(),
         slug=entry.get("slug") or "",
         short_description=(entry.get("shortDescription") or "").strip(),
-        sport=detect_sport(entry.get("title"), entry.get("slug"), entry.get("shortDescription"),
-                           entry.get("description")),
+        sport=sport or detect_sport(entry.get("title"), entry.get("slug"),
+                                    entry.get("shortDescription"), entry.get("description")),
         category=category.get("name") or None,
         destination=(destination.get("title") or "").strip() or None,
         country=destination.get("country") or None,
@@ -70,6 +74,7 @@ def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datet
         bookable_checked_at=None,
         archived=archived,
         provider_id=entry.get("providerID"),
+        brand=brand,
     )
 
 
@@ -80,41 +85,54 @@ def load_fixture(path, fetched_at: Optional[datetime] = None) -> list:
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
     details = data.get("details") or {}
+    brand, sport = data.get("brand"), data.get("sport")
     products = []
     for item in data.get("products") or []:
         pid = str(item["id"])
         detail = details.get(pid)
         if detail and not item.get("archived"):
             products.append(product_from_entry(detail["catalog"], archived=False,
-                                               raw=detail.get("raw") or {}, fetched_at=fetched_at))
+                                               raw=detail.get("raw") or {}, fetched_at=fetched_at,
+                                               brand=brand, sport=sport))
         else:
             products.append(product_from_entry(item, archived=bool(item.get("archived")),
-                                               raw=item, fetched_at=fetched_at))
+                                               raw=item, fetched_at=fetched_at,
+                                               brand=brand, sport=sport))
     return products
 
 
 def fixture_meta(path) -> dict:
-    """Host, locale e brand con cui la fixture è stata registrata (`record_catalog.py`)."""
+    """Host, locale, brand e sport con cui la fixture è stata registrata."""
     with open(path, encoding="utf-8") as fh:
         data = json.load(fh)
-    return {"base_url": data.get("base_url"), "locale": data.get("locale"), "brand": data.get("brand")}
+    return {"base_url": data.get("base_url"), "locale": data.get("locale"), "brand": data.get("brand"),
+            "sport": data.get("sport")}
 
 
-def select_fixture(fixtures_dir, base_url: str) -> str:
-    """La fixture `catalog*.json` registrata sull'host `base_url` (decisione M7: una fixture per
-    ambiente). Lo `/` finale non conta. Nessuna corrispondenza → RuntimeError con gli host trovati."""
+def select_fixtures(fixtures_dir, base_url: str) -> List[str]:
+    """Le fixture `catalog*.json` registrate sull'host `base_url`, una per brand (RF-32, M10).
+    Lo `/` finale non conta. Nessuna corrispondenza → RuntimeError con gli host trovati; due
+    fixture dello stesso brand sullo stesso host → RuntimeError."""
     wanted = base_url.rstrip("/")
-    found = []
+    found, selected, brands = [], [], {}
     for name in sorted(os.listdir(fixtures_dir)):
         if not (name.startswith("catalog") and name.endswith(".json")):
             continue
         path = os.path.join(fixtures_dir, name)
-        host = (fixture_meta(path)["base_url"] or "").rstrip("/")
-        if host == wanted:
-            return path
-        found.append("%s (%s)" % (host, name))
-    raise RuntimeError("nessuna fixture del catalogo registrata su %s; trovate: %s"
-                       % (wanted, ", ".join(found) or "nessuna"))
+        meta = fixture_meta(path)
+        host = (meta["base_url"] or "").rstrip("/")
+        if host != wanted:
+            found.append("%s (%s)" % (host, name))
+            continue
+        if meta["brand"] in brands:
+            raise RuntimeError("due fixture del brand %s su %s: %s e %s"
+                               % (meta["brand"], wanted, brands[meta["brand"]], name))
+        brands[meta["brand"]] = name
+        selected.append(path)
+    if not selected:
+        raise RuntimeError("nessuna fixture del catalogo registrata su %s; trovate: %s"
+                           % (wanted, ", ".join(found) or "nessuna"))
+    return selected
 
 
 BRAND_DESTINATIONS = ("Weebora", "Terrarossa")
