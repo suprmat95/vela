@@ -11,6 +11,7 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
+from vela.adapters.sms_fake import FakeSms
 from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
 from vela.domain.jobs import JobProcessor
@@ -20,6 +21,7 @@ from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus,
 from vela.domain.orders import OrderService
 from vela.domain.payment_check import PaymentCheckJob
 from vela.domain.purchase import PurchaseJob
+from vela.domain.sms import SmsJob
 from vela.ports.hofj import QuotaError, QuotaSnapshot, UpstreamError
 
 CRITERIA = Criteria("padel", Area("country", "Spagna", "ES"),
@@ -52,9 +54,12 @@ class World:
         booking = BookingJob(self.repos, router, now=self.clock)
         orders = OrderService(self.repos, self.hofj, now=self.clock)
         check = PaymentCheckJob(self.repos, payments, orders, now=self.clock)
+        sms = SmsJob(self.repos, FakeSms(), now=self.clock)
         self.processor = JobProcessor(self.repos, router, {JobKind.PURCHASE: purchase,
                                                               JobKind.BOOKING: booking,
-                                                              JobKind.PAYMENT_CHECK: check},
+                                                              JobKind.PAYMENT_CHECK: check,
+                                                              JobKind.SMS_LINK: sms,
+                                                              JobKind.SMS_CONFIRMED: sms},
                                       now=self.clock, lease_seconds=120)
 
     def purchase(self, n, seconds_ago=0):
@@ -144,7 +149,11 @@ class SchedulingTest(unittest.TestCase):
         w.purchase(2, seconds_ago=5)
         w.purchase(1, seconds_ago=10)
         w.purchase(3, seconds_ago=1)
-        for _ in range(3):
+        # 3 acquisti bastavano prima degli SMS_LINK: ora ognuno accoda anche un SMS immediato
+        # (priorità più alta di un acquisto) che intercala un giro di run_once in più.
+        for _ in range(6):
+            if all(w.status(n) == OrderStatus.AWAITING_PAYMENT for n in (1, 2, 3)):
+                break
             w.processor.run_once()
             w.clock.advance(5)                         # il bucket si riempie di nuovo
         created = [c[1] for c in w.hofj.calls if c[0] == "create_itinerary"]
@@ -190,6 +199,8 @@ class QuotaErrorTest(unittest.TestCase):
         w.clock.advance(10)
         w.processor.run_once()
         self.assertEqual(w.status(2), OrderStatus.CONFIRMED)
+        w.processor.run_once()                         # SMS di conferma: priorità sopra l'acquisto
+        self.assertEqual(w.status(1), OrderStatus.QUEUED)
         w.processor.run_once()
         self.assertEqual(w.status(1), OrderStatus.AWAITING_PAYMENT)
         self.assertEqual(sum(1 for m in w.hofj_methods() if m == "get_quota"), 1)

@@ -1,8 +1,12 @@
 """Helper condivisi dai test di M2: prodotti sintetici, porta HofJ finta, invariante RF-10."""
 from datetime import date, datetime, timezone
+from datetime import timedelta as _timedelta
 from decimal import Decimal
+from decimal import Decimal as _Decimal
 
 from vela.domain.models import Availability, Product
+from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
+from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
 TODAY = date(2026, 9, 25)
@@ -43,12 +47,6 @@ def assert_single_product(testcase, d):
     testcase.assertNotIn("http", d["say"])
     testcase.assertNotIn("**", d["say"])
 
-
-from decimal import Decimal as _Decimal
-from datetime import timedelta as _timedelta
-
-from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
-from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 
 class FakeHofJ:

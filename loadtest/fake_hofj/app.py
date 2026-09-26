@@ -16,10 +16,10 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -254,7 +254,8 @@ class FakeHofJ:
 
     def quota(self) -> dict:
         a = self.window.peek(self.config.api_key, self.clock())
-        iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat().replace("+00:00", "Z")
+        def iso(t):
+            return datetime.fromtimestamp(t, timezone.utc).isoformat().replace("+00:00", "Z")
         return {"clientId": "loadtest", "backend": "process_local", "limitPerMinute": a.limit,
                 "usedInWindow": a.used, "remainingInWindow": max(a.limit - a.used, 0),
                 "windowStartedAt": iso(a.window_start), "windowEndsAt": iso(a.window_end)}

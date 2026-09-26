@@ -272,15 +272,23 @@ _AWAITING_AMOUNT = {
     "it": "L'ordine è in attesa del pagamento di %s: usa il link che ti ho mandato.",
     "en": "The order is waiting for payment of %s: use the link I sent you.",
 }
+_AWAITING_AMOUNT_SMS = {
+    "it": ("L'ordine è in attesa del pagamento di %s: usa il link che ti ho mandato, anche per SMS "
+           "al numero che finisce con %s."),
+    "en": "The order is waiting for payment of %s: use the link I sent you, also by text to the number ending in %s.",
+}
 
 
 def say_status(status: OrderStatus, booking_code: Optional[str], failure_reason: Optional[str],
                lang: str = "it", total: Optional[Decimal] = None, minutes: Optional[int] = None,
-               price_from_total: Optional[Decimal] = None) -> str:
+               price_from_total: Optional[Decimal] = None, phone_tail: Optional[str] = None) -> str:
     if status == OrderStatus.QUEUED and minutes is not None:
-        return say_queued(minutes, lang)
+        return say_queued(minutes, lang, phone_tail)
     if status == OrderStatus.AWAITING_PAYMENT and total is not None:
-        text = _AWAITING_AMOUNT.get(lang, _AWAITING_AMOUNT["it"]) % fmt_money(total, lang)
+        if phone_tail:
+            text = _AWAITING_AMOUNT_SMS.get(lang, _AWAITING_AMOUNT_SMS["it"]) % (fmt_money(total, lang), phone_tail)
+        else:
+            text = _AWAITING_AMOUNT.get(lang, _AWAITING_AMOUNT["it"]) % fmt_money(total, lang)
         if price_from_total is not None and total != price_from_total:
             text = _price_changed(total, price_from_total, lang) + " " + text   # RF-16: prima del link
         return text
@@ -301,13 +309,25 @@ def _price_changed(total: Decimal, price_from_total: Decimal, lang: str = "it") 
         fmt_money(total), fmt_money(price_from_total).replace(" euro", ""))
 
 
-def say_queued(minutes: int, lang: str = "it") -> str:
-    """RF-45: l'attesa dichiarata in minuti (già arrotondati per eccesso, almeno 1)."""
+def say_queued(minutes: int, lang: str = "it", phone_tail: Optional[str] = None) -> str:
+    """RF-45: l'attesa dichiarata in minuti (già arrotondati per eccesso, almeno 1). Con le
+    ultime cifre di un numero valido annuncia i due SMS (RF-19, RF-57) e ricorda che si può
+    sempre chiedere lo stato, anche se l'SMS non arriva (decisione 2026-09-26)."""
     if lang == "en":
         wait = "a minute" if minutes == 1 else "%d minutes" % minutes
+        if phone_tail:
+            return ("You're in the queue: the payment link will be ready in about %s and I'll text "
+                    "it to the number ending in %s. I'll text you again when the booking is "
+                    "confirmed. If you want to know how it's going, or the text hasn't arrived in "
+                    "a few minutes, just ask me." % (wait, phone_tail))
         return ("You're in the queue: the payment link will be ready in about %s. Ask me how it's "
                 "going whenever you like." % wait)
     wait = "un minuto" if minutes == 1 else "%d minuti" % minutes
+    if phone_tail:
+        return ("Ti ho messo in coda: tra circa %s il link di pagamento sarà pronto e te lo mando "
+                "per SMS al numero che finisce con %s. Ti scrivo di nuovo quando la prenotazione "
+                "è confermata. Se vuoi sapere a che punto è, o se l'SMS non arriva entro qualche "
+                "minuto, chiedimi pure." % (wait, phone_tail))
     return ("Ti ho messo in coda: tra circa %s il link di pagamento sarà pronto. Chiedimi a che "
             "punto è quando vuoi." % wait)
 

@@ -1,7 +1,7 @@
 """Adapter Stripe (RF-18, RF-21, RF-22): parametri della Checkout Session con un client finto, mai la rete."""
 import unittest
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 

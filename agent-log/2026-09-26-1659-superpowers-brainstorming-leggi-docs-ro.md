@@ -536,3 +536,54 @@ La verifica sul banco è partita alle 17:58. Ogni giro dura circa 8 minuti, quin
 Il fix funziona: 0 POST ripetute in entrambi i giri, e ora le POST di booking sono esattamente una per itinerario prenotato. Aggiungo la nota in RESULTS.md e il risultato nella decisione.
 
 - 🔧 Bash: Add fix verification to RESULTS and decisions
+
+- 🔧 Bash: Run tests, commit verification, stop test Postgres
+
+Il fix delle prenotazioni doppie funziona anche sul banco: rilanciando A-500 e C-2500 identici, gli itinerari con la `POST /v1/bookings` ripetuta scendono a zero.
+
+| | A dopo M18 | A dopo il fix | C dopo M18 | C dopo il fix |
+|---|---|---|---|---|
+| Itinerari con POST di booking ripetuta | 1 | **0** | 4 | **0** |
+| POST di booking / itinerari prenotati | 68 / 67 | **67 / 67** | 89 / 85 | **85 / 85** |
+| Massimo chiamate in 60 s (≤ 108) | 108 | 106 | 106 | 106 |
+| 429 | 0 | 0 | 0 | 0 |
+| Marco confermato a (s), limite 420 | 95 | 95 | 367 | 372 |
+
+Ora c'è una sola POST di booking per ogni itinerario prenotato. I quattro criteri di M13b passano ancora, e il resto dei numeri (ritmo, coda, confermati) non cambia.
+
+**Branch.** Il fix sta su `task/booking-race`, aperto da `task/m13b`, quindi contiene anche i due commit di M13b:
+- `17b3447` e `1c78e8d`: M13b, cioè RESULTS.md con "prima" e "dopo" e la decisione;
+- `49cc1cb`: il fix (A + B), con 18 test nuovi;
+- `5ae6a92`: la verifica sul banco, aggiunta in RESULTS.md e in `docs/decisions.md`.
+
+La suite è verde: 1.062 test, 62 saltati senza `DATABASE_URL`, tutti verdi con Postgres. Ho spento il Postgres usato per i test e ho spento i container del banco dopo ogni giro.
+
+**Ancora aperti:**
+- La conversazione è più lenta dopo M18: nel giro C il p95 è 190-200 ms contro 30 ms, senza errori. Non l'ho indagato. La mia ipotesi è che i 10 worker girino nello stesso processo uvicorn della conversazione. Se vuoi, è una task a parte.
+- La migrazione 0009 porta a `dead` gli eventuali job di prenotazione doppi già presenti e tiene il più vecchio. Questa scelta non l'avevamo discussa.
+
+Non ho fatto push né PR. Per aprire la PR mi servono due indicazioni:
+- se vuoi due PR separate (prima `task/m13b`, poi il fix) o una sola;
+- quale base usare: `master` o `develop`. Il tuo CLAUDE.md globale dice `origin/develop` salvo indicazione del repo, ma qui il branch principale è `master`.
+
+## Utente 18:15
+
+ok mergia tutto
+
+## Agente 18:15
+
+- 🔧 Bash: Inspect master changes since branch point and worktrees
+
+- 🔧 Bash: Check master worktree is clean and merge master into branch
+
+L'unico conflitto è in `docs/decisions.md`: tutti e due i rami hanno aggiunto sezioni in fondo. Tengo entrambe.
+
+- 🔧 Bash: Locate conflict markers in decisions
+
+- 🔧 Bash: Inspect lines around conflict markers
+
+- 🔧 Bash: Resolve decisions conflict keeping both sides and run ruff
+
+Ruff è pulito. Ora la suite completa sul risultato del merge, anche contro un Postgres usa e getta nuovo, perché l'SMS di `master` ha aggiunto nuovi tipi di job.
+
+- 🔧 Bash: Run full suite after merge, with and without Postgres

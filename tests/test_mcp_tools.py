@@ -11,7 +11,8 @@ from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.usecases import Vela
-from vela.surfaces.mcp import DESCRIPTIONS, INSTRUCTIONS, TOOL_NAMES, build_mcp
+from vela.surfaces.mcp import (DESCRIPTIONS, DESCRIPTIONS_SMS, INSTRUCTIONS, INSTRUCTIONS_SMS,
+                               TOOL_NAMES, build_mcp)
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 TRAVELER = {"first_name": "Anna", "last_name": "Rossi", "email": "anna@x.it", "phone": "+390000",
@@ -33,11 +34,12 @@ class Clock:
         return self.at
 
 
-def make_vela(products=None, hofj=None):
+def make_vela(products=None, hofj=None, sms_enabled=False):
     repos = MemoryRepositories()
     repos.products.upsert_many(PRODUCTS if products is None else products)
     ids = iter("id%d" % i for i in range(1, 100))
-    return Vela(repos, hofj or FakeHofJ(), StubPayments(), now=Clock(), new_id=lambda: next(ids))
+    return Vela(repos, hofj or FakeHofJ(), StubPayments(), now=Clock(), new_id=lambda: next(ids),
+                sms_enabled=sms_enabled)
 
 
 class McpCase(unittest.IsolatedAsyncioTestCase):
@@ -165,6 +167,73 @@ class DescriptionsM5Test(unittest.TestCase):
 
     def test_instructions_mention_the_queue(self):
         self.assertIn("queue", INSTRUCTIONS)
+
+
+
+# Testi di prima degli SMS (e106b9c): restano identici quando Twilio non è configurato.
+PRE_SMS_INSTRUCTIONS_END = (
+    "Accepting a proposal puts the order in a queue: the payment link comes later from "
+    "get_order_status.")
+PRE_SMS_ACCEPT_END = (
+    "the order is `queued` with `order_id`, `position` and `wait_seconds`. Get the payment link "
+    "with get_order_status after the stated wait, or whenever the user asks.")
+PRE_SMS_STATUS_START = (
+    "Check an order after the wait stated by accept_proposal, when the user says they paid or "
+    "asks how it is going. Returns `status`: queued (with `position` and `wait_seconds`), ")
+
+
+class SmsTextsTest(unittest.TestCase):
+    """C1: gli SMS si annunciano solo se Twilio è configurato (`vela.sms_enabled`)."""
+
+    def test_default_texts_are_the_pre_sms_ones(self):
+        self.assertTrue(INSTRUCTIONS.endswith(PRE_SMS_INSTRUCTIONS_END))
+        self.assertIn(PRE_SMS_ACCEPT_END, DESCRIPTIONS["accept_proposal"])
+        self.assertTrue(DESCRIPTIONS["get_order_status"].startswith(PRE_SMS_STATUS_START))
+        for text in (INSTRUCTIONS, DESCRIPTIONS["accept_proposal"], DESCRIPTIONS["get_order_status"]):
+            self.assertNotIn("texts", text)
+
+    def test_sms_texts_say_vela_texts_the_link(self):
+        self.assertIn("texts the payment link", INSTRUCTIONS_SMS)
+        self.assertNotIn("comes later from get_order_status", INSTRUCTIONS_SMS)
+        self.assertIn("texts", DESCRIPTIONS_SMS["accept_proposal"])
+        self.assertIn("texts", DESCRIPTIONS_SMS["get_order_status"])
+        self.assertEqual(set(DESCRIPTIONS_SMS), set(DESCRIPTIONS))
+        for name in ("create_intent", "get_proposal", "reject_proposal"):
+            self.assertEqual(DESCRIPTIONS_SMS[name], DESCRIPTIONS[name])
+
+    def test_sms_texts_forbid_polling_but_always_answer_the_user(self):
+        # I1 (decisione dell'utente 2026-09-26): mai interrogare di propria iniziativa, sempre
+        # quando l'utente chiede, e una volta se dice che l'SMS non è arrivato
+        for name, text in (("instructions", INSTRUCTIONS_SMS),
+                           ("accept_proposal", DESCRIPTIONS_SMS["accept_proposal"]),
+                           ("get_order_status", DESCRIPTIONS_SMS["get_order_status"])):
+            with self.subTest(name=name):
+                self.assertIn("poll", text)
+                self.assertIn("whenever the user asks how it is going", text)
+                self.assertIn("once if the user says the text has not arrived", text)
+                self.assertNotIn("only when", text)
+
+
+class SmsServerTest(unittest.IsolatedAsyncioTestCase):
+    async def served(self, get_vela):
+        server = build_mcp(get_vela)
+        async with Client(server) as client:
+            tools = {t.name: t.description for t in (await client.list_tools()).tools}
+        return server.instructions, tools
+
+    async def test_sms_disabled_serves_the_pre_sms_texts(self):
+        vela = make_vela()
+        self.assertFalse(vela.sms_enabled)
+        for get_vela in (lambda: vela, lambda: None):
+            instructions, tools = await self.served(get_vela)
+            self.assertEqual(instructions, INSTRUCTIONS)
+            self.assertEqual(tools, DESCRIPTIONS)
+
+    async def test_sms_enabled_serves_the_sms_texts(self):
+        vela = make_vela(sms_enabled=True)
+        instructions, tools = await self.served(lambda: vela)
+        self.assertEqual(instructions, INSTRUCTIONS_SMS)
+        self.assertEqual(tools, DESCRIPTIONS_SMS)
 
 
 class ErrorsTest(McpCase):

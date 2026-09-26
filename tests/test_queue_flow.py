@@ -5,7 +5,6 @@ in memoria, orologio manuale che avanza di un secondo per giro; il worker gira c
 Vela esce dal token bucket di M18: B = 8, 100 gettoni/min, attesa dichiarata su 16 acquisti/min.
 """
 import unittest
-from dataclasses import replace
 from datetime import timedelta
 
 from support import NOW, FakeHofJ

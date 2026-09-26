@@ -1,6 +1,5 @@
 """Sync incrementale multi-brand del catalogo (M10, RF-28..31) con sorgente finta: mai la rete."""
 import unittest
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from hofj_samples import detail_of, item

@@ -6,7 +6,7 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
   1 cliente (`set_customer`)                                    1
   2 passeggeri (`get_pax` + `set_pax`, un'unica unità di ripresa) 2
   3 importo da pagare (`get_itinerary`, salva `total`)          1
-  4 link di pagamento (porta dei pagamenti) e job di verifica    0
+  4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
 
 Prima di ogni passo l'ordine viene riletto: se non è più `queued` (rinuncia, RF-49) il job si
@@ -30,6 +30,7 @@ from typing import Callable, Union
 from vela.domain import say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
+from vela.domain.notify import enqueue_sms
 from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError,
                              UpstreamTimeout)
 from vela.ports.payments import PaymentsError, PaymentsPort
@@ -123,6 +124,7 @@ class PurchaseJob:
             now = self.now()   # RF-20: da qui la verifica del pagamento per interrogazione
             self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PAYMENT_CHECK, order.id, JobStatus.PENDING,
                                         now, now + timedelta(seconds=self.poll_seconds)))
+            enqueue_sms(self.repos, JobKind.SMS_LINK, order.id, now, self.new_id)   # RF-19
         job = replace(job, step=job.step + 1)
         self.repos.jobs.save(job)
         return job

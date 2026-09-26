@@ -156,9 +156,10 @@ class PurchaseEnqueuesCheckTest(unittest.TestCase):
                                "EUR", TravelerProfile(), NOW, NOW, itinerary_id="it-1"))
         job = Job("j1", JobKind.PURCHASE, "o1", JobStatus.RUNNING, NOW, NOW, step=4, locked_at=NOW)
         repos.jobs.enqueue(job)
+        ids = iter(["chk1", "sms1"])   # id distinto per il job di verifica e per l'SMS accodati insieme
         purchase = PurchaseJob(repos, SingleClientRouter(FakeHofJ()), StubPayments(), lambda i: NoMatch("i1", "x", "x"),
                                DEFAULT_TRAVELER, now=lambda: NOW, max_attempts=3,
-                               new_id=lambda: "chk1", poll_seconds=60)
+                               new_id=lambda: next(ids), poll_seconds=60)
         purchase.run(job, NOW + timedelta(seconds=60))
         check = repos.jobs.active_for_order("o1", JobKind.PAYMENT_CHECK)
         self.assertEqual((check.id, check.run_after), ("chk1", NOW + timedelta(seconds=60)))

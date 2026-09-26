@@ -1,0 +1,70 @@
+# SMS al viaggiatore (Twilio)
+
+Vela manda due SMS al viaggiatore principale, senza che nessuno chieda nulla (decisione del
+2026-09-26, design in `docs/superpowers/specs/2026-09-26-sms-notifiche-design.md`):
+
+1. quando l'ordine diventa `awaiting_payment`: riepilogo (titolo, date, persone, totale) e link
+   di pagamento Stripe, valido 24 ore;
+2. quando l'ordine diventa `confirmed`: riepilogo e codice di prenotazione.
+
+Codice: `vela/domain/sms.py` (job), `vela/domain/sms_text.py` (testi), `vela/domain/phone.py`
+(numeri), `vela/adapters/sms_twilio.py`, `vela/adapters/sms_fake.py`.
+
+## Numeri
+
+Il telefono è quello di RF-12. Uno "(0)" (es. `+39 (0)333…`) viene tolto, poi spazi e
+separatori; `+…` resta com'è; `00…`
+diventa `+…`; altrimenti si aggiunge `+39` (test in Italia). Un numero che non risulta `+` e
+8-15 cifre non riceve SMS: il job lo registra nei log e l'ordine va avanti.
+
+## Attivazione
+
+| Variabile | Effetto |
+|---|---|
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM` | Tutte e tre: SMS reali con Twilio. Nessuna: SMS finti (replay e test). Solo alcune: l'app non parte. Indipendenti da `VELA_UPSTREAM_MODE` |
+
+Solo con Twilio configurato l'agente annuncia gli SMS (frasi di `say` e testi MCP); con gli SMS
+finti restano le frasi e i testi di prima, perché nessun SMS parte davvero.
+
+`TWILIO_FROM` è il numero Twilio acquistato, in E.164. Mai incollare le chiavi in chat, nei
+commit o in `docs/`.
+
+## Tentativi
+
+Job `sms_link` e `sms_confirmed` nella coda del worker, prelevati dopo prenotazioni e verifiche
+del pagamento e prima degli acquisti. Errore temporaneo (rete, timeout, 5xx, 429): nuovo
+tentativo dopo 30 s, 2 min, 10 min, poi `dead`. Altro 4xx di Twilio: `dead` subito. Un SMS non
+cambia mai lo stato dell'ordine. Nei log il numero è mascherato (`+39******4567`) e il testo
+non compare.
+
+## Rollback
+
+Il codice precedente a questa funzione non sa leggere le righe dei job `sms_link` e
+`sms_confirmed`. Prima di tornare a una versione precedente, segnare come `done` i job SMS
+ancora `pending` o `running`:
+
+```sql
+UPDATE jobs SET status = 'done', locked_at = NULL
+WHERE kind IN ('sms_link', 'sms_confirmed') AND status IN ('pending', 'running');
+```
+
+## Test manuale
+
+Costo: 2 SMS Twilio, circa 4-5 segmenti in tutto (il primo SMS, con il link Stripe vero, da solo
+può occupare 3-4 segmenti o più), 1 Checkout Session e 1 pagamento di test Stripe, le letture
+della sessione ogni 60 s finché non è pagata, più quanto indicato in `docs/stripe.md` per HofJ
+in live.
+
+1. Sul server impostare le tre variabili Twilio e `STRIPE_SECRET_KEY` con `VELA_PUBLIC_URL`.
+   Con un account Twilio di prova gli SMS arrivano solo ai numeri verificati nella console
+   Twilio: verificare prima il proprio.
+2. Lanciare il flusso con il proprio numero come telefono del viaggiatore, scritto solo sulla
+   riga di comando (mai nei commit, in `docs/` o nei log):
+   `VELA_API_TOKEN=... uv run python scripts/rest_flow.py <url del server> --phone <proprio numero>`.
+   Lo script interroga lo stato da sé per misurare i tempi: va bene, il punto è che l'SMS
+   arrivi al viaggiatore senza che nessuno lo chieda all'agente.
+3. Arriva l'SMS con riepilogo e link. Pagare con `4242 4242 4242 4242` (dal link dell'SMS o da
+   quello stampato dallo script).
+4. Arriva l'SMS di conferma con lo stesso codice che lo script stampa (`booking_code`).
+
+Registrare l'esito in `docs/acceptance.md` senza numero né chiavi.

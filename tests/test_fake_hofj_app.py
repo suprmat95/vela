@@ -211,8 +211,8 @@ class LogTest(unittest.TestCase):
             f.log.close()
             with open(path, encoding="utf-8") as fh:
                 lines = [json.loads(line) for line in fh]
-        self.assertEqual([l["status"] for l in lines], [200, 429, 401])
-        self.assertEqual([l["counted"] for l in lines], [True, True, False])
+        self.assertEqual([line["status"] for line in lines], [200, 429, 401])
+        self.assertEqual([line["counted"] for line in lines], [True, True, False])
         self.assertEqual(lines[0]["endpoint"], "GET /v1/quota")
 
 
