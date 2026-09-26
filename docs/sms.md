@@ -35,13 +35,21 @@ non compare.
 
 ## Test manuale
 
-Costo: 2 SMS Twilio (circa 3-4 segmenti in tutto), 1 Checkout Session e 1 pagamento di test
-Stripe, più quanto indicato in `docs/stripe.md` per HofJ in live.
+Costo: 2 SMS Twilio, circa 4-5 segmenti in tutto (il primo SMS, con il link Stripe vero, da solo
+può occupare 3-4 segmenti o più), 1 Checkout Session e 1 pagamento di test Stripe, le letture
+della sessione ogni 60 s finché non è pagata, più quanto indicato in `docs/stripe.md` per HofJ
+in live.
 
-1. Impostare nell'ambiente le tre variabili Twilio e `STRIPE_SECRET_KEY` con `VELA_PUBLIC_URL`.
-2. Eseguire il flusso di `docs/stripe.md` (`scripts/rest_flow.py`) con il proprio numero come
-   telefono del viaggiatore.
-3. Senza interrogare lo stato: arriva l'SMS con riepilogo e link. Pagare con `4242 4242 4242 4242`.
-4. Arriva l'SMS di conferma con lo stesso codice di `GET /v1/orders/<order_id>`.
+1. Sul server impostare le tre variabili Twilio e `STRIPE_SECRET_KEY` con `VELA_PUBLIC_URL`.
+   Con un account Twilio di prova gli SMS arrivano solo ai numeri verificati nella console
+   Twilio: verificare prima il proprio.
+2. Lanciare il flusso con il proprio numero come telefono del viaggiatore, scritto solo sulla
+   riga di comando (mai nei commit, in `docs/` o nei log):
+   `VELA_API_TOKEN=... uv run python scripts/rest_flow.py <url del server> --phone <proprio numero>`.
+   Lo script interroga lo stato da sé per misurare i tempi: va bene, il punto è che l'SMS
+   arrivi al viaggiatore senza che nessuno lo chieda all'agente.
+3. Arriva l'SMS con riepilogo e link. Pagare con `4242 4242 4242 4242` (dal link dell'SMS o da
+   quello stampato dallo script).
+4. Arriva l'SMS di conferma con lo stesso codice che lo script stampa (`booking_code`).
 
 Registrare l'esito in `docs/acceptance.md` senza numero né chiavi.
