@@ -46,6 +46,9 @@ class DockerignoreTest(unittest.TestCase):
         for needed in ("alembic", "alembic.ini", "pyproject.toml", "uv.lock", "vela"):
             self.assertNotIn(needed, lines)
 
+    def test_excludes_the_landing(self):
+        self.assertIn("landing", read(".dockerignore").splitlines())
+
 
 class ComposeTest(unittest.TestCase):
     """Banco di prova di M13a: il compose non deve mai portare il carico a HofJ vero."""

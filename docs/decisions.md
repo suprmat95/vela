@@ -732,3 +732,31 @@ Piano in `docs/plans/2026-09-26-m13a-banco-di-prova.md`. Intervista del 2026-09-
 | Giri della colonna "prima" (rivista il 2026-09-26) | Quattro giri ridotti da 5 min di arrivi + 3 di coda: 500, 1.000, 2.500 viaggiatori puliti e 1.000 con guasti e latenza pessimistica; 1k/10k/50k in 10 minuti diventano una **proiezione** in `RESULTS.md`. Anna arriva al 60% della finestra degli arrivi (minuto 6 di 10, minuto 3 di 5). Sostituisce "1k, 10k, 50k puliti + 50k con guasti" | Richiesta dell'utente: numeri più bassi che consentano proiezioni. Con il 20% che accetta la coda satura oltre ~85 arrivi/min, e da lì chiamate HofJ/min e acquisti/min non dipendono dal numero di viaggiatori: a 50k cresce solo la coda, che si calcola dai ritmi misurati. Il carico REST sulla conversazione a 50k resta una proiezione lineare, non una misura. Tempo: ~40 minuti invece di ~70 |
 | Durata di un giro (rivista il 2026-09-26) | `run.py --duration` (minuti, default 10) è il tetto dell'intero giro: 2/3 di arrivi e 1/3 di coda, oppure la divisione data con `--arrival-minutes`/`--tail-minutes`, rifiutata se la supera. Sostituisce "10 min di arrivi + 5 di coda" | Richiesta dell'utente: load test configurabile con un massimo di 10 minuti |
 | Giro con finestra scorrevole | Un quinto giro, E-1000-rolling (1.000 viaggiatori, finestra `rolling`), nella colonna "prima" | I giri con finestra ancorata superano 120 chiamate in 60 s senza nessun 429: serviva vedere cosa succede con la finestra descritta da brief e OAS. Esito: 3 429 alla prima raffica, un minuto a metà ritmo, poi 111 chiamate in 60 s. Dettagli in `loadtest/RESULTS.md` |
+
+## 2026-09-26 — Landing: design
+
+Origine: brainstorming di `task/landingpage`. Design in
+`docs/superpowers/specs/2026-09-26-landing-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Scopo della landing | Guida ai canali ("come si usa Vela"): nessun viaggio, prezzo, lista o tabella | Il brief dice "In 2029 Vela has no homepage"; la pagina spiega come arrivare a Vela dove il viaggiatore è già. Scartate: vetrina per i valutatori, pagina marketing |
+| Stack | HTML, CSS e JS a mano in `landing/`, nessun build e nessuna dipendenza | Una sola pagina; Render la pubblica così com'è. Scartati: static site generator (Node, `package.json`, build), Tailwind da CDN |
+| Deploy | Servizio `vela-landing` (`runtime: static`, `staticPublishPath: landing`) nello stesso `render.yaml`; `buildFilter` separati tra landing e API; `landing` in `.dockerignore` | Configurazione versionata; un cambio alla landing non ridistribuisce l'API e viceversa. Scartati: servizio creato a mano in dashboard, secondo blueprint |
+| Canali mostrati | Claude via MCP, widget ElevenLabs, numero di telefono. REST escluso | Il token REST non è pubblico; la pagina è per il viaggiatore |
+| Agent id e numero | Placeholder vuoti in `landing/config.js`; finché sono vuoti le sezioni mostrano "In arrivo" e lo script ElevenLabs non viene caricato. La creazione resta in M12 | M12 non è fatta; attivarli poi costa una riga |
+| Lingua | Solo italiano | Scelta dell'utente |
+| Comandi del servizio statico | `buildCommand: echo "Landing statica, nessun build"` e `staticPublishPath: ./landing` | Non è certo che il Blueprint accetti un `buildCommand` vuoto; `./` segue gli esempi della documentazione Render |
+
+## 2026-09-26 — Landing: design grafico
+
+Origine: design fornito dall'utente (`index_1.html`, non versionato). Spec aggiornata in
+`docs/superpowers/specs/2026-09-26-landing-design.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Aspetto | Il design dell'utente, portato in `styles.css` e `index.html`; `config.js` e `main.js` restano. Solo tema chiaro, come il design | Scelta dell'utente; la struttura a file resta quella testata |
+| Dati negli esempi | I segnaposto del design ([DESTINAZIONE], [DATE], [PREZZO]) diventano i `say` reali di Vela, accorciati, ottenuti in memoria sulle fixture del 2026-09-25 (prodotti 688, 695, 369, 1023, 1044), senza chiamate esterne. Scartati: dati inventati, testo generico | Scelta dell'utente: tutto ciò che si mostra viene da HofJ. Prezzi e date possono cambiare con il catalogo |
+| Frasi degli esempi | Cambiate il minimo perché il parser di oggi le capisca: "siamo in due" invece di "in due", "novembre" invece di "Pasqua", "Preferisco in Italia/Spagna" invece di "più fresco" e "spostare di una settimana", "per 2 persone" nella frase del connettore; tolto "al caldo" | Con le frasi originali Vela chiedeva il numero di persone, leggeva "più fresco" come Malaga o ignorava il periodo. I limiti del parser restano da trattare in un task a parte |
+| Esempio del calendario | Riscritto: è Claude, con un suo connettore, a leggere e scrivere il calendario; Vela propone il viaggio | Vela non ha una funzione calendario; scelta dell'utente |
+| Nome del connettore | `Pacchetti Viaggio di Padel Tennis` sulla landing e nel README | Scelta dell'utente |
