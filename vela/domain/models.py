@@ -222,6 +222,10 @@ class Proposal:
     def total_from(self) -> Decimal:
         return self.price_from * self.pax
 
+    @property
+    def nights(self) -> int:
+        return (self.end_date - self.start_date).days
+
 
 class OrderStatus(str, Enum):
     """Stati dell'ordine nell'ordine di RF-25."""
@@ -363,7 +367,7 @@ class ProposalMade:
         p = self.proposal
         return {"proposal_id": p.id, "intent_id": p.intent_id, "product": self.product.to_dict(),
                 "start_date": p.start_date.isoformat(), "end_date": p.end_date.isoformat(),
-                "pax": p.pax, "price_from": money_str(p.price_from),
+                "nights": p.nights, "pax": p.pax, "price_from": money_str(p.price_from),
                 "total_from": money_str(p.total_from), "currency": p.currency,
                 "reason": p.reason, "replaced": self.replaced, "say": self.say}
 

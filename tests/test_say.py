@@ -308,6 +308,40 @@ class AgentToolSayTest(unittest.TestCase):
                 self.assertEqual(s.count("."), len(items))
         self.assertEqual(say.say_discarded((), "it"), "")
 
+    def test_understood_says_the_duration_between_period_and_people(self):
+        c = Criteria("padel", SPAIN, Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"), 2,
+                     duration_min_nights=1, duration_max_nights=3)
+        self.assertEqual(say.say_understood(c),
+                         "Ho capito: un viaggio di padel in Spagna tra il 1 ottobre 2026 e il "
+                         "31 ottobre 2026, da 1 a 3 notti, per 2 persone.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip in Spain between 1 October 2026 and "
+                         "31 October 2026, 1 to 3 nights, for 2 people.")
+
+    def test_understood_duration_forms(self):
+        cases = [((4, 4), "4 notti", "4 nights"), ((1, 1), "1 notte", "1 night"),
+                 ((3, None), "almeno 3 notti", "at least 3 nights"),
+                 ((None, 5), "al massimo 5 notti", "at most 5 nights")]
+        for (low, high), it, en in cases:
+            with self.subTest(low=low, high=high):
+                c = Criteria("padel", pax=2, duration_min_nights=low, duration_max_nights=high)
+                self.assertEqual(say.say_understood(c), "Ho capito: un viaggio di padel, %s, per 2 persone." % it)
+                self.assertIn(en, say.say_understood(replace(c, language="en")))
+
+    def test_understood_duration_last_has_no_trailing_comma(self):
+        c = Criteria("padel", duration_min_nights=6, duration_max_nights=8)
+        self.assertEqual(say.say_understood(c), "Ho capito: un viaggio di padel, da 6 a 8 notti.")
+
+    def test_understood_without_duration_is_unchanged(self):
+        self.assertEqual(say.say_understood(Criteria("padel", SPAIN, pax=2)),
+                         "Ho capito: un viaggio di padel in Spagna per 2 persone.")
+
+    def test_discarded_duration(self):
+        self.assertEqual(say.say_discarded((("duration", (4, 2)),), "it"),
+                         "Non ho potuto usare 4 - 2 come durata in notti.")
+        self.assertEqual(say.say_discarded((("duration", (0, None)),), "en"),
+                         "I couldn't use 0 - ? as the length in nights.")
+
     def test_direction_discarded_names_the_direction(self):
         self.assertIn("nord", say.say_discarded((("direction", "north"),), "it"))
         self.assertIn("north", say.say_discarded((("direction", "north"),), "en"))

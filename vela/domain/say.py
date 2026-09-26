@@ -112,6 +112,11 @@ def _describe(c: Criteria) -> str:
         parts.append(geo.where(c.area, lang))
     if c.period:
         parts.append(_when(c.period, lang))
+    if c.duration_min_nights is not None or c.duration_max_nights is not None:
+        # tra virgole: "…a ottobre, da 1 a 3 notti, per 2 persone" (M21, RF-58)
+        parts[-1] += ","
+        parts.append(nights_range(c.duration_min_nights, c.duration_max_nights, lang)
+                     + ("," if c.pax or c.budget is not None else ""))
     if c.pax:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if c.budget is not None:
@@ -141,21 +146,23 @@ _DISCARDED = {
            "period": "Non ho potuto usare le date %s.",
            "pax": "Non ho potuto usare %s come numero di persone.",
            "budget": "Non ho potuto usare %s come budget.",
-           "direction": "Non so spostare la ricerca verso %s."},
+           "direction": "Non so spostare la ricerca verso %s.",
+           "duration": "Non ho potuto usare %s come durata in notti."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
            "pax": "I couldn't use %s as the number of people.",
            "budget": "I couldn't use %s as the budget.",
-           "direction": "I can't move the search %s."},
+           "direction": "I can't move the search %s.",
+           "duration": "I couldn't use %s as the length in nights."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
 
 def _discarded_value(field: str, value, lang: str) -> str:
-    if field == "period":
+    if field in ("period", "duration"):
         start, end = value
-        return "%s - %s" % (start or "?", end or "?")
+        return "%s - %s" % tuple("?" if v is None else v for v in (start, end))
     if field == "direction":
         return _DIRECTION_WORDS.get(lang, _DIRECTION_WORDS["it"]).get(value, str(value))
     return str(value)

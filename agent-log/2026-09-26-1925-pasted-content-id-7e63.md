@@ -195,3 +195,29 @@ RED for the right reasons. Implementing: date/night formatting in `say.py` (wher
 - 🔧 Bash: Implement duration preference and reason in chooser
 
 - 🔧 Bash: Fix wording in test, simplify label, run suite
+
+Green, lint clean. (The file change on disk was mine, from the script.) Commit:
+
+- 🔧 Bash: Commit chooser duration changes
+
+Step 3: `say` ("Ho capito" and the discarded field) and `nights` in the `proposal` response.
+
+- 🔧 Bash: Read say discarded helpers and test_say layout
+
+- 🔧 Bash: Read AgentToolSayTest
+
+- 🔧 Bash: Check say test fixtures and ProductSummary
+
+Tests for `say` and for `nights` (RED):
+
+- 🔧 Bash: Add say and nights tests, run expecting failures
+
+- 🔧 Bash: Implement say duration phrase and nights, run suite
+
+- 🔧 Bash: Show the discarded-duration failure
+
+A real bug caught by the test: `start or "?"` turns 0 into "?". I'll use `is None`:
+
+- 🔧 Bash: Fix zero handling in discarded value and rerun
+
+- 🔧 Bash: Commit say and nights changes
