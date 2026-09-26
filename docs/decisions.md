@@ -460,6 +460,7 @@ Origine: esecuzione del piano `docs/plans/2026-09-25-m5-hofj-reale.md` in TDD, T
 | Da verificare in M7 | La fixture è il catalogo di produzione (`it`), le verifiche di §8 erano su staging (prodotto 118 solo in `en`) | Con `live` su staging gli id della fixture non esistono: M7 deve scegliere ambiente e catalogo coerenti |
 | Suite finale | 709 test, 40 saltati senza `DATABASE_URL` (erano 390 a inizio M5, 513 dopo il rebase su M6 e M9) | — |
 
+
 ## 2026-09-25 — M7: prima prenotazione reale end-to-end
 
 Origine: intervista sulla macro task M7, piano in
