@@ -217,3 +217,10 @@ Da fare: Task 10 (criterio 1 in claude.ai, con la frase su Barcellona), Task 11 
 `rest_flow.py --trap`), Task 12 se qualcosa si rompe, Task 13 (righe finali di acceptance,
 decisioni, merge). Esiti e latenza già registrati in `docs/acceptance.md`.
 
+## Stato al 2026-09-26
+
+Task 10 e 11 chiusi dalle conversazioni dell'utente in claude.ai (criterio 1 `cji6lhfcni72`,
+criterio 4 con la trappola sostituita dal 76); trappola tolta dalla fixture. Criteri 1, 3 e 4
+`ok` in `docs/acceptance.md`. Resta il merge di `task/m7` su `master` e il deploy, che archivia
+la trappola sul DB di Render.
+

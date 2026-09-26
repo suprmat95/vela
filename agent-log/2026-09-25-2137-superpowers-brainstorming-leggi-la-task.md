@@ -1175,3 +1175,9 @@ Suite verde. Registro in `docs/acceptance.md` le esecuzioni del mattino, poi agg
 - 🔧 Bash: Locate acceptance rows for criteria 1 and 4
 
 - 🔧 Bash: Record acceptance and decisions, commit
+
+Commit `a103004`: la trappola è tolta e i criteri 1 e 4 sono registrati. Resta il Task 13. Prendo il conteggio finale della suite locale, senza DB, per le decisioni:
+
+- 🔧 Bash: Run final local suite for counts
+
+- 🔧 Bash: Record final decisions and status, commit
