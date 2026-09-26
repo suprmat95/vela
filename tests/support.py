@@ -181,3 +181,23 @@ def inline_worker(vela, **settings):
     from vela.app import build_worker
     from vela.config import Settings
     return build_worker(vela, Settings(worker_concurrency=0, **settings))
+
+
+
+def asgi_transport(app):
+    """Transport httpx **sincrono** verso un'app ASGI in-process (M13a). `httpx.ASGITransport` è
+    solo asincrono e `HofJHttp` usa un client sincrono; il `TestClient` di Starlette gira su un
+    suo httpx, quindi qui la richiesta passa dal `TestClient` e la risposta torna in `httpx`."""
+    import httpx
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+
+    class _Transport(httpx.BaseTransport):
+        def handle_request(self, request):
+            r = client.request(request.method, str(request.url), headers=dict(request.headers),
+                               content=request.read())
+            return httpx.Response(r.status_code, headers=list(r.headers.items()),
+                                  content=r.content, request=request)
+
+    return _Transport()

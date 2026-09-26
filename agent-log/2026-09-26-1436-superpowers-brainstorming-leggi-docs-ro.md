@@ -74,3 +74,31 @@ Piano salvato e decisioni registrate (commit `58e6e0f`). Ora scrivo le regole di
 - 🔧 Bash: Implement quota rules and run their tests
 
 - 🔧 Bash: Commit rules; read sync internals and fixture helpers
+
+- 🔧 Bash: Inspect detail projection and fixture detail structure
+
+- 🔧 Bash: Look at existing HofJ HTTP tests and samples
+
+- 🔧 Bash: Write fake HofJ faults/latency and call log modules
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m13a/loadtest/fake_hofj/app.py
+
+Scrivo i test dell'app del finto HofJ (rotte, 401/429/502/503, guasti, registro).
+
+- 🔧 Bash: Fix executed flag; pick sample product ids from fixtures
+
+- 🔧 Bash: Write fake HofJ app tests and run them
+
+- 🔧 Bash: Write and run HofJHttp contract tests against the fake
+
+- 🔧 Bash: Run fake HofJ tests via discovery
+
+- 🔧 Bash: Inspect contract test failures and TestClient streams
+
+- 🔧 Bash: Debug TestClient transport response stream type
+
+Il transport del `TestClient` usa un pacchetto `httpx2` diverso da `httpx`, quindi scrivo un piccolo adattatore sincrono nei test.
+
+- 🔧 Bash: Add sync ASGI transport adapter and rerun tests
+
+- 🔧 Bash: Add fake HofJ CLI, test it, commit
