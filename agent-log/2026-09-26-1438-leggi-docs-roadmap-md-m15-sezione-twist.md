@@ -1384,3 +1384,23 @@ ok leggi master ho appena mergiato il branch di nome last-load-test con i risult
 - 🔧 Bash: Resolve decisions log conflict keeping both sides
 
 - 🔧 Bash: Verify and commit the merge
+
+Merge fatto (`5a23edb`), test verdi. Ora leggo il `RESULTS.md` nuovo per intero.
+
+- 🔧 Read /Users/matteodospina/orca/workspaces/vela/doc-architecture/loadtest/RESULTS.md
+
+- 🔧 Bash: Read the projection section of new results
+
+- 🔧 Bash: Locate all load-test references to update
+
+- 🔧 Bash: Read sections that reference load test results
+
+Riscrivo le parti toccate dal nuovo load test: il riferimento in testa, §2 (conteggi del funnel), §3.2, §3.7, §4.1, §4.3, §4.5, §6, §7 e §8.
+
+- 🔧 Bash: Update all load-test dependent sections
+
+- 🔧 Bash: Fix a row label and check links
+
+Link tutti validi. Aggiungo la voce in `decisions.md` (supera la stima di "circa 13 istanze" della voce precedente), poi test, lint e commit.
+
+- 🔧 Bash: Record decision, verify, and commit

@@ -1334,3 +1334,15 @@ mentre la proiezione a 50.000 viaggiatori arriva a ~420 req/s.
 |---|---|---|
 | Come trattarlo | Solo testo (opzione 1): `ARCHITECTURE.md` §4.1, §4.3, §4.5 dicono che il tempo di risposta è misurato fino a 34 req/s su un'istanza, scompongono i ~420 req/s (≈208 arrivi + ≈212 polling della coda) e stimano al massimo ~13 istanze (predicted, scala lineare e Postgres non verificati) | Scelta dell'utente. Scartati per ora: un giro a gradini per trovare il limite di un'istanza (opzione 2, avviata e poi fermata dall'utente) e la riduzione del carico con codice nuovo (opzione 3) |
 | Limiti del banco dichiarati | In `loadtest` l'attesa di `accept_proposal` è 0 (in `live` fino a 100 s su un pool di 40); `get_proposal` legge tutto il catalogo senza cache per istanza | Il banco sottostima il carico reale della conversazione |
+
+## 2026-09-27 — `ARCHITECTURE.md` completato con il load test a 10.000
+
+Origine: merge su `master` di `suprmat95/last-load-test` (giro da 10.000 a quattro gruppi,
+`RESULTS.md` riscritto) e richiesta dell'utente di completare `ARCHITECTURE.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Fonte dei numeri | Il giro da 10.000 come "ultimo giro" (§2 funnel con i conteggi, §4.3, §4.5); i giri M13a…M19 restano come "giri che hanno formato il design", citati da `git show 5ec87aa:loadtest/RESULTS.md` | `RESULTS.md` ora contiene solo il giro da 10.000; i giri precedenti spiegano le scelte (token bucket, fix della corsa, cache, M19) |
+| Finestra della proiezione | Quella di `RESULTS.md`: 50.000 in 5 minuti, dichiarata più severa dei 10 minuti del twist; la proiezione precedente a 10 minuti citata in una riga | Un solo modello, quello del file versionato |
+| Conversazione | Misurata a 34 req/s (p95 200-220 ms, 0 errori) e a 86,8 req/s (p95 0,8-1,1 s, 3 errori per il pool esaurito); a 454 req/s stimate 6-14 istanze (454 ÷ 87 e 454 ÷ 34), non verificate | Supera la stima di "circa 13 istanze" della voce "Carico della conversazione a 50.000" |
+| Pool del database | Dichiarato come primo limite di Vela prima della quota (§3.2, §6) e tra i prossimi passi (§7) | Misurato nel giro da 10.000; non cambiato |

@@ -4,7 +4,9 @@ This document explains how Vela is built, the choices behind it, and what each c
 is written for readers who have not followed the project day to day. Every decision here is
 recorded in more detail, with date and rejected alternatives, in [`docs/decisions.md`](docs/decisions.md)
 (Italian); section names below refer to its headings. Load test numbers come from
-[`loadtest/RESULTS.md`](loadtest/RESULTS.md).
+[`loadtest/RESULTS.md`](loadtest/RESULTS.md) (the latest run, 10,000 travellers) and, for the
+earlier rounds that shaped the design, from that file's history
+(`git show 5ec87aa:loadtest/RESULTS.md`).
 
 Labels used for numbers: **measured** = from a real call, the fake HofJ's call log, or Locust;
 **projected** = computed from measured rates by `loadtest/projection.py`; **predicted** = a
@@ -116,6 +118,18 @@ page, and the code delivered to the traveller).
 | 5 · Payment | `get_order_status` (optional) | Stripe (payment page); `payment_check` job reads the session every 60 s or when asked | 0 | Up to 60 s unless the traveller asks |
 | 6 · Booking | `get_order_status` | Booking job, quota class `booking`: may drain the bucket, never queues behind purchases | 3 | Never sacrificed |
 
+How many travellers reached each stage in the latest load test (**measured**: 10,000 travellers
+arriving in 5 minutes, 8-minute run, fake HofJ; §4.5):
+
+| Stage | Travellers | Note |
+|---|---|---|
+| Arrive | 10,000 | 5,000 only visit the landing page, a separate static site: 0 requests to Vela |
+| 1–2 · Intent and proposal | 5,000 → 4,998 proposals | Answered in the request; no HofJ call |
+| 3 · Accept, actual price | 2,001 accepts; 1,991 heard the price at once | Price cache hits; 1 accept failed with a 500 (pool, §4.5) |
+| 4 · Link within the run | 310 | ~44 links a minute, the quota's pace; 1,690 still queued at the end (drained in ~45 min, **projected**) |
+| 5 · Paid | 30 | Everyone who had the link and meant to pay paid at once |
+| 6 · Confirmed within the run | 28 | The other 2 paid in the last minute; 31 bookings made in total, one per itinerary |
+
 ### The path of a purchase, step by step
 
 | Step | What happens | HofJ calls |
@@ -160,13 +174,17 @@ Each entry: what we chose, what we rejected, what it costs, and where the eviden
   external call. One deployable process; the background work runs as threads inside it.
 - **Rejected.** A separate worker service plus a queue (two deploys to keep in step within 24
   hours). A single synchronous "buy" tool (it would force the whole conversation into one turn).
-- **Trade-off.** Background work shares the interpreter and connection pool with the API: after
-  raising workers from 4 to 10 the worst REST p95 rose from 30 to 200 ms at 34 req/s
-  (**measured**; the cause is a hypothesis, not measured separately). Splitting the worker into
-  its own process is a configuration change, not a redesign, because the queue is already in
-  Postgres.
-- **Evidence.** `decisions.md`: "Requisiti e architettura di Vela"; `RESULTS.md`: "Cosa cambia
-  con M18", point 12.
+- **Trade-off.** Background work shares the interpreter and the database connection pool with
+  the API.
+  - After raising workers from 4 to 10 the worst REST p95 rose from 30 to 200 ms at 34 req/s
+    (**measured**; the cause is a hypothesis, not measured separately).
+  - At 87 req/s it reached 0.8–1.1 s, and 3 requests out of 26,408 failed because SQLAlchemy's
+    default pool (5 + 10 connections, shared by workers and requests) ran out (**measured**).
+    The pool is the first limit Vela hits before the HofJ quota.
+  - Splitting the worker into its own process and sizing the pool are configuration changes,
+    not a redesign, because the queue is already in Postgres.
+- **Evidence.** `decisions.md`: "Requisiti e architettura di Vela", "Load test a quattro gruppi
+  e RESULTS.md riscritto"; `RESULTS.md`: "Conversazione e REST".
 
 ### 3.3 Postgres is the queue
 
@@ -258,8 +276,8 @@ pay (look-to-book). Two changes moved the calls to where they buy something.
     payment, meaning a failed booking and a manual refund.
   - *Reopen if* HofJ returns the checkout in the `POST` response, or if `live` runs show that
     prices almost never change after a cache hit (`quote_price_changed` log lines).
-- **Result (measured, 2,500 travellers).** With the cache, 473 of 487 accepts heard the actual
-  price at once. After M19, links per minute went from 17.8 to **47.4** on the same ~100
+- **Result (measured, 2,500 travellers; earlier rounds in the file's history).** With the
+  cache, 473 of 487 accepts heard the actual price at once (1,991 of 2,001 in the 10,000 run). After M19, links per minute went from 17.8 to **47.4** on the same ~100
   calls/min: 2.11 calls per link, 3.00 per booking. *Not like-for-like:* the M19 run had 2% of
   travellers paying against 60% before; at 60% the estimate is ~26 links/min (**predicted**, run
   not done).
@@ -283,7 +301,8 @@ pay (look-to-book). Two changes moved the calls to where they buy something.
   - *Rejected:* `SELECT … FOR UPDATE` across repositories (a transaction shared between
     repositories changes the architecture).
 - **Evidence.** `decisions.md`: "M18: quota a ritmo costante", "Un solo job di prenotazione per
-  ordine (task/booking-race)"; `RESULTS.md`: "Dopo il fix delle prenotazioni doppie".
+  ordine (task/booking-race)"; earlier `RESULTS.md` (`git show 5ec87aa:loadtest/RESULTS.md`),
+  "Dopo il fix delle prenotazioni doppie".
 
 ### 3.8 Payment through HofJ's Stripe account, without a webhook
 
@@ -392,9 +411,10 @@ The five asks, one per subsection.
 ### 4.1 The architecture that holds, and the diff in our thinking
 
 **What holds.** The conversation (intent, proposal, rejection, details) spends no HofJ call. It
-reads Postgres, and stayed under 220 ms p95 in every run, up to the highest load we generated
-(34 req/s on one instance). Beyond that it scales by adding instances, which we have not measured
-(§4.5). The purchase
+reads Postgres and never waits for HofJ. On one instance it stayed under 220 ms p95 up to
+34 req/s; at 87 req/s it slowed to about 1 s p95 with 3 errors from the database pool, and did
+not stop (§4.5). More load needs more instances and a larger pool, which we have not measured.
+The purchase
 is capped by physics: ~100 HofJ calls a minute. The design turns that cap into a **declared
 wait** instead of errors:
 - a queue in Postgres;
@@ -455,26 +475,35 @@ With a 5% expected paying share, the declared wait assumes ~46.5 links/min.
   or priced by the leader. He gets the link when his turn comes, pays, and his booking jumps
   the queue: **5 s from payment to confirmation** in every run without faults (measured; 30 s
   when a fault hit his own booking call).
-- **Anna** arrives in the middle of the peak. She gets her proposal in 10–15 ms, "too
-  expensive" gets her another one, and after "yes" she hears the price and an honest wait. She
+- **Anna** arrives in the middle of the peak. She gets her proposal at once, "too expensive"
+  gets her another one, and after "yes" she hears the price and a position in the queue. She
   never sees an error or a timeout, and can give up at any point with `reject_proposal`.
 
-What we measured and what we projected:
+What we measured and what we projected. The projection uses the latest run's window: 50,000
+arrivals in **5 minutes**, twice the arrival rate of the twist's 10 minutes, so it is the harsher
+case.
 
-| | Measured, 2,500 travellers in 5 min (after M19) | Projected, 50,000 in 10 min (after M19) |
+| | Measured: 10,000 in 5 min | Projected: 50,000 in 5 min |
 |---|---|---|
-| Anna's proposal | 15 ms, at a peak of 34 req/s | not measured: the conversation would reach ~420 req/s (§4.5) |
-| Marco: link / confirmed | 90 s / 95 s | link after ~20 min |
-| Anna: wait for the link | link at 332 s (she arrived at 180 s) | ~121 min |
-| Last traveller | — | ~201 min; queue drained in 3.5 h |
+| Proposal (conversation) | p50 110 ms, p95 950 ms at a peak of 87 req/s; 3 errors in 26,408 requests | ~454 req/s at the end of arrivals: **not measured** |
+| Marco (accepts at minute 1): link / confirmed | 241 s / 247 s | link after ~44 min |
+| Anna (accepts at minute 3, position 793) | no link within the 8-minute run | — |
+| Median wait for the link | 4.2 min from arrival, only for the 310 served within the run | ~110 min from accepting |
+| Last accept gets the link | 1,690 still queued at the end; ~45 min to drain (**projected**) | after ~220 min |
+| Payers able to pay within 1 hour of arriving | — | 27% (54% within 2 hours) |
 
-- **What degrades:** only the wait for the link, and it is declared. Our first prediction, "Marco
-  gets the link around minute 3", is **refuted** at 10,000 and 50,000 travellers: with ~1,000
-  accepts a minute he has hundreds of people ahead of him.
-- **What never degrades:** the confirmation of whoever has already paid, and the conversation's
-  use of HofJ, which stays at 0 calls at any load. Its response time we have measured only up to
-  34 req/s on one instance (worst p95 220 ms, 0 errors). At 50,000 travellers it depends on
-  running enough instances (§4.5).
+An earlier projection over the twist's 10 minutes, at 47.4 links/min, put Marco at ~20 min and
+the drain at 3.5 h (`git show 5ec87aa:loadtest/RESULTS.md`).
+
+- **What degrades:** the wait for the link, which becomes a matter of hours at 50,000, and is
+  declared. Our first prediction, "Marco gets the link around minute 3", is **refuted** at 10,000
+  and 50,000 travellers: with ~400 accepts a minute he has hundreds of people ahead of him. The
+  conversation also slows on one instance (§4.5).
+- **What never degrades:** the confirmation of whoever has already paid (5 s for Marco, at most
+  58 s for the others, which is their own polling), and the conversation's use of HofJ: 0 calls
+  at any load.
+- **What would shorten the wait** is more links per minute: more HofJ quota or fewer calls per
+  link. A faster Vela would not help, because the limit is the quota.
 
 ### 4.4 `POST /v1/bookings` is an idempotent upsert on `itineraryId`
 
@@ -516,17 +545,20 @@ change run to run, and evaluators could not repeat it without our key.
   - a JSONL log of every call. **All checks run on the fake's log, not on Vela's.**
 - **`loadtest` mode.** Vela refuses any host other than localhost/`fake-hofj`, and payments and
   SMS are fake.
-- **Scenario.** An open-model Locust scenario with seed 13: 30% say "too expensive", 20%
-  accept, status is polled every 30–60 s, 60% of link holders pay. Two sentinels, Marco and
-  Anna.
+- **Scenario.** An open-model Locust scenario with seed 13 and four groups set from the command
+  line. The latest run used 50% who only visit the landing page (no request to Vela), 30% who
+  ask for a proposal and stop, 18% who accept and reach the link without paying, and 2% who pay.
+  Whoever accepts polls the status every 30–60 s. Two sentinels come on top: Marco and Anna.
+  Earlier rounds used a funnel with 30% "too expensive" and 60% of link holders paying.
 
 **Run it** (Docker only, no keys):
 
 ```sh
 docker compose up -d --build
-docker compose run --rm locust --travelers 2500 --label 2500 --duration 8 --arrival-minutes 5 --tail-minutes 3
+docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
+    --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
 docker compose down -v          # each run starts from a clean DB, queue and quota
-python loadtest/projection.py --rate 47.4   # project a measured rate to the twist
+python loadtest/projection.py --rate 44.4 --sizes 10000,50000   # project the measured rate
 ```
 
 Details, options and fault injection: [`loadtest/README.md`](loadtest/README.md).
@@ -537,11 +569,30 @@ Details, options and fault injection: [`loadtest/README.md`](loadtest/README.md)
 - Marco confirmed by minute 7;
 - one booking per itinerary.
 
-The queue saturates at 500 travellers in 5 minutes, so the runs use 500–2,500 travellers and the
-twist numbers are projected.
+The queue saturates at 500 travellers in 5 minutes. Beyond that, HofJ calls per minute and links
+per minute no longer depend on the number of travellers, so the twist numbers are projected
+from measured runs.
 
-**Numbers per round** (run C: 2,500 travellers in 5 min + 3 min tail, anchored window,
-standard latency; all **measured**):
+**The latest run: 10,000 travellers in four groups** (all **measured**; `RESULTS.md`):
+
+| | Result |
+|---|---|
+| 429 received | 0 |
+| Max Vela→HofJ calls in any 60 s | 107 (119 with the key's other uses, under HofJ's 120) |
+| Vela calls/min at steady state | ~100 (99–102 every minute from minute 2) |
+| Links/min | 44.4, at 2.11 calls per link; each payment 3 calls |
+| Accepts / links within the run / paid / confirmed | 2,001 / 310 / 30 / 28 |
+| Bookings | 31 for 31 itineraries, one POST each; 0 orphans |
+| Queued at end / oldest (s) | 1,690 / 445 |
+| Marco: link / confirmed (s) | 241 / 247 |
+| Peak REST load | 86.8 req/s: p95 0.8–1.1 s, 3 errors (500, pool exhausted) |
+
+The rate is a little lower than the 47.4 of the earlier M19 round because more people pay here
+(2% of all travellers, 10% of those who accept), and each payment costs 3 calls. The queue is
+longer because four times as many people accept per minute, not because Vela is slower.
+
+**The rounds that shaped the design** (run C: 2,500 travellers in 5 min + 3 min tail, anchored
+window, standard latency; all **measured**; `git show 5ec87aa:loadtest/RESULTS.md`):
 
 | | Before (M13a) | After M18 bucket (M13b) | After booking-race fix | After price cache | After M19 (2% pay) |
 |---|---|---|---|---|---|
@@ -574,28 +625,36 @@ How to read the tables:
 - Caveats: the cache round has no control run with the cache off, and the M19 round changed
   the paying share (§3.6).
 
-**Projection to the twist** (**projected**; 20% of travellers accept, spread over 10 minutes):
+**Projection to 50,000** (**projected** by `loadtest/projection.py` from the measured 44.4
+links/min, same groups, arrivals in 5 minutes):
 
-| Rate used | 10,000: Marco / Anna / drain | 50,000: Marco / Anna / last / drain |
-|---|---|---|
-| Before M18, 16.5 links/min | 11 min / 67 min / 2.0 h | 60 min / 358 min / 596 min / 10.1 h |
-| After M18, 17.8 links/min | 10 min / 61 min / 1.9 h | 55 min / 331 min / 552 min / 9.4 h |
-| After M19, 47.4 links/min | 3 min / 19 min / 0.7 h | 20 min / 121 min / 201 min / 3.5 h |
+| Travellers in 5 min | Accepts/min | Queue at end of arrivals | Accept → link: Marco / median / last (min) | Drain (min) | REST req/s at end of arrivals |
+|---|---|---|---|---|---|
+| 10,000 | 400 | 1,778 (measured 1,809) | 8 / 20 / 40 | 45 | 86.8 (measured 86.8) |
+| 50,000 | 2,000 | 9,778 | 44 / 110 / 220 | 225 | 454 |
+
+At 10,000 the model is close on the queue and the REST load. It is slightly optimistic on links
+(355 against 311 measured, because no link comes out in minute 1) and pessimistic for the first
+in line (Marco 8 min against 3). Silent orders (15 minutes without asking) are not in the
+model; in a queue of hours they would shorten the real drain.
 
 HofJ calls per minute are the same at any N beyond saturation: the boundary is decided by the
 limiter, not by the load.
 
-**The conversation at 50,000 is not measured.** The projection puts the REST load at the end of
-the arrivals at ~420 req/s:
-- ~208 req/s from new travellers (83 a second, 2.5 requests each: intent, proposal, 30%
-  rejections, 20% accepts);
-- ~212 req/s from ~9,500 people in the queue asking for their status every ~45 s.
+**The conversation at 50,000 is not measured.** At the end of the arrivals the projection puts
+the REST load at ~454 req/s: new travellers (intent and proposal for everyone but the landing
+visitors, accept and confirmation for those who accept) plus ~9,800 people in the queue asking
+for their status every ~45 s. What we measured on one uvicorn process that also runs the 10
+workers:
 
-The highest load we generated is 34 req/s, on one uvicorn process that also runs the 10
-workers; there the worst p95 was already 200–220 ms. 34 req/s is the most we tried, not the
-limit we found. If one instance held only that, 420 req/s would need about 13 instances
-(**predicted**, an upper bound). That assumes linear scaling and a shared Postgres that keeps
-up, and neither has been tested.
+| Peak REST load | Worst p95 | Errors |
+|---|---|---|
+| 34 req/s | 200–220 ms | 0 |
+| 86.8 req/s | 0.8–1.1 s | 3 in 26,408, all from the exhausted database pool (5 + 10) |
+
+So one instance meets the 500 ms target (RNF-05) somewhere between 34 and 87 req/s. For 454 req/s
+that means roughly **6 to 14 instances** (**predicted**: 454 ÷ 87 and 454 ÷ 34). It holds only if
+the load spreads evenly and the pool and a shared Postgres keep up; none of that has been tested.
 
 Two things make the real load heavier than the bench:
 - in `loadtest` mode `accept_proposal` does not wait. In `live` it can hold a thread for up to
@@ -603,8 +662,8 @@ Two things make the real load heavier than the bench:
 - every `get_proposal` reads the whole catalogue from Postgres, because there is no
   per-instance cache (§6).
 
-The next measurement would be a step test with the same scenario and more travellers, until the
-proposal p95 passes 500 ms (§7).
+The next measurements: a step test between 34 and 87 req/s to find one instance's limit, then
+the same with a larger pool and the worker in its own process (§7).
 
 **Predictions of the second reading, checked:**
 
@@ -673,8 +732,11 @@ proposal p95 passes 500 ms (§7).
 - **Observability and data hygiene (M14).**
   - Missing: structured JSON logs, and the command to delete personal data.
   - Done: `/health` reports DB, catalogue age, bucket state, queue age and orphans.
+- **The database pool is the first limit.** SQLAlchemy's default pool (5 + 10 connections) is
+  shared by the 10 workers and the API; it ran out at 87 req/s (3 errors). It is not sized or
+  split yet.
 - **No per-instance catalogue cache**, and no concurrency breaker on the Haiku fallback. Both
-  matter for the ~420 req/s projection.
+  matter for the ~454 req/s projection.
 - **The voice path is configured but its end-to-end acceptance run is still to do.**
 - **Open questions to HofJ** ([`docs/hofj-questions.md`](docs/hofj-questions.md)):
   - the real window rule;
@@ -699,7 +761,8 @@ proposal p95 passes 500 ms (§7).
 - **Measure what we only estimated:**
   - the M19 run with 60% payers;
   - a cache run with price refusals, and one with the cache off;
-  - the conversation's limit on one instance (a step test up to 500 ms p95), then across instances;
+  - the conversation's limit on one instance (a step test between 34 and 87 req/s), then with a
+    larger pool, the worker in its own process, and several instances;
   - the worker in its own process.
 - **Hardening:** JSON logs, the delete command, a catalogue cache per instance.
 - **Hotel change**, if HofJ confirms the list and the `PATCH` (reopen conditions in the M22 plan).
@@ -711,5 +774,6 @@ proposal p95 passes 500 ms (§7).
   plans agents executed.
 - [`docs/api/`](docs/api/): what we measured about the HofJ API, including
   [`differences.md`](docs/api/differences.md) between its docs and its behaviour.
-- [`loadtest/RESULTS.md`](loadtest/RESULTS.md): every run.
+- [`loadtest/RESULTS.md`](loadtest/RESULTS.md): the latest run and the 50,000 projection; the
+  earlier rounds are in its history (`git show 5ec87aa:loadtest/RESULTS.md`).
 - [`agent-log/`](agent-log/): the raw transcripts of the Claude Code sessions that did the work.
