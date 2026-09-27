@@ -1157,3 +1157,21 @@ prezzo"). Nessuna chiamata a HofJ né a Stripe: tutto nel compose locale.
 | Hit contati a posteriori | Da `travelers.jsonl`: accettazione senza `position` né `wait_seconds` = hit (200 `order_status`); `t_priced` = polling in cui il viaggiatore vede il prezzo. `report.py` non li calcola | Nessuna modifica al banco per un solo giro; la regola è scritta in `RESULTS.md` e riproducibile |
 | Aperto | Per un hit non esiste un'attesa dichiarata (`position` e `wait_seconds` nulli): la misura "scarto attesa reale − dichiarata" del report non vale più e RF-48 non dice cosa dichiarare a chi ha già il prezzo e aspetta il link | Da decidere se e cosa dichiarare; `report.py` da adeguare quando si rifanno gli altri giri |
 
+
+## 2026-09-27 — M19 passo 1: sonda di cliente e passeggeri (domanda 10)
+
+Task M19, passo 1 approvato dall'utente: sonda `scripts/m19_probe.py` con 5 chiamate dichiarate
+su HofJ staging, lanciata dall'utente dal proprio terminale (`uv run --env-file .env` con
+`HOFJ_BASE_URL` forzato su staging; il `.env` non è stato aperto da Claude). Esiti in
+`docs/api/customer-pax.md`, differenze #36-#38 in `docs/api/differences.md`, risposta parziale
+alla domanda 10 in `docs/hofj-questions.md`. Nessuna modifica a `vela/`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Prodotto | 124 "Magnificent Padel in Lanzarote", 2026-10-08, 2 adulti, 1 camera: `allowAccommodationList: false`, hotel preselezionato, proponibile | Preferenza dell'utente (`allowAccommodationList` false); totale già misurato dalla sonda di M22-a per gli stessi parametri. Il 118 di M5 è escluso dal chooser come torneo |
+| Chiamate | Le 5 dichiarate: creazione, `GET` del totale, `PUT customer`, `PUT pax` (senza `GET .../pax`, con i `refId` di M5), `GET` del totale. Nessun `GET /v1/quota` | Vincolo della task; lo script non può superare 5 chiamate e il test lo fissa |
+| Itinerario orfano | `deimmovsayfq` (124) su `staging.weebora.com`, con cliente e passeggeri di prova; nessun pagamento, nessun booking | Come nelle sonde di M5 e M22-a |
+| **[misurato] Totale** | Invariato dopo cliente e passeggeri: `openAmount`, `total`, `originalTotal` e `totalPrice` = 1156 € prima e dopo; tra le due letture cambiano solo `customer` e `passengers` | È la condizione "il totale non cambia dopo i pax" della roadmap. Il link porta `openAmount` (RF-16), che si conosce con 2 chiamate |
+| **[non verificabile su staging]** `PUT` dopo il pagamento | Resta aperto se HofJ accetta `PUT customer` e `PUT pax` su un itinerario già pagato. Da verificare al primo giro `live` con la carta di test, o con la risposta di HofJ alla domanda 10 | Su staging non si paga il PaymentIntent del brand senza carta di test e booking, esclusi dal perimetro della sonda |
+| **[misurato] Passeggeri dalla creazione** | Il `GET` dell'itinerario appena creato ha già `passengers` con `pax-1..N`; `PUT pax` li accetta senza `GET .../pax` | Differenza #36. Spunto per il passo 2, non deciso: il job di prenotazione potrebbe fare 3 chiamate (customer, `set_pax` con `refId` noti, booking) invece di 4 |
+| **Verdetto** | Sulla parte verificabile, **sì**: il job d'acquisto può fermarsi a itinerario + totale + link senza che il prezzo detto al viaggiatore cambi dopo. Rischio residuo non verificato: un rifiuto dei `PUT` dopo il pagamento porterebbe l'ordine pagato a `booking_failed` con rimborso a mano, come un booking rifiutato oggi. Se M19 prosegua lo decide l'utente | Condizione della task: "decido io se M19 va avanti" |

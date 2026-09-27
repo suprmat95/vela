@@ -163,3 +163,96 @@ Fails as expected (module missing). Now the script.
 Tutto verde. Faccio il commit.
 
 - 🔧 Bash: git add scripts/m19_probe.py tests/test_m19_probe.py && git commit -q -m "Add th…
+
+La sonda è pronta: `scripts/m19_probe.py`, commit `b40fb8f` su `task/m19`, già allineato a `master`. Non ho fatto nessuna chiamata a HofJ. I 9 test della sonda, la suite completa (1546 test, 73 saltati) e ruff sono verdi.
+
+**Come lanciarla** (con `HOFJ_API_KEY` nell'ambiente; lo script non stampa mai la chiave):
+```bash
+uv run python3 scripts/m19_probe.py --dry-run   # solo il piano, nessuna chiamata
+uv run python3 scripts/m19_probe.py             # il giro vero, circa 50 s
+```
+
+**Le 5 chiamate**, sul prodotto 124, 2026-10-08, 2 adulti, 1 camera, EUR, `locale=en`, una ogni 12 s:
+1. `POST /v1/itineraries`
+2. `GET /v1/itineraries/{id}`
+3. `PUT .../customer`
+4. `PUT .../pax` con `pax-1` e `pax-2`, senza `GET pax`
+5. `GET /v1/itineraries/{id}`
+
+Niente quota, pagamento o booking; l'itinerario resta orfano.
+
+**Quando si ferma:**
+- se la creazione fallisce;
+- a ogni 401, 403, 429 o 5xx.
+
+Un 4xx su customer o pax non la ferma: la rilettura del totale parte lo stesso, sempre dentro le 5 chiamate. Un controllo interno impedisce comunque una sesta chiamata.
+
+**Cosa produce:** le risposte grezze e `findings.json` in `probe-m19/`. Il file ha gli importi prima e dopo (`openAmount`, `total`, `originalTotal`, `totalPrice`, valuta, `checkout.status`) e l'elenco `changed` di quelli cambiati. L'ultima riga a terminale riassume l'esito.
+
+**Cosa ho deciso da solo:**
+- **Pax come li manda Vela.** Il corpo contiene solo `refId`, nome e cognome, come fa `HofJHttp.set_pax` in produzione.
+- **Customer come quello di Vela.** L'indirizzo è quello di default di `TravelerDefaults`; nome, cognome, email e telefono sono di prova.
+- **`probe-m19/` non è versionata**, come la cartella della sonda di M22-a. Non l'ho aggiunta a `.gitignore`: attenzione a non committarla per sbaglio.
+
+**Il dubbio principale:** i `refId` `pax-1` e `pax-2` vengono dalla sonda di M5 su un altro prodotto. Se sul 124 fossero diversi, la chiamata 4 dà un 4xx, la rilettura parte comunque e lo scriviamo come differenza. Non aggiungo un `GET pax` senza il tuo OK.
+
+Quando l'hai lanciata, dimmi che ha finito oppure incollami l'output. Da `probe-m19/` scrivo `docs/api/customer-pax.md`, le differenze in `differences.md` (dalla #36), la risposta alla domanda 10 e il verdetto in `decisions.md`. In quei documenti "PUT dopo un pagamento vero" risulterà non verificabile su staging, da rimandare al primo giro live con la carta di test. Poi mi fermo.
+
+## Utente 17:05
+
+ho messo la chiave nel .env lancia tu
+
+## Agente 17:05
+
+Lancio la sonda con la chiave del `.env`. Il file non lo leggo e non lo stampo: lo carica `uv run --env-file`. Forzo `HOFJ_BASE_URL` su staging, così anche se nel `.env` ci fosse un altro host le 5 chiamate vanno comunque su staging.
+
+- 🔧 Bash: ls -la .env >/dev/null && echo ".env presente" && uv run --env-file .env env HOF…
+
+Non ho lanciato la sonda: il permesso per il comando è stato negato, quindi a HofJ non è partita nessuna chiamata. Non riprovo per altre strade, visto che il comando caricava il `.env` e le regole del progetto e della task dicono di non aprirlo.
+
+Puoi lanciarla tu da qui con il prefisso `!`, così l'output arriva direttamente in conversazione:
+
+```
+! uv run --env-file .env env HOFJ_BASE_URL=https://staging.api.hofj.com python3 scripts/m19_probe.py
+```
+
+- `--env-file .env` carica la chiave senza mostrarla; lo script non la stampa.
+- `HOFJ_BASE_URL` è forzato su staging, anche se nel `.env` ci fosse un altro host.
+- Fa le 5 chiamate dichiarate, una ogni 12 s, quindi dura circa un minuto.
+
+Se invece preferisci che la lanci io, autorizza il comando quando te lo ripropongo.
+
+Appena vedo l'output, leggo `probe-m19/` e scrivo `docs/api/customer-pax.md`, le differenze, la risposta alla domanda 10 e il verdetto. Poi mi fermo.
+
+## Utente 17:06
+
+<bash-input> uv run --env-file .env env HOFJ_BASE_URL=https://staging.api.hofj.com python3 scripts/m19_probe.py</bash-input>
+
+<bash-stdout>host: staging.api.hofj.com brand: staging.weebora.com
+ 1 create    POST  /v1/itineraries                          200   7138 ms
+ 2 before    GET   /v1/itineraries/deimmovsayfq             200   1949 ms
+ 3 customer  PUT   /v1/itineraries/deimmovsayfq/customer    200   2065 ms
+ 4 pax       PUT   /v1/itineraries/deimmovsayfq/pax         200   1010 ms
+ 5 after     GET   /v1/itineraries/deimmovsayfq             200   1965 ms
+chiamate HofJ: 5, esiti in probe-m19/findings.json
+importi cambiati dopo customer e pax: nessuno</bash-stdout><bash-stderr></bash-stderr>
+
+## Agente 17:07
+
+- 🔧 Bash: python3 -c " import json;f=json.load(open('probe-m19/findings.json'));f.pop('cal…
+
+- 🔧 Bash: python3 -c " import json a=json.load(open('probe-m19/02-before.json'))['response…
+
+- 🔧 Bash: grep -n "Risposta\|risposta\|Esito" docs/hofj-questions.md | head; sed -n 60,97p…
+
+- 🔧 Bash: sed -n 939,997p docs/decisions.md | cut -c1-400; sed -n 1,20p docs/hofj-question…
+
+La sonda è andata: 5 chiamate, tutte 200, e nessun importo cambiato. Tra la lettura prima e quella dopo cambiano solo `customer` e `passengers`. Ora scrivo i documenti.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m19/docs/api/customer-pax.md
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m19/docs/api/customer-pax.md
+
+- 🔧 Bash: cat >> docs/api/differences.md <<'EOF'  ## Cliente e passeggeri (sonda M19, 2026…
+
+- 🔧 Bash: cat >> docs/decisions.md <<'EOF'  ## 2026-09-27 — M19 passo 1: sonda di cliente …

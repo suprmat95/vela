@@ -91,6 +91,11 @@ Nate dalla rilettura del twist (`docs/plans/2026-09-26-twist-seconda-lettura.md`
     di `POST /v1/bookings`)? Il totale dell'itinerario può cambiare dopo l'inserimento dei
     passeggeri?
 
+    *Verificato in parte su staging il 2026-09-27 (`docs/api/customer-pax.md`, sonda M19):* il
+    totale non cambia dopo `PUT customer` e `PUT pax` (1156 € prima e dopo sul prodotto 124).
+    Resta aperta la prima metà: su staging non si paga, quindi i `PUT` dopo un pagamento vero
+    sono da vedere al primo giro `live` con la carta di test, o da confermare da HofJ.
+
 ## Domande aggiunte il 2026-09-27 (sonda di `/accommodations`, M22-a)
 
 Nate dalla sonda di M22-a (`docs/api/accommodations.md`, differenze #28-#35).
