@@ -13,7 +13,7 @@ RF-12, RF-14, RF-39..41, RF-49, RF-52..54, §7 e §4.12 (RF-58..75) aggiornati i
 v3 (roadmap M21, `docs/usecases/scelta.md`): descrivono il comportamento dopo M21, le parti
 marcate "(M21)" non sono ancora implementate. RF-06, RF-16, RF-19, RF-25, RF-39, RF-45,
 RF-46, RF-49 e RNF-05 aggiornati il 2026-09-26 per la conferma del prezzo effettivo prima
-del link. Origine: `docs/brief.md` e
+del link. RNF-04 aggiornato il 2026-09-27 per l'attesa dell'accettazione (roadmap M20). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -552,9 +552,11 @@ default falso).
   Un timeout è un esito incerto: si ripetono solo le chiamate idempotenti
   (`POST /v1/bookings`); un timeout su `POST /v1/itineraries` conta un itinerario
   probabilmente orfano. Nessun caso d'uso
-  aspetta HofJ: il job d'acquisto (RF-46) assorbe i 2-6 secondi della ricerca di
+  chiama HofJ: il job d'acquisto (RF-46) assorbe i 2-6 secondi della ricerca di
   disponibilità live e i timeout, con ripetizione per passo e stato `failed` come esito
-  finale leggibile.
+  finale leggibile. L'unico caso d'uso che aspetta è `accept_proposal`, che rilegge l'ordine
+  finché il job lo porta fuori da `queued` (prezzo effettivo, link, sostituzione, fallimento):
+  dura al massimo il tetto di RF-45 (`accept_wait_seconds`, 100 s), poi risponde comunque.
 - **RNF-05 Latenza.** I cinque casi d'uso non chiamano servizi esterni (eccetto il fallback
   LLM di RF-03) e rispondono sotto i 500 ms al 95° percentile in modalità replay sul load
   test. Eccezione: `accept_proposal` aspetta il job d'acquisto fino al tetto di RF-45, senza
