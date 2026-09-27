@@ -29,14 +29,14 @@ def versions(url):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0011"])
+        self.assertEqual(heads, ["0015"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0011", res.stdout)
+        self.assertIn("0015", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -45,7 +45,7 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0011"])
+                self.assertEqual(versions(url), ["0015"])
                 with create_engine(url).connect() as conn:
                     tables = inspect(conn).get_table_names()
                     self.assertIn("orders", tables)
@@ -56,6 +56,9 @@ class SqliteUpgradeTest(unittest.TestCase):
                     self.assertIn("enqueued_at", order_cols)
                     self.assertIn("replacement_proposal_id", order_cols)
                     self.assertTrue(order_cols["total"]["nullable"])
+                    self.assertIn("price_quotes", tables)
+                    self.assertFalse(order_cols["follows_quote"]["nullable"])
+                    self.assertTrue(order_cols["confirmed_total"]["nullable"])
                     product_cols = {c["name"]: c for c in inspect(conn).get_columns("products")}
                     self.assertTrue(product_cols["brand"]["nullable"])
                     for flag in ("featured", "special_offer"):   # 0010 (M21-B)
@@ -261,4 +264,4 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0011"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0015"])

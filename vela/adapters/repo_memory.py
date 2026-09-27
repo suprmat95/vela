@@ -3,10 +3,12 @@ import threading
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
+from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
-                                Product, Proposal, QuotaClass, Rejection)
+                                PriceQuote, Product, Proposal, QuotaClass, QuoteKey, QuoteStatus,
+                                Rejection)
 from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
@@ -155,6 +157,65 @@ CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.SMS_LINK
                   JobKind.SMS_CONFIRMED: 2, JobKind.PURCHASE: 3}
 
 
+class MemoryQuotes:
+    """RF-84. Legge ordini e proposte dei repository accanto, come il JOIN di Postgres; il lock
+    degli ordini tiene fanout e rilascio atomici rispetto alle altre scritture sugli ordini."""
+
+    def __init__(self, orders: MemoryOrders, proposals: MemoryProposals):
+        self._items: Dict[QuoteKey, PriceQuote] = {}
+        self._orders, self._proposals = orders, proposals
+        self._lock = threading.Lock()
+
+    def get(self, key: QuoteKey) -> Optional[PriceQuote]:
+        return self._items.get(key)
+
+    def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
+        with self._lock:
+            quote = self._items.get(key)
+            if quote is not None and not self._takeable(quote, fresh_after):
+                return False
+            self._items[key] = PriceQuote(key, QuoteStatus.PENDING, order_id, now)
+            return True
+
+    def _takeable(self, quote: PriceQuote, fresh_after: datetime) -> bool:
+        if quote.status == QuoteStatus.READY:
+            return quote.priced_at < fresh_after
+        leader = self._orders.get(quote.leader_order_id)
+        return leader is None or leader.status != OrderStatus.QUEUED
+
+    def _followers(self, key: QuoteKey) -> List[Order]:
+        out = []
+        for o in self._orders._items.values():
+            if not o.follows_quote or o.status != OrderStatus.QUEUED:
+                continue
+            p = self._proposals.get(o.proposal_id)
+            if p is not None and QuoteKey(o.product_id, p.start_date, o.pax, o.rooms, o.currency) == key:
+                out.append(o)
+        return sorted(out, key=lambda o: o.id)
+
+    def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
+        with self._lock, self._orders._lock:
+            self._items[key] = PriceQuote(key, QuoteStatus.READY, leader_order_id, now, total, now)
+            ids = []
+            for o in self._followers(key):
+                self._orders._items[o.id] = replace(o, status=OrderStatus.AWAITING_CONFIRMATION,
+                                                    total=total, follows_quote=False, updated_at=now)
+                ids.append(o.id)
+            return ids
+
+    def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
+        with self._lock, self._orders._lock:
+            quote = self._items.get(key)
+            if (quote is None or quote.status != QuoteStatus.PENDING
+                    or quote.leader_order_id != leader_order_id):
+                return []
+            del self._items[key]
+            freed = [replace(o, follows_quote=False) for o in self._followers(key)]
+            for o in freed:
+                self._orders._items[o.id] = o
+            return freed
+
+
 def claimable(j: Job, now: datetime, lease_seconds: int) -> bool:
     if j.status == JobStatus.PENDING:
         return j.run_after <= now
@@ -234,6 +295,7 @@ class MemoryRepositories:
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
         self.jobs = MemoryJobs()
+        self.quotes = MemoryQuotes(self.orders, self.proposals)
         self.quota = MemoryQuota(rules=self.quota_rules)
 
 
