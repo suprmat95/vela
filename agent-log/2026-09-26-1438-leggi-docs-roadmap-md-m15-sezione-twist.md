@@ -1349,3 +1349,34 @@ Controllo che il Mermaid sia valido prima del commit.
 - 🔧 Bash: Look for a local Mermaid renderer
 
 - 🔧 Bash: Check npx cache for mermaid-cli
+
+- 🔧 Bash: Verify and commit the funnel
+
+Ho aggiunto il funnel in `ARCHITECTURE.md`, nella §2 "The purchase funnel: who serves each step" (commit `6c14d43`, nessun push). Il Mermaid non l'ho renderizzato: `mermaid-cli` non è installato e ho controllato la sintassi a mano. Il modo più rapido per vederlo è l'anteprima di GitHub dopo un push.
+
+**Cosa c'è**
+- **Diagramma Mermaid**, che GitHub disegna da solo, con i passaggi: intento → una proposta (con "cosa è incluso?" e "no, perché…" che tornano alla proposta) → prezzo effettivo → link → pagamento su Stripe → pagamento visto → prenotazione → confermato. Ogni riquadro dice quale tool o job lo serve e quante chiamate HofJ costa. Tre colori:
+  - **blu:** Vela risponde dentro la richiesta, senza coda e senza chiamate a HofJ;
+  - **ambra:** il lavoro lo fanno i worker, in coda su Postgres e ritmati dal token bucket;
+  - **grigio:** fuori da Vela (la pagina di Stripe e il codice consegnato).
+- **Tabella per fase:** cosa chiede l'agente, chi serve la richiesta, chiamate HofJ, e cosa succede in quella fase sotto picco. Si vede che l'unica attesa che cresce è quella del link, e che la prenotazione non viene mai sacrificata.
+
+**Correzione trovata strada facendo**
+
+La tabella del percorso diceva che le 2 chiamate del carrello avvengono sempre al prezzo. Nel codice (`vela/domain/usecases.py:374-378`) non è così quando il prezzo arriva dalla cache: il carrello si crea solo dopo la conferma, quindi le 2 chiamate cadono al passo del link. Se nel frattempo il totale è cambiato, il viaggiatore deve confermare di nuovo. Ho corretto la tabella di conseguenza.
+
+I conteggi di quante persone arrivano a ogni passaggio non ci sono, come deciso: li aggiungo quando `last-load-test` sarà su `master`.
+
+## Utente 20:11
+
+ok leggi master ho appena mergiato il branch di nome last-load-test con i risulta, completa architecture
+
+## Agente 20:12
+
+- 🔧 Bash: Check what master brought in
+
+`last-load-test` è su `master` (`task/m19`, con la decisione sulla GET, ancora no). Faccio il merge di `master` nel branch, come l'altra volta.
+
+- 🔧 Bash: Merge master into the branch
+
+- 🔧 Bash: Commit session log, then merge master
