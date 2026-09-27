@@ -43,6 +43,9 @@ Ondata 6          M15 Consegna (ARCHITECTURE, README, video; dopo M13b)   [M16 A
 
 Ondata 7   M21 Scelta v3: M21-A Durata → M21-E Budget → M21-B Ordinamento → M21-D Camere
                           → M21-C Livello → M21-F Rifiuti   (dopo M17, M11, M10, M5)
+
+Ondata 8   M22-a Hotel: bozza, sonda, verdetto (solo documenti, parallela a M21)
+                 → M22-b Cambio di hotel (dopo M21-D, M21-F e un verdetto "sì")
 ```
 
 Traguardo A = M3 completata (prototipo replay su Render, testato da claude.ai).
@@ -81,6 +84,9 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M21-D | Persone e camere | M | M21-B, M5 | 7 / — |
 | M21-C | Livello e lezioni | M | M21-B, M10 | 7 / — |
 | M21-F | Rifiuti con motivo sempre capito | L | M21-A, M21-B, M21-C, M21-D | 7 / — |
+| M22 | Scelta dell'hotel con degrado dinamico (due task: a, b) | L | M21-D, M21-F | 8 / — |
+| M22-a | Bozza, sonda su `/accommodations`, verdetto | S-M | — | 8 / tutte (niente codice in `vela/`) |
+| M22-b | Cambio di hotel a coda vuota | L | M22-a (verdetto "sì"), M21-D, M21-F | 8 / nessuna che tocchi `usecases.py`, `quota.py`, `purchase.py` |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
@@ -1090,6 +1096,54 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 
 ---
 
+## M22 — Scelta dell'hotel con degrado dinamico
+
+**Risultato.** Su un ordine in `awaiting_confirmation` il viaggiatore può chiedere un hotel
+diverso con una preferenza (più vicino al campo, più economico, più stelle, recensioni
+migliori) e Vela propone un solo hotel alternativo con la motivazione e il nuovo totale. Il
+cambio avviene solo a coda d'acquisto vuota; con la coda piena Vela tiene l'hotel incluso e lo
+dice. Priorità della quota: `booking` > `purchase` > `hotel` > `sync`. Bozza dei requisiti
+(RF-15 riscritto, RF-76..RF-82), casi d'uso UC-G e domande aperte in
+`docs/plans/2026-09-27-m22-hotel.md`; decisioni in `docs/decisions.md` (2026-09-27, "M22-a").
+
+### M22-a — Bozza, sonda, verdetto
+
+**Scope.** Solo documenti e uno script: bozza in `docs/plans/2026-09-27-m22-hotel.md` (non
+in `docs/spec.md`, che ogni task di M21 modifica); sonda su HofJ staging
+(`scripts/accommodations_probe.py`, sul modello di `scripts/quota_probe.py`): latenza di
+`/accommodations`, formato e risposta del `PATCH` con i `roomIds`, totale dopo il `PATCH`,
+risposta di un prodotto con `hotelSelection=false`; esiti in `docs/api/accommodations.md` e
+`docs/api/differences.md`. Verdetto: M22-b si fa o no. Testo per `ARCHITECTURE.md` §5.2 e
+§5.3 in entrambi i casi. Tre fasi, ognuna con l'OK dell'utente.
+**Test.** Nessun codice in `vela/`; suite e lint verdi.
+**Copre.** Bozza di RF-15, RF-76..RF-82 (spec in M22-b).
+**Taglia.** S-M. **Dipende da** nessuna (le chiamate della sonda si dichiarano prima).
+
+### M22-b — Cambio di hotel a coda vuota (condizionata al verdetto)
+
+**Scope.** Testi della bozza portati in `docs/spec.md` (§4.13, RF-15, §7, RF modificati) e
+UC-G in `docs/usecases/scelta.md`; campo `hotel_preference` e parser it/en; i tre rami di RF-77
+in `reject_proposal`; job `hotel_change` (lista, `PATCH`, rilettura del totale); classe
+`hotel` nello scheduler della quota (tutti i gettoni insieme, mai con acquisti in attesa, sync
+dopo i cambi); hotel nel `say` della conferma del prezzo; porte `HofJPort` nuove e replay;
+migrazione 0014 (campi hotel sull'ordine, da approvare all'inizio della task); descrizioni
+MCP, `docs/rest.md`.
+**Test.** Quelli di UC-G nella bozza (§5).
+**Copre.** RF-15, RF-16, RF-25, RF-37, RF-39..41, RF-47, RF-49, RF-52, RF-72, RF-76..RF-82,
+RNF-04.
+**Taglia.** L. **Dipende da** M22-a (verdetto "sì"), M21-D (`orders.rooms`, `create_itinerary`
+con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
+**Da decidere nel brainstorm.** Le domande aperte di §10 della bozza non chiuse in M22-a.
+
+**Prompt** (M22-b).
+> Leggi docs/plans/2026-09-27-m22-hotel.md, docs/api/accommodations.md, docs/decisions.md
+> (2026-09-27, "M22-a"), docs/spec.md (RF-15, RF-16, RF-47, RF-49, RF-71..75), vela/domain/quota.py,
+> vela/domain/purchase.py, vela/domain/usecases.py, vela/domain/refine.py e docs/roadmap.md M22-b.
+> Obiettivo: UC-G con i suoi test. Prima chiudi le domande aperte e chiedi l'OK sulla
+> migrazione 0014. Nessuna chiamata a servizi esterni.
+
+---
+
 ## Matrice dei requisiti
 
 | Requisito | Macro task |
@@ -1108,8 +1162,8 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 | RF-12 | M2, M21-D |
 | RF-13 | M2 (default), M5 (invio a HofJ), M15 (documentazione) |
 | RF-14 | M5, M21-D (camere) |
-| RF-15 | M5 |
-| RF-16 | M2, M5 |
+| RF-15 | M5, M22-b (cambio di hotel) |
+| RF-16 | M2, M5, M22-b (hotel nel `say`) |
 | RF-17 | M5 |
 | RF-18, RF-19 | M6 |
 | RF-20, RF-21, RF-22 | M6 |
@@ -1135,7 +1189,8 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 | RF-62..RF-64 | M21-C |
 | RF-65..RF-68 | M21-D |
 | RF-69, RF-70 | M21-E |
-| RF-71..RF-75 | M21-F |
+| RF-71..RF-75 | M21-F (RF-72 anche M22-b) |
+| RF-76..RF-82 | M22-a (bozza), M22-b |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5, M18 |
 | RNF-05 | M13a, M13b |
@@ -1155,5 +1210,5 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 | §10.5 | M13a, M13b |
 | §10.6 | M2, M3, M4 |
 
-Tutti i 75 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
+Tutti gli 82 RF (RF-76..RF-82 in bozza fino a M22-b), i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
 di §10 hanno almeno una macro task.
