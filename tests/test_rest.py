@@ -581,3 +581,41 @@ class RoomsContractTest(unittest.TestCase):
         c, _ = make_client(products=SIVIGLIA_MADRID)
         r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "rooms": "tre"})
         self.assertEqual(r.status_code, 422)
+
+    FIVE_TRAVELERS = dict(FULL, participants=[{"first_name": "P%d" % i, "last_name": "Rossi"}
+                                              for i in range(4)])
+
+    FIVE_OCT = "padel a ottobre, siamo in cinque"   # il prodotto sintetico parte a ottobre
+
+    def five_proposal(self, c):
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE_OCT, "pax": 5, "rooms": 3,
+                                                       "profile": self.FIVE_TRAVELERS})
+        self.assertEqual(r.status_code, 201, r.text)
+        return c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+
+    def test_proposal_reports_the_rooms(self):
+        c, _ = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        self.assertEqual((proposal["outcome"], proposal["rooms"]), ("proposal", 3))
+
+    def test_accept_below_the_minimum_is_200_question_without_an_order(self):
+        c, vela = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": 2})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["question"]), ("question", "In quante camere?"))
+        self.assertIsNone(vela.repos.orders.get_by_proposal(proposal["proposal_id"]))
+
+    def test_accept_with_a_rooms_correction(self):
+        c, vela = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": 4})
+        self.assertEqual(r.status_code, 202, r.text)
+        self.assertEqual(vela.repos.orders.get_by_proposal(proposal["proposal_id"]).rooms, 4)
+
+    def test_accept_wrong_rooms_type_is_422(self):
+        c, _ = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": "due"})
+        self.assertEqual(r.status_code, 422)

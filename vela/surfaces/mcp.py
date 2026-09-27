@@ -58,7 +58,9 @@ _ACCEPT = (
     "the user gave you: first_name, last_name, email and phone of the main traveler, plus "
     "first and last name of every other participant. If the result has `missing`, ask the "
     "user only for those details and call accept_proposal again with everything you have: "
-    "calling it again never creates a second order. The call can take up to about a minute and "
+    "calling it again never creates a second order. Pass `rooms` only if the user corrects the "
+    "number of hotel rooms at the last moment; if the answer is `question`, the rooms are too "
+    "few for this trip: ask the user and call accept_proposal again with `rooms`. The call can take up to about a minute and "
     "a half: Vela waits for the supplier. The answer is usually `awaiting_confirmation` with "
     "the actual `total`: speak `say` and wait for the user. If the user confirms the price, call "
     "accept_proposal again on the same proposal: that is the confirmation, and the answer is "
@@ -84,7 +86,10 @@ DESCRIPTIONS = {
         "divided by the people) with `budget_scope` (per_person or total) only if the user said "
         "it explicitly, and the trip length in nights as `duration_min_nights` and "
         "`duration_max_nights` (a weekend is 1 to 3, a long weekend 2 to 4, a week 6 to 8, N days "
-        "is N-1 nights). Leave out what the user did not say: never guess. Add "
+        "is N-1 nights), and the hotel rooms as `rooms`. With more than 2 people, if the user "
+        "has not said how many rooms, first ask \"In quante camere?\" / \"How many rooms?\" and "
+        "wait for the answer; with 1 or 2 people leave `rooms` out unless the user said it, Vela "
+        "assumes one room. Leave out what the user did not say: never guess. Add "
         "traveler details only if the user already gave them. Returns either `intent_id` (then "
         "call get_proposal immediately) or `question` (ask the user exactly that question, then "
         "call create_intent again with the original sentence plus the answer). Use it only "
@@ -100,12 +105,12 @@ DESCRIPTIONS = {
         "then on every change goes through reject_proposal, never a new create_intent." + _VOICE),
     "reject_proposal": (
         "The user said no to the current proposal or wants to change something about it (place, "
-        "dates, length, sport, budget, people). Always use this tool for changes after a proposal, never "
+        "dates, length, sport, budget, people, rooms). Always use this tool for changes after a proposal, never "
         "a new create_intent: the intent keeps what the user already turned down. Pass the "
         "user's reason in their own words in `reason`, plus only the criteria that changed as "
         "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget` as the user said "
         "it, `budget_scope` when the user says the budget was per person or in total, "
-        "`duration_min_nights`, `duration_max_nights`), and "
+        "`duration_min_nights`, `duration_max_nights`, `rooms`), and "
         "`direction`: north when the user wants somewhere cooler, south when they want somewhere "
         "warmer. Returns the next single proposal, or `failed_criterion` with "
         "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
@@ -174,6 +179,9 @@ Rooms = Annotated[Optional[int], Field(
                 "With more than 2 people ask \"In quante camere?\" / \"How many rooms?\" before "
                 "calling if they have not said it; with 1 or 2 people leave it out, Vela assumes "
                 "one room.")]
+RoomsCorrection = Annotated[Optional[int], Field(
+    description="Only if the user corrects the number of hotel rooms at the last moment: 1 to "
+                "the number of people. Leave it out otherwise, the rooms come from the intent.")]
 Participants = Annotated[Optional[List[ParticipantArg]],
                          Field(description="First and last name of each traveler other than the main one.")]
 IntentId = Annotated[str, Field(description="The intent_id returned by create_intent.")]
@@ -258,9 +266,10 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
     @server.tool(description=descriptions["accept_proposal"])
     def accept_proposal(proposal_id: ProposalId, first_name: FirstName = None,
                         last_name: LastName = None, email: Email = None, phone: Phone = None,
-                        participants: Participants = None) -> CallToolResult:
+                        participants: Participants = None,
+                        rooms: RoomsCorrection = None) -> CallToolResult:
         profile = traveler_profile(first_name, last_name, email, phone, None, participants)
-        return run("accept_proposal", lambda v: v.accept_proposal(proposal_id, profile))
+        return run("accept_proposal", lambda v: v.accept_proposal(proposal_id, profile, rooms))
 
     @server.tool(description=descriptions["get_order_status"])
     def get_order_status(order_id: OrderId) -> CallToolResult:
