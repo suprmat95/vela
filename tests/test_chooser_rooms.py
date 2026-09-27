@@ -25,7 +25,7 @@ def pick(products, criteria):
 
 class RoomsFilterTest(unittest.TestCase):
     def test_rooms_filter_comes_after_pax(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "place", "hotel",
                                    "price", "rejected"))
 
     def test_enough_rooms_keeps_the_product(self):

@@ -2,7 +2,8 @@
 
 Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, camere
 (RF-66, M21-D: un prodotto con `max_pax_per_room` vuole almeno ceil(pax / limite) camere), livello
-(RF-64, M21-C: solo un prodotto riservato esplicitamente ad altri livelli), prezzo
+(RF-64, M21-C: solo un prodotto riservato esplicitamente ad altri livelli), luogo (RF-73, M21-F:
+dentro un'area esclusa), hotel (RF-72, M21-F: lo stesso hotel di un rifiuto `hotel`), prezzo
 (dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Dei
 prodotti equivalenti (RF-61, M21-B) resta un solo candidato, quello con l'id più basso. Tra i
 restanti ordina come RF-60 (M21-B): aderenza all'area (dentro l'area 3, stessa regione 2,
@@ -19,7 +20,7 @@ livello i livelli a cui sono riservati i prodotti esclusi.
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Iterable, Optional, Set, Tuple, Union
+from typing import Dict, Iterable, Optional, Set, Tuple, Union
 
 from vela.domain import geo
 from vela.domain.catalog import is_trip
@@ -28,8 +29,8 @@ from vela.domain.models import Area, Criteria, Period, Product
 from vela.domain.say import (_people, fmt_money, fmt_nights, fmt_rooms, fmt_span, level_sentence,
                              nights_range, on_date)
 
-FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "price",
-           "rejected")
+FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "place",
+           "hotel", "price", "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
 
@@ -66,21 +67,37 @@ class Why:
     featured_won: bool = False       # un pari più economico parte lo stesso giorno senza `featured`
 
 
-def departure(product: Product, period: Optional[Period], today: date) -> Optional[Tuple[date, date]]:
+def _clashes(start: date, end: date, excluded: tuple) -> list:
+    """Le finestre escluse (RF-74) che si sovrappongono al viaggio: stesse date, o almeno una
+    notte in comune."""
+    return [(s, e) for s, e in excluded if (s, e) == (start, end) or (start < e and s < end)]
+
+
+def departure(product: Product, period: Optional[Period], today: date,
+              excluded: tuple = ()) -> Optional[Tuple[date, date]]:
     """Prima partenza valida (inizio, fine). Finestra fissa (lunga al più `duration_days`): il
     viaggio è la finestra. Finestra aperta: inizio = max(inizio finestra, oggi, minDate, inizio
     periodo), fine = inizio + durata - 1 dentro la finestra. L'inizio cade nel periodo e non nel
-    passato; il viaggio sta in [minDate, maxDate]."""
+    passato; il viaggio sta in [minDate, maxDate]. `excluded` (M21-F, RF-74): finestre già
+    rifiutate con `keep_product`; una finestra fissa che ne tocca una si salta, in una finestra
+    aperta si riparte dal giorno in cui finisce il viaggio escluso."""
     duration = product.duration_days
     for window in product.availabilities:
         if duration and (window.end - window.start).days + 1 > duration:
             start = max(d for d in (window.start, today, product.min_date,
                                     period.start if period else None) if d is not None)
             end = start + timedelta(days=duration - 1)
+            clash = _clashes(start, end, excluded)
+            while clash and end <= window.end:
+                start = max(e for _, e in clash)
+                end = start + timedelta(days=duration - 1)
+                clash = _clashes(start, end, excluded)
             if end > window.end:
                 continue
         else:
             start, end = window.start, window.end
+            if _clashes(start, end, excluded):
+                continue
         if start < today:
             continue
         if period is not None and not (period.start <= start <= period.end):
@@ -144,6 +161,27 @@ def _no_choice(name: str, candidates: list, criteria: Criteria) -> NoChoice:
         return NoChoice(name)
     best = min(candidates, key=lambda p: (rooms_needed(p, criteria.pax), id_key(p)))
     return NoChoice(name, rooms_needed(best, criteria.pax), best.max_pax_per_room)
+
+
+def place_allowed(product: Product, excluded: tuple) -> bool:
+    """RF-73: fuori un prodotto dentro un'area esclusa (il luogo o chi lo contiene, fino al paese)."""
+    if not excluded:
+        return True
+    place = place_of(product)
+    around = geo.ancestors(place) if place is not None else []
+    country = geo.country_area(product.country)
+    if country is not None:
+        around.append(country)
+    return not any(area in around for area in excluded)
+
+
+def hotel_key(product: Product) -> tuple:
+    """RF-72: l'hotel a nome normalizzato; senza hotel il viaggio (titolo normalizzato e
+    destinazione di RF-61, prezzo a parte), così un rifiuto `hotel` del 78 esclude anche il 900078."""
+    name = " ".join((product.hotel or "").lower().split())
+    if name:
+        return ("hotel", name)
+    return ("trip", " ".join(product.title.lower().split()), product.destination or "")
 
 
 def place_of(product: Product) -> Optional[Area]:
@@ -366,17 +404,21 @@ def bookable(product: Product, now: Optional[datetime]) -> bool:
     return now is not None and checked is not None and now - checked >= RECHECK_AFTER
 
 
-def _hard_filters(criteria: Criteria, today: date, now: Optional[datetime]) -> tuple:
-    """I filtri duri che dipendono solo dal catalogo e dai criteri, in ordine (RF-07)."""
+def _hard_filters(criteria: Criteria, today: date, now: Optional[datetime],
+                  kept_windows: Optional[Dict[str, tuple]] = None) -> tuple:
+    """I filtri duri che dipendono solo dal catalogo e dai criteri, in ordine (RF-07); le date
+    saltano le finestre già rifiutate con `keep_product` (RF-74)."""
+    kept = kept_windows or {}
     return (
         ("archived", lambda p: not p.archived),
         ("bookable", lambda p: bookable(p, now)),
         ("trip", is_trip),
         ("sport", lambda p: criteria.sport in (None, "any") or p.sport == criteria.sport),
-        ("dates", lambda p: departure(p, criteria.period, today) is not None),
+        ("dates", lambda p: departure(p, criteria.period, today, kept.get(p.id, ())) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
         ("rooms", lambda p: _rooms_ok(p, criteria.pax, criteria.rooms)),
         ("level", lambda p: level_allowed(p, criteria.level)),
+        ("place", lambda p: place_allowed(p, criteria.excluded_areas)),
     )
 
 
@@ -391,10 +433,18 @@ def cheapest_total(products: Iterable[Product], criteria: Criteria, today: date,
 
 def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
            today: date, now: Optional[datetime] = None,
-           max_total: Optional[Decimal] = None) -> Union[Choice, NoChoice]:
-    """`max_total`: tetto dopo un rifiuto per prezzo (decisione M7), totale strettamente minore."""
+           max_total: Optional[Decimal] = None, hotel_rejected: Iterable[str] = (),
+           kept_windows: Optional[Dict[str, tuple]] = None) -> Union[Choice, NoChoice]:
+    """`max_total`: tetto dopo un rifiuto per prezzo (decisione M7), totale strettamente minore.
+    `hotel_rejected` (RF-72): prodotti rifiutati per l'hotel; escono tutti quelli con la stessa
+    `hotel_key`. `kept_windows` (RF-74): id del prodotto → finestre (inizio, fine) rifiutate con
+    `keep_product`; il prodotto non è in `rejected_ids` e resta candidato con le altre date."""
     candidates = list(products)
-    steps = _hard_filters(criteria, today, now) + (
+    rejected_for_hotel = set(hotel_rejected)
+    hotels = {hotel_key(p) for p in candidates if p.id in rejected_for_hotel}
+    kept = kept_windows or {}
+    steps = _hard_filters(criteria, today, now, kept) + (
+        ("hotel", lambda p: hotel_key(p) not in hotels),
         ("price", lambda p: max_total is None or _total(p, criteria) < max_total),
         ("rejected", lambda p: p.id not in rejected_ids),
     )
@@ -403,7 +453,8 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         if not candidates:
             return _no_choice(name, before, criteria)
     candidates = one_per_equivalence_group(candidates)   # RF-61: mai vuoto
-    trips = {p.id: departure(p, criteria.period, today) for p in candidates}   # mai None: filtro "dates"
+    trips = {p.id: departure(p, criteria.period, today, kept.get(p.id, ()))
+             for p in candidates}   # mai None: filtro "dates"
     score_of = {p.id: area_score(p, criteria.area) for p in candidates}
     within_of = {p.id: _within_budget(p, criteria) for p in candidates}
     fits_of = {p.id: _duration_ok(nights_between(*trips[p.id]), criteria) for p in candidates}

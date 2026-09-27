@@ -64,12 +64,35 @@ class SayTest(unittest.TestCase):
     def test_no_match_covers_every_criterion(self):
         from vela.domain.chooser import FILTERS
         texts = {c: say.say_no_match(c) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 8)   # archived, bookable e trip condividono la frase
+        self.assertEqual(len(set(texts.values())), 10)   # archived, bookable e trip condividono la frase
         self.assertIn("scartato", texts["rejected"])
         self.assertIn("camere", texts["rooms"])   # M21-D
         self.assertIn("livello", texts["level"])   # M21-C
+        self.assertIn("luoghi", texts["place"])   # M21-F
+        self.assertIn("hotel", texts["hotel"])    # M21-F
         self.assertIn("più economico", texts["price"])
         self.assertIn("periodo", texts["dates"])
+
+    def test_no_match_place_hotel_and_same_trip(self):
+        """M21-F (RF-09, RF-72..74): luoghi esclusi detti per nome, hotel scartato, stesso viaggio
+        senza altre partenze con la domanda di UC-F3."""
+        c = Criteria("padel", Area("country", "Spagna", "ES"),
+                     Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"), 2,
+                     excluded_areas=(Area("city", "Estepona", "ES"), Area("city", "Marbella", "ES")))
+        self.assertEqual(say.say_no_match("place", c),
+                         "Esclusi i viaggi a Estepona e a Marbella non trovo altri viaggi compatibili. "
+                         "Vuoi cambiare qualcosa?")
+        self.assertEqual(say.say_no_match("place", replace(c, language="en")),
+                         "Excluding Estepona and Marbella, I can't find other matching trips. Do you "
+                         "want to change something?")
+        self.assertEqual(say.say_no_match("hotel", c),
+                         "Gli altri viaggi compatibili sono negli hotel che hai scartato. Vuoi cambiare "
+                         "qualcosa?")
+        self.assertEqual(say.say_no_match("dates", c, same_trip=True),
+                         "Questo viaggio non ha altre partenze tra il 1 ottobre 2026 e il 31 ottobre "
+                         "2026. Vuoi che cerchi un altro viaggio?")
+        self.assertEqual(say.say_no_match("dates", replace(c, period=None, language="en"), same_trip=True),
+                         "This trip has no other departures. Shall I look for another trip?")
 
     def test_missing(self):
         s = say.say_missing(["email", "phone", "participants[0].last_name"])
@@ -205,7 +228,7 @@ class EnglishTest(unittest.TestCase):
         from vela.domain.chooser import FILTERS
         en = Criteria(language="en")
         texts = {c: say.say_no_match(c, en) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 8)   # archived, bookable e trip condividono la frase
+        self.assertEqual(len(set(texts.values())), 10)   # archived, bookable e trip condividono la frase
         self.assertIn("period", texts["dates"])
         self.assertIn("rooms", texts["rooms"])   # M21-D
         self.assertIn("level", texts["level"])   # M21-C

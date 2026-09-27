@@ -283,3 +283,39 @@ The duration and level clauses would add a second comma after an exclusion. Guar
 - 🔧 Bash: Guard against double commas and test it
 
 - 🔧 Bash: Run full suite after step 3
+
+- 🔧 Bash: Commit step 3
+
+Step 4: the chooser (filters `place` and `hotel`, excluded windows in `departure`). Checking the test helper first:
+
+- 🔧 Bash: Read make_product helper and FILTERS uses
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/tests/test_chooser_rejections.py
+
+Now the chooser implementation:
+
+- 🔧 Bash: Implement chooser place, hotel filters and windows
+
+Expected failures: the five existing `FILTERS` assertions (earlier tasks updated them the same way). Updating them:
+
+- 🔧 Bash: Show FILTERS failures and assertions
+
+- 🔧 Bash: Update FILTERS assertions and run suite
+
+- 🔧 Bash: Show the two failures
+
+`place` and `hotel` fall back to the generic sentence today. They need their own RF-09 sentences, plus the RF-74 "no other departures" one. Tests first:
+
+- 🔧 Bash: Read no-match say tests
+
+- 🔧 Bash: Read the start of those no-match tests
+
+- 🔧 Bash: Add no-match sentences for place, hotel, same trip
+
+- 🔧 Bash: Show lint and test errors
+
+My new test landed in the middle of the existing one and split it. Moving the two orphaned assertions back:
+
+- 🔧 Bash: Fix misplaced assertions and rerun
+
+- 🔧 Bash: Commit step 4

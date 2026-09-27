@@ -38,7 +38,7 @@ class EquivalentProductsTest(unittest.TestCase):
     un solo candidato, quello con l'id numerico più basso. La trappola 900078 non vince sul 78."""
 
     def test_grouping_is_not_a_filter(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "price",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "place", "hotel", "price",
                                    "rejected"))
 
     def test_trap_with_a_lower_price_loses_to_the_lowest_id(self):

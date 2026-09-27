@@ -385,6 +385,12 @@ _NO_MATCH = {
         # M21-C (RF-64): i compatibili sono riservati ad altri livelli
         "level": "I viaggi compatibili sono riservati a un altro livello di gioco. Vuoi cambiare qualcosa?",
         "level_value": "I viaggi compatibili sono riservati a %s. Vuoi cambiare qualcosa?",
+        # M21-F (RF-72..74)
+        "place": "Senza i luoghi che hai escluso non trovo altri viaggi compatibili. Vuoi cambiare qualcosa?",
+        "place_value": "Esclusi i viaggi %s non trovo altri viaggi compatibili. Vuoi cambiare qualcosa?",
+        "hotel": "Gli altri viaggi compatibili sono negli hotel che hai scartato. Vuoi cambiare qualcosa?",
+        "same_trip": "Questo viaggio non ha altre partenze disponibili. Vuoi che cerchi un altro viaggio?",
+        "same_trip_value": "Questo viaggio non ha altre partenze %s. Vuoi che cerchi un altro viaggio?",
     },
     "en": {
         "archived": "Right now I have no bookable trips: please try again later.",
@@ -406,20 +412,33 @@ _NO_MATCH = {
                         "Do you want to change the number of rooms?"),
         "level": "The compatible trips are reserved for another playing level. Do you want to change something?",
         "level_value": "The compatible trips are reserved for %s. Do you want to change something?",
+        "place": "Without the places you excluded I can't find other matching trips. Do you want to change something?",
+        "place_value": "Excluding %s, I can't find other matching trips. Do you want to change something?",
+        "hotel": "The other matching trips are in the hotels you turned down. Do you want to change something?",
+        "same_trip": "This trip has no other departures. Shall I look for another trip?",
+        "same_trip_value": "This trip has no other departures %s. Shall I look for another trip?",
     },
 }
 
 
 def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
                  rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None,
-                 levels: Optional[tuple] = None) -> str:
+                 levels: Optional[tuple] = None, same_trip: bool = False) -> str:
     """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
     nella lingua dei criteri. Con una persona sola il filtro `pax` cade solo per `minPax` ≥ 2
     (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66), per `level` i livelli a cui
-    sono riservati i prodotti esclusi (RF-64)."""
+    sono riservati i prodotti esclusi (RF-64). `same_trip` (RF-74): lo stesso prodotto chiesto
+    con `keep_product` non ha altre partenze."""
     c = criteria or Criteria()
     lang = c.language
     texts = _NO_MATCH.get(lang, _NO_MATCH["it"])
+    if criterion == "dates" and same_trip:
+        return (texts["same_trip_value"] % _when(c.period, lang) if c.period
+                else texts["same_trip"])
+    if criterion == "place" and c.excluded_areas:
+        en = lang == "en"
+        places = [geo.display_name(a, lang) if en else geo.where(a, lang) for a in c.excluded_areas]
+        return texts["place_value"] % _join(places, lang)
     if criterion == "sport" and c.sport:
         return texts["sport_value"] % c.sport
     if criterion == "dates" and c.period:
