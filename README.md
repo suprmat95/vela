@@ -80,6 +80,7 @@ regole di quota e latenza di quello vero, e Locust. **Non tocca mai HofJ vero, R
 docker compose up -d --build
 docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
     --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
+cat loadtest/out/10k/report.md   # il risultato del giro
 docker compose down -v        # ogni giro riparte con DB, coda e quota puliti
 uv run python loadtest/projection.py --rate <link/min misurati> --sizes 10000,50000
 ```
