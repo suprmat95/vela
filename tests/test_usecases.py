@@ -11,11 +11,14 @@ from vela.config import DEFAULT_TRAVELER
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.models import (Area, IntentCreated, IntentQuestion, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, OrderQueued, OrderStatus,
-                                OrderStatusResponse, Participant, ProposalMade, TravelerProfile)
+                                OrderStatusResponse, Participant, ProposalMade, StructuredFields,
+                                TravelerProfile)
 from vela.domain.usecases import NotFound, Vela
 from vela.ports.payments import to_cents
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
+# M21-F (RF-75): un motivo senza tipo è una domanda; `other` esplicito è il rifiuto di prima
+OTHER = StructuredFields(reject_kind="other")
 
 
 class Clock:
@@ -154,7 +157,7 @@ class RejectProposalTest(unittest.TestCase):
         while isinstance(r, ProposalMade):
             self.assertNotIn(r.product.product_id, seen)
             seen.append(r.product.product_id)
-            r = vela.reject_proposal(r.proposal.id, "no")
+            r = vela.reject_proposal(r.proposal.id, "no", OTHER)
         self.assertEqual(seen, ["3", "4", "2", "1"])
         self.assertEqual(r.failed_criterion, "rejected")
 
@@ -162,8 +165,8 @@ class RejectProposalTest(unittest.TestCase):
         vela = make_vela()
         iid = vela.create_intent(INTENT).intent_id
         first = vela.get_proposal(iid)
-        a = vela.reject_proposal(first.proposal.id, "no")
-        b = vela.reject_proposal(first.proposal.id, "no")
+        a = vela.reject_proposal(first.proposal.id, "no", OTHER)
+        b = vela.reject_proposal(first.proposal.id, "no", OTHER)
         self.assertEqual(a.proposal.id, b.proposal.id)
         self.assertEqual(len(vela.repos.proposals.list_for_intent(iid)), 2)
 
@@ -218,7 +221,7 @@ class RejectProposalTest(unittest.TestCase):
         vela = make_vela()
         iid = vela.create_intent(INTENT).intent_id
         first = vela.get_proposal(iid)                  # prodotto 3, 350
-        second = vela.reject_proposal(first.proposal.id, "non mi piace")
+        second = vela.reject_proposal(first.proposal.id, "non mi piace", OTHER)
         self.assertEqual(second.product.product_id, "4")                # 390, in Spagna
 
     def test_double_reject_does_not_lower_twice(self):
@@ -508,7 +511,7 @@ class PriceConfirmationTest(unittest.TestCase):
     def test_reject_awaiting_confirmation_cancels_without_a_link(self):
         vela, pid, _ = self.waiting_vela()
         oid = vela.accept_proposal(pid, FULL).order_id
-        r = vela.reject_proposal(pid, "no grazie")
+        r = vela.reject_proposal(pid, "no grazie", OTHER)
         self.assertTrue(r.say.startswith("Ho annullato l'ordine. "))
         self.assertEqual(vela.get_order_status(oid).status, OrderStatus.CANCELLED)
         self.assertEqual(vela.payments.links, [])
@@ -548,7 +551,7 @@ class RejectQueuedTest(unittest.TestCase):
     def test_reject_queued_order_cancels_and_proposes_next(self):
         vela, _, proposal = accepted_vela()
         oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
-        r = vela.reject_proposal(proposal.proposal.id, "ci ho ripensato")
+        r = vela.reject_proposal(proposal.proposal.id, "ci ho ripensato", OTHER)
         self.assertIsInstance(r, ProposalMade)
         self.assertNotEqual(r.proposal.product_id, proposal.proposal.product_id)
         self.assertTrue(r.say.startswith("Ho annullato l'ordine. "))
@@ -562,7 +565,7 @@ class RejectQueuedTest(unittest.TestCase):
         oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
         drain_to_link(vela, inline_worker(vela), proposal.proposal.id)
         self.assertEqual(vela.get_order_status(oid).status, OrderStatus.AWAITING_PAYMENT)
-        vela.reject_proposal(proposal.proposal.id, "no")
+        vela.reject_proposal(proposal.proposal.id, "no", OTHER)
         self.assertEqual(vela.get_order_status(oid).status, OrderStatus.CANCELLED)
         self.assertIsNone(vela.get_order_status(oid).payment_url)
 
@@ -571,7 +574,8 @@ class RejectQueuedTest(unittest.TestCase):
         oid = vela.accept_proposal(proposal.proposal.id, FULL).order_id
         drain_to_link(vela, inline_worker(vela), proposal.proposal.id)
         vela.orders.mark_paid(oid, "pi")
-        r = vela.reject_proposal(proposal.proposal.id, "no")
+        r = vela.reject_proposal(proposal.proposal.id, "no", OTHER)
+        self.assertIsInstance(r, ProposalMade)
         self.assertNotIn("annullato", r.say)
         self.assertEqual(vela.get_order_status(oid).status, OrderStatus.PAID_PENDING_BOOKING)
 
@@ -580,7 +584,7 @@ class RejectQueuedTest(unittest.TestCase):
         iid = vela.create_intent("a padel weekend in Spain in October, we are two, max 800 euros", FULL).intent_id
         proposal = vela.get_proposal(iid)
         vela.accept_proposal(proposal.proposal.id)
-        self.assertTrue(vela.reject_proposal(proposal.proposal.id, "no").say.startswith("I've cancelled the order. "))
+        self.assertTrue(vela.reject_proposal(proposal.proposal.id, "no", OTHER).say.startswith("I've cancelled the order. "))
 
 
 class OrderStatusTest(unittest.TestCase):

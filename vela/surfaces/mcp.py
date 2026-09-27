@@ -119,8 +119,8 @@ DESCRIPTIONS = {
         "change still goes through reject_proposal." + _VOICE),
     "reject_proposal": (
         "The user said no to the current proposal or wants to change something about it (place, "
-        "dates, length, sport, budget, people, rooms, level, lessons). Always use this tool for "
-        "changes after a proposal, never "
+        "hotel, dates, length, sport, budget, people, rooms, level, lessons). Always use this tool "
+        "for changes after a proposal, never "
         "a new create_intent: the intent keeps what the user already turned down. Pass the "
         "user's reason in their own words in `reason`, plus only the criteria that changed as "
         "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget` as the user said "
@@ -129,9 +129,20 @@ DESCRIPTIONS = {
         "the user only says the trip is too hard or too easy, pass the reason and Vela moves the "
         "level by one), and "
         "`direction`: north when the user wants somewhere cooler, south when they want somewhere "
-        "warmer. Returns the next single proposal, or `failed_criterion` with "
+        "warmer. When it is clear what the user did not like, pass `reject_kind`: price, place, "
+        "hotel, dates, duration, sport, pax, level or direction. A place the user rules out "
+        "(\"not Estepona, Spain is fine\") is excluded while the area stays; with `reject_kind` "
+        "hotel Vela leaves out every trip at that hotel. If the user likes the trip but not the "
+        "dates, pass `reject_kind` dates and `keep_product` true: the answer is the same trip "
+        "with another departure. Returns the next single proposal, or `failed_criterion` with "
         "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
-        "reject_proposal again on `rejected_proposal_id` with the updated fields." + _VOICE),
+        "reject_proposal again on `rejected_proposal_id` with the updated fields (with "
+        "`keep_product` false to look for another trip). It can also return `question` with "
+        "`proposal_id` when Vela did not understand what is wrong, or needs the number of rooms: "
+        "the proposal is still open, nothing was turned down. Ask the user exactly that question, "
+        "then call reject_proposal again on the same `proposal_id` with the reason plus the "
+        "answer and the matching `reject_kind`; if the user cannot say what is wrong, pass "
+        "`reject_kind` other and Vela moves on to another trip." + _VOICE),
     "accept_proposal": _ACCEPT + (
         " If the answer is `queued`, check with get_order_status after the stated wait, or "
         "whenever the user asks." + _VOICE),
@@ -195,6 +206,12 @@ Level = Annotated[Optional[str], Field(
 WantsCoaching = Annotated[Optional[bool], Field(
     description="true if the user wants lessons, a coach or a clinic; false if they said they "
                 "want no lessons. Leave it out otherwise.")]
+RejectKind = Annotated[Optional[str], Field(
+    description="What the user did not like, when it is clear: price, place, hotel, dates, "
+                "duration, sport, pax, level, direction; other only when the user cannot say.")]
+KeepProduct = Annotated[Optional[bool], Field(
+    description="true when the user likes this trip and only wants other dates; false to look for "
+                "another trip after 'no other departures'. Leave it out otherwise.")]
 Direction = Annotated[Optional[str], Field(
     description="north when the user wants somewhere cooler, south when somewhere warmer.")]
 Rooms = Annotated[Optional[int], Field(
@@ -288,10 +305,12 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                         direction: Direction = None, duration_min_nights: DurationMin = None,
                         duration_max_nights: DurationMax = None,
                         budget_scope: BudgetScope = None, rooms: Rooms = None,
-                        level: Level = None, wants_coaching: WantsCoaching = None) -> CallToolResult:
+                        level: Level = None, wants_coaching: WantsCoaching = None,
+                        reject_kind: RejectKind = None,
+                        keep_product: KeepProduct = None) -> CallToolResult:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction,
                                   duration_min_nights, duration_max_nights, budget_scope, rooms,
-                                  level, wants_coaching)
+                                  level, wants_coaching, reject_kind, keep_product)
         return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
     @server.tool(description=descriptions["accept_proposal"])

@@ -20,6 +20,7 @@ from vela.domain.models import (Criteria, IntentCreated, NoMatch, OrderStatus, P
 from vela.domain.usecases import Vela
 
 BRANDS = {"padel": "weebora.com", "tennis": "terrarossa.com"}
+OTHER = StructuredFields(reject_kind="other")   # M21-F: "Un altro" non dice cosa non va (RF-75)
 TRAVELER = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
 MAY = (("2027-05-14", "2027-05-17"),)
 JUNE = (("2027-06-11", "2027-06-14"),)
@@ -144,7 +145,7 @@ class MB5AnySportTest(unittest.TestCase):
         brands = []
         while isinstance(result, ProposalMade):
             brands.append(mb.product(result).brand)
-            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro", OTHER)
         self.assertEqual(sorted(brands), ["terrarossa.com", "weebora.com"])
 
     def test_the_brand_of_the_chosen_product_decides_the_cart(self):
@@ -191,7 +192,7 @@ class MB9SpectatorPackagesTest(unittest.TestCase):
             product = mb.product(result)
             seen.append(product.id)
             self.assertEqual((product.sport, product.brand), ("tennis", "terrarossa.com"))
-            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro", OTHER)
         self.assertTrue(seen)                        # si propone un viaggio da giocare
         self.assertFalse(events & set(seen))
         self.assertIsInstance(result, NoMatch)

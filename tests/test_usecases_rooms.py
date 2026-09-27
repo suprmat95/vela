@@ -85,13 +85,22 @@ class ProposalRoomsTest(unittest.TestCase):
 
 
 class RejectRoomsTest(unittest.TestCase):
-    def test_more_people_without_rooms_keep_one_room_and_filter(self):
-        """Decisione M21-D, 1: 2 persone in 1 camera, poi "siamo in 5" senza camere → il say dice
-        "in 1 camera" e i prodotti con massimo 2 per camera sono esclusi."""
+    def test_more_people_without_rooms_ask_how_many_rooms(self):
+        """M21-F (roadmap, da M21-D): 2 persone in 1 camera, poi "siamo in 5" senza camere → la
+        domanda chiusa "In quante camere?" con `proposal_id`, come RF-75: nessun rifiuto, criteri
+        invariati, la proposta resta aperta. Con la risposta il rifiuto passa e i prodotti con
+        massimo 2 per camera restano solo se le camere bastano. Prima di M21-F: "per 5 persone in
+        1 camera" nel say e il prodotto 2."""
         vela = make_vela([TWO_PER_ROOM, NO_LIMIT])
-        _, first = proposal_for(vela, "padel, siamo in due")
+        intent, first = proposal_for(vela, "padel, siamo in due")
         self.assertEqual(first.product.product_id, "1")
+        before = vela.repos.intents.get(intent.intent_id).criteria
         r = vela.reject_proposal(first.proposal.id, "siamo in 5")
+        self.assertIsInstance(r, IntentQuestion)
+        self.assertEqual((r.question, r.say, r.proposal_id), (QUESTION_ROOMS, QUESTION_ROOMS, first.proposal.id))
+        self.assertEqual(vela.repos.rejections.list_for_intent(intent.intent_id), [])
+        self.assertEqual(vela.repos.intents.get(intent.intent_id).criteria, before)
+        r = vela.reject_proposal(first.proposal.id, "siamo in 5, una camera")
         self.assertIsInstance(r, ProposalMade)
         self.assertIn("per 5 persone in 1 camera", r.say)
         self.assertEqual((r.product.product_id, r.to_dict()["rooms"]), ("2", 1))
@@ -124,6 +133,9 @@ class AcceptRoomsTest(unittest.TestCase):
         self.assertEqual(r.question, QUESTION_ROOMS)
         self.assertEqual(r.say, "Le camere di questo viaggio ospitano al massimo 2 persone: per 5 "
                                 "servono almeno 3 camere. In quante camere?")
+        # M21-F: stesso formato della domanda di RF-75, con l'id della proposta
+        self.assertEqual(r.proposal_id, self.proposal.proposal.id)
+        self.assertEqual(r.to_dict()["proposal_id"], self.proposal.proposal.id)
         self.assertIsNone(self.order())
         self.assertEqual(self.vela.repos.intents.get(self.intent.intent_id).criteria.rooms, 3)
 

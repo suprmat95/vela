@@ -206,9 +206,38 @@ class ProposalEndpointsTest(unittest.TestCase):
         assert_single_product(self, body)
 
     def test_reject_without_body(self):
+        """M21-F (RF-75): senza motivo né tipo la risposta è la domanda chiusa, 200, con l'id della
+        proposta che resta aperta; con `reject_kind` other è il rifiuto di prima."""
         r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"], headers=AUTH)
         self.assertEqual(r.status_code, 200, r.text)
+        question = "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?"
+        self.assertEqual(r.json(), {"outcome": "question", "question": question, "say": question,
+                                    "proposal_id": self.first["proposal_id"]})
+        r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"], headers=AUTH,
+                        json={"reject_kind": "other"})
+        self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["outcome"], "proposal")
+
+    def test_reject_kind_and_keep_product(self):
+        """M21-F (RF-52, RF-74): stesso viaggio con un'altra partenza; `keep_product` di tipo
+        sbagliato è un 422 come `wants_coaching`, un `reject_kind` fuori elenco è scartato e detto."""
+        c, _ = make_client(products=[make_product(1, windows=(("2026-10-01", "2026-10-04"),
+                                                              ("2026-10-08", "2026-10-11"))),
+                                     make_product(2, price=900)])
+        iid = new_intent(c, text="padel a ottobre, siamo in due")["intent_id"]
+        first = proposal_for(c, iid)
+        body = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                      json={"reason": "va bene il viaggio", "reject_kind": "dates",
+                            "keep_product": True}).json()
+        self.assertEqual((body["outcome"], body["product"]["product_id"], body["start_date"]),
+                         ("proposal", "1", "2026-10-08"))
+        r = c.post("/v1/proposals/%s/reject" % body["proposal_id"], headers=AUTH,
+                   json={"keep_product": "forse"})
+        self.assertEqual(r.status_code, 422)
+        body = c.post("/v1/proposals/%s/reject" % body["proposal_id"], headers=AUTH,
+                      json={"reason": "boh", "reject_kind": "meteo"}).json()
+        self.assertEqual(body["outcome"], "question")
+        self.assertTrue(body["say"].startswith("Non ho potuto usare meteo come tipo di rifiuto."))
 
     def test_reject_with_null_reason(self):
         r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"],
@@ -219,7 +248,7 @@ class ProposalEndpointsTest(unittest.TestCase):
         c, _ = make_client(products=[make_product(1)])
         iid = new_intent(c, text="padel a ottobre, siamo in due")["intent_id"]
         pid = proposal_for(c, iid)["proposal_id"]
-        body = c.post("/v1/proposals/%s/reject" % pid, headers=AUTH).json()
+        body = c.post("/v1/proposals/%s/reject" % pid, headers=AUTH, json={"reject_kind": "other"}).json()
         self.assertEqual(body["outcome"], "no_match")
         self.assertEqual(body["failed_criterion"], "rejected")
 
@@ -444,7 +473,7 @@ class AgentToolContractTest(unittest.TestCase):
         intent = new_intent(c)
         first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
         d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
-                   json={"reason": "no"}).json()
+                   json={"reason": "no", "reject_kind": "other"}).json()
         self.assertEqual((d["outcome"], d["rejected_proposal_id"]), ("no_match", first["proposal_id"]))
         d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
                    json={"reason": "a novembre", "period_start": "2026-11-01",

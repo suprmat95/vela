@@ -2,12 +2,14 @@
 
 Bearer statico ``VELA_API_TOKEN``; senza token configurato ogni endpoint risponde 503. Ogni
 risposta di successo è ``{"outcome": ..., **to_dict()}``: gli esiti previsti (domanda, niente di
-compatibile, dati mancanti, camere sotto il minimo) sono 200, non errori. L'accettazione è asincrona (RF-45): 202
+compatibile, dati mancanti, camere sotto il minimo, motivo di rifiuto da chiarire) sono 200, non
+errori. L'accettazione è asincrona (RF-45): 202
 ``order_queued`` con ``Location`` verso lo stato dell'ordine; un doppio accept risponde 200 con lo
 stato attuale. Gli errori sono RFC 7807
 (``vela/surfaces/problems.py``). Ordine dei controlli: token, validazione, dominio.
 """
 import hmac
+from dataclasses import replace
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -104,6 +106,12 @@ class IntentIn(FieldsIn):
 class RejectIn(FieldsIn):
     reason: Optional[str] = None
     direction: Optional[str] = None
+    reject_kind: Optional[str] = None     # M21-F (RF-71): price | place | hotel | dates | … | other
+    keep_product: Optional[bool] = None   # M21-F (RF-74): stesso viaggio, altre date
+
+    def reject_fields(self) -> StructuredFields:
+        return replace(self.fields(self.direction), reject_kind=self.reject_kind,
+                       keep_product=self.keep_product)
 
 
 class AcceptIn(BaseModel):
@@ -133,7 +141,7 @@ def get_proposal_details(proposal_id: str, vela: Vela = Depends(get_vela)) -> JS
 def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
                     vela: Vela = Depends(get_vela)) -> JSONResponse:
     reason = body.reason if body is not None else None
-    fields = body.fields(body.direction) if body is not None else None
+    fields = body.reject_fields() if body is not None else None
     return reply(vela.reject_proposal(proposal_id, reason or "", fields))
 
 

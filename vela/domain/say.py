@@ -212,7 +212,9 @@ _DISCARDED = {
            "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto.",
            "rooms": "Non ho potuto usare %s come numero di camere.",
            "level": "Non ho potuto usare %s come livello di gioco: principiante, intermedio o avanzato.",
-           "wants_coaching": "Non ho potuto usare %s per sapere se vuoi lezioni: sì o no."},
+           "wants_coaching": "Non ho potuto usare %s per sapere se vuoi lezioni: sì o no.",
+           "reject_kind": "Non ho potuto usare %s come tipo di rifiuto.",
+           "keep_product": "Non ho potuto usare %s per sapere se tenere questo viaggio: sì o no."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
@@ -223,7 +225,9 @@ _DISCARDED = {
            "budget_scope": "I couldn't use %s as the budget reading, per person or in total.",
            "rooms": "I couldn't use %s as the number of rooms.",
            "level": "I couldn't use %s as the playing level: beginner, intermediate or advanced.",
-           "wants_coaching": "I couldn't use %s to know whether you want lessons: yes or no."},
+           "wants_coaching": "I couldn't use %s to know whether you want lessons: yes or no.",
+           "reject_kind": "I couldn't use %s as the kind of rejection.",
+           "keep_product": "I couldn't use %s to know whether to keep this trip: yes or no."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
@@ -248,6 +252,29 @@ def say_untranslatable(lang: str = "it") -> str:
     if lang == "en":
         return "I can't choose based on that: I've only excluded the previous proposal."
     return "Non so scegliere in base a questo: ho escluso solo la proposta di prima."
+
+
+# M21-F (RF-75): la domanda chiusa per un motivo di rifiuto che non si classifica
+QUESTION_REASON = {"it": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                   "en": "What doesn't convince you: the place, the hotel, the dates or the price?"}
+
+
+def question_reason(lang: str = "it") -> str:
+    return QUESTION_REASON.get(lang, QUESTION_REASON["it"])
+
+
+def say_hotel_excluded(hotel: Optional[str], lang: str = "it") -> str:
+    """RF-72: "Ho escluso i viaggi con l'hotel X."; senza hotel si esclude lo stesso viaggio."""
+    if lang == "en":
+        return ("I've left out the trips at %s." % hotel if hotel
+                else "This trip doesn't name its hotel: I've left out this trip.")
+    return ("Ho escluso i viaggi con l'hotel %s." % hotel if hotel
+            else "Questo viaggio non indica l'hotel: ho escluso questo viaggio.")
+
+
+def say_same_trip(lang: str = "it") -> str:
+    """RF-74: la proposta successiva è lo stesso prodotto con un'altra partenza."""
+    return "Same trip, with another departure." if lang == "en" else "Stesso viaggio, con un'altra partenza."
 
 
 def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it",

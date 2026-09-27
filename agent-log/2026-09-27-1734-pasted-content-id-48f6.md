@@ -319,3 +319,95 @@ My new test landed in the middle of the existing one and split it. Moving the tw
 - 🔧 Bash: Fix misplaced assertions and rerun
 
 - 🔧 Bash: Commit step 4
+
+Step 5: `refine`. Checking two existing tests whose motives sit on the new classification boundary:
+
+- 🔧 Bash: Read existing rejection use-case tests
+
+Now pure `refine` tests: a classification table (one Italian and one English phrase per type), plus keep_product, places and the rooms question.
+
+- 🔧 Bash: Read refine test helpers
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/tests/test_refine_kinds.py
+
+Now the `refine` implementation:
+
+- 🔧 Bash: Add reject_kind and keep_product to StructuredFields
+
+- 🔧 Bash: Implement classification in refine
+
+- 🔧 Bash: Restrict rooms question to intents with rooms, rerun
+
+- 🔧 Bash: Show the failing test
+
+- 🔧 Bash: Read use-case test helpers
+
+Use-case tests for F1-F4, the deferred cases and RF-84, written before the flow change:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/tests/test_usecases_rejections.py
+
+- 🔧 Bash: Rewrite the price-and-hotel use-case test
+
+Now the two deferred M21-D tests in `tests/test_usecases_rooms.py`:
+
+- 🔧 Bash: Read rooms use-case tests
+
+- 🔧 Bash: Update the deferred M21-D rooms tests
+
+Now the implementation: sentences in `say.py`, `IntentQuestion.proposal_id`, the rejection flow in `usecases.py`, and the hotel reason check in `refine.py`.
+
+- 🔧 Bash: Implement the new reject flow in usecases
+
+- 🔧 Bash: List failing tests
+
+Most of these are the expected old-behaviour tests ("no" → next proposal). One is my new test; checking that first:
+
+- 🔧 Bash: Show SameTrip test failure
+
+The sentence is right, only my test's expected position was wrong: "Ho capito…" comes first, then "Stesso viaggio, con un'altra partenza.", then the proposal. Fixing the assertion:
+
+- 🔧 Bash: Fix assertion and inspect old failing tests
+
+- 🔧 Bash: Add reject_kind and keep_product to REST and MCP
+
+Now the old tests. Looking at each one before touching it:
+
+- 🔧 Bash: Read failing tests in test_usecases
+
+- 🔧 Bash: Pass reject_kind other in test_usecases
+
+Next: agent-tool, multibrand and staging tests.
+
+- 🔧 Bash: Read failing agent-tool and multibrand tests
+
+- 🔧 Bash: Update agent-tool and multibrand tests
+
+- 🔧 Bash: Define OTHER in multibrand tests and run
+
+- 🔧 Bash: Show error
+
+- 🔧 Bash: Exclude explicit other from hotel check, rerun
+
+Now the staging trap: the old test gets `other`, and the deferred M21-B case (hotel rejection of 78 → neither 78 nor 900078) is added.
+
+- 🔧 Bash: Add trap hotel test and update staging test
+
+The trap case passes on the real staging fixture. Now the REST and MCP tests:
+
+- 🔧 Bash: Read failing REST and MCP tests
+
+- 🔧 Bash: Update REST and MCP tests and add new ones
+
+- 🔧 Bash: Read MCP schema tests
+
+Adding a schema and description test for the MCP `reject_proposal` changes:
+
+- 🔧 Bash: Add MCP schema test and run suite
+
+Suite and lint are green. Before committing I'm checking for old tests that now pass vacuously through the question path. One candidate is an empty reason with an invalid `direction`:
+
+- 🔧 Bash: Read invalid direction test
+
+That one still holds: the discarded-field sentence now comes before the question. I'll make the assertion state that explicitly:
+
+- 🔧 Bash: Strengthen assertion and commit steps 5-7

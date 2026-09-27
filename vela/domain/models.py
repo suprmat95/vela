@@ -67,6 +67,8 @@ class StructuredFields:
     rooms: Optional[object] = None
     level: Optional[object] = None
     wants_coaching: Optional[object] = None
+    reject_kind: Optional[object] = None    # M21-F (RF-71): solo sul rifiuto, validato in `refine`
+    keep_product: Optional[object] = None   # M21-F (RF-74): solo sul rifiuto
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
@@ -422,9 +424,13 @@ class IntentCreated:
 class IntentQuestion:
     question: str
     say: str
+    proposal_id: Optional[str] = None   # M21-F: la domanda chiusa su una proposta che resta aperta
 
     def to_dict(self) -> dict:
-        return {"question": self.question, "say": self.say}
+        d = {"question": self.question, "say": self.say}
+        if self.proposal_id is not None:
+            d["proposal_id"] = self.proposal_id
+        return d
 
 
 @dataclass(frozen=True)

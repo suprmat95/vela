@@ -144,7 +144,10 @@ class UC6UntranslatableReasonTest(unittest.TestCase):
         vela = make_vela()
         intent, first = propose(vela)
         before = vela.repos.intents.get(intent.intent_id).criteria
-        r = vela.reject_proposal(first.proposal.id, "Voglio un hotel con la spa")
+        # M21-F: senza tipo "hotel con la spa" è un rifiuto `hotel` (RF-72); la frase di RF-54 resta
+        # per `reject_kind="other"` esplicito
+        r = vela.reject_proposal(first.proposal.id, "Voglio un hotel con la spa",
+                                 StructuredFields(reject_kind="other"))
         self.assertEqual(vela.repos.intents.get(intent.intent_id).criteria, before)
         self.assertNotEqual(r.product.product_id, first.product.product_id)
         self.assertTrue(r.say.startswith("Non so scegliere in base a questo"))
@@ -153,7 +156,8 @@ class UC6UntranslatableReasonTest(unittest.TestCase):
     def test_empty_reason_is_not_untranslatable(self):
         vela = make_vela()
         _, first = propose(vela)
-        r = vela.reject_proposal(first.proposal.id, "")
+        r = vela.reject_proposal(first.proposal.id, "", StructuredFields(reject_kind="other"))
+        self.assertIsInstance(r, ProposalMade)
         self.assertNotIn("Non so scegliere", r.say)
 
 
@@ -180,6 +184,10 @@ class UC7InvalidFieldTest(unittest.TestCase):
         _, first = propose(vela)
         r = vela.reject_proposal(first.proposal.id, "", fields=StructuredFields(direction="east"))
         self.assertTrue(r.say.startswith("Non so spostare la ricerca verso east."))
+        # M21-F: la direzione scartata non dice cosa non va → domanda di RF-75, dopo lo scarto
+        self.assertIsInstance(r, IntentQuestion)
+        self.assertEqual(r.say, "Non so spostare la ricerca verso east. Cosa non ti convince: il posto, "
+                                "l'hotel, le date o il prezzo?")
 
 
 class UC8ConflictTest(unittest.TestCase):
@@ -226,7 +234,7 @@ class NoMatchAfterRejectionTest(unittest.TestCase):
     def test_second_reject_on_the_same_proposal(self):
         vela = make_vela(products=[CATALOG[0], CATALOG[2]])   # un padel in Spagna, un tennis
         intent, first = propose(vela)
-        nomatch = vela.reject_proposal(first.proposal.id, "no")
+        nomatch = vela.reject_proposal(first.proposal.id, "no", StructuredFields(reject_kind="other"))
         self.assertIsInstance(nomatch, NoMatch)
         self.assertEqual(nomatch.rejected_proposal_id, first.proposal.id)
         self.assertEqual(nomatch.to_dict()["rejected_proposal_id"], first.proposal.id)
