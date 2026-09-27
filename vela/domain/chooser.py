@@ -1,11 +1,15 @@
-"""Chooser v2 (RF-06, RF-07, RF-09): una sola scelta deterministica.
+"""Chooser v3 (RF-06, RF-07, RF-09, RF-60, RF-61): una sola scelta deterministica.
 
 Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, prezzo
-(dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
-restanti ordina per aderenza all'area (dentro l'area 3, stessa regione 2, stesso paese 1),
-totale entro budget, durata compatibile (M21, RF-58), prezzo crescente, id. Area, budget e
-durata non escludono mai: se non sono rispettati la motivazione lo dichiara (RF-59). Se un filtro azzera i candidati, `NoChoice` porta il
-nome di quel filtro (RF-09).
+(dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Dei
+prodotti equivalenti (RF-61, M21-B) resta un solo candidato, quello con l'id più basso. Tra i
+restanti ordina come RF-60 (M21-B): aderenza all'area (dentro l'area 3, stessa regione 2,
+stesso paese 1), totale entro budget, durata compatibile (RF-58), [livello e lezioni: neutro
+fino a M21-C], partenza più vicina all'inizio del periodo (o a oggi senza periodo), `featured`
+o offerta speciale, prezzo crescente, id numerico. Area, budget e durata non escludono mai: se
+non sono rispettati la motivazione lo dichiara (RF-59); la motivazione dice anche il livello
+che ha deciso quando un prodotto più economico ha perso sulla partenza o su `featured`. Se un
+filtro azzera i candidati, `NoChoice` porta il nome di quel filtro (RF-09).
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -20,6 +24,8 @@ from vela.domain.say import fmt_money, fmt_nights, fmt_span, nights_range, on_da
 FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "price", "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
+
+EQUIVALENT_PRICE_TOLERANCE = Decimal("0.05")   # RF-61: prezzo entro il 5% dell'id più basso
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,16 @@ class Choice:
 @dataclass(frozen=True)
 class NoChoice:
     failed_criterion: str
+
+
+@dataclass(frozen=True)
+class Why:
+    """Cosa la motivazione può dire del prodotto scelto rispetto ai suoi pari (stessa area e
+    stesso stato di budget), calcolato in `choose` così che ogni frase sia vera (RF-06)."""
+    cheapest: bool = True            # nessun pari più economico che non abbia perso sulla durata
+    cheaper_skipped: bool = False    # un pari più economico ha perso solo sulla durata (M21-A)
+    departure_won: bool = False      # un pari più economico parte dopo (RF-60, livello 5)
+    featured_won: bool = False       # un pari più economico parte lo stesso giorno senza `featured`
 
 
 def departure(product: Product, period: Optional[Period], today: date) -> Optional[Tuple[date, date]]:
@@ -146,12 +162,6 @@ def _duration_ok(nights: int, criteria: Criteria) -> bool:
     return (low is None or nights >= low) and (high is None or nights <= high)
 
 
-def _product_duration_ok(product: Product, criteria: Criteria, today: date) -> bool:
-    if criteria.duration_min_nights is None and criteria.duration_max_nights is None:
-        return True
-    return _duration_ok(nights_between(*departure(product, criteria.period, today)), criteria)
-
-
 # durate della tabella di UC-A che hanno un nome proprio nella motivazione
 _DURATION_NAMES = {(1, 3): ("weekend", "weekend trips"),
                    (2, 4): ("ponti o weekend lunghi", "long-weekend trips"),
@@ -179,32 +189,51 @@ def _duration_sentence(criteria: Criteria, start: date, end: date) -> str:
 
 
 def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, score: int,
-                           within: bool, cheaper_skipped: bool = False) -> str:
-    """`cheaper_skipped`: un prodotto più economico con la stessa area e lo stesso budget ha
-    perso solo per la durata, quindi "la più economica" vale tra quelle della durata chiesta."""
+                           within: bool, why: Why) -> str:
+    """"Parte il 5 ottobre 2026, la prima partenza nel periodo che hai chiesto, con un totale a
+    partire da 1000 euro, dentro il tuo budget di 1500 euro, ed è tra i viaggi in evidenza del
+    catalogo." Ogni pezzo compare solo se è vero (`why`): "la più economica" resta la frase di
+    prima quando nessun pari costa meno, con "tra quelle della durata che hai chiesto" se un più
+    economico ha perso solo sulla durata."""
     lang = criteria.language
     en = lang == "en"
     text = ("It leaves %s" if en else "Parte %s") % on_date(start, lang)
-    if criteria.period is not None:
+    if why.departure_won:
+        if criteria.period is not None:
+            text += (", the first departure in the period you asked for," if en
+                     else ", la prima partenza nel periodo che hai chiesto,")
+        else:
+            text += ", the earliest departure available," if en else ", la prima partenza disponibile,"
+    elif criteria.period is not None:
         text += ", in the period you asked for," if en else ", nel periodo che hai chiesto,"
     total = fmt_money(_total(product, criteria), lang)
     cheapest = "it's the cheapest compatible option" if en else "è la più economica compatibile"
+    featured = ("it's one of the catalogue's featured trips" if en
+                else "è tra i viaggi in evidenza del catalogo")
     length = ""
-    if cheaper_skipped:
+    if why.cheaper_skipped:
         length = " of the length you asked for" if en else " tra quelle della durata che hai chiesto"
         cheapest += length
     if criteria.budget is None:
-        if criteria.area is None:
+        if criteria.area is None and why.cheapest:
             return text + (" and %s." if en else " ed %s.") % cheapest
-        return text + (" with a total starting at %s." if en
-                       else " con un totale a partire da %s.") % total
+        text += (" with a total starting at %s" if en else " con un totale a partire da %s") % total
+        if why.featured_won:
+            text += (", and %s" if en else ", ed %s") % featured
+        return text + "."
     budget = fmt_money(criteria.budget, lang)
     if within:
-        return text + ((" with a total starting at %s, within your budget of %s." if en
-                        else " con un totale a partire da %s, dentro il tuo budget di %s.")
-                       % (total, budget))
+        text += ((" with a total starting at %s, within your budget of %s" if en
+                  else " con un totale a partire da %s, dentro il tuo budget di %s") % (total, budget))
+        if why.featured_won:
+            text += (", and %s" if en else ", ed %s") % featured
+        return text + "."
     text += ((" with a total starting at %s, over your budget of %s" if en
               else " con un totale a partire da %s, oltre il tuo budget di %s") % (total, budget))
+    if why.featured_won:
+        return text + (", but %s." if en else ", ma %s.") % featured
+    if not why.cheapest:
+        return text + "."
     if criteria.area is None:
         return text + (", but %s." if en else ", ma %s.") % cheapest
     if score == INSIDE:
@@ -214,13 +243,41 @@ def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, sc
 
 
 def _reason(product: Product, criteria: Criteria, start: date, end: date, score: int,
-            within: bool, duration_ok: bool, cheaper_skipped: bool) -> str:
+            within: bool, duration_ok: bool, why: Why) -> str:
     sentences = [_area_sentence(product, criteria.area, score, criteria.language)]
     if not duration_ok:
         sentences.append(_duration_sentence(criteria, start, end))
-    sentences.append(_dates_budget_sentence(product, criteria, start, score, within,
-                                            cheaper_skipped))
+    sentences.append(_dates_budget_sentence(product, criteria, start, score, within, why))
     return " ".join(s for s in sentences if s is not None)
+
+
+def id_key(product: Product) -> tuple:
+    """Ordine degli id (RF-60, RF-61): numerici prima, in ordine numerico ("78" < "100"); un id
+    non numerico dopo, come stringa (decisione M10 sui possibili prefissi). Mai un'eccezione."""
+    pid = product.id
+    return (0, int(pid)) if pid.isdecimal() else (1, pid)
+
+
+def _equivalence_key(product: Product) -> tuple:
+    """RF-61: stesso hotel (nessun hotel = nessun hotel), stesso titolo minuscolo senza spazi doppi,
+    stessa destinazione."""
+    return (product.hotel or "", " ".join(product.title.lower().split()), product.destination or "")
+
+
+def one_per_equivalence_group(products: Iterable[Product]) -> list:
+    """RF-61: un solo candidato per gruppo di prodotti equivalenti, quello con l'id più basso
+    (`id_key`). Scorrendo in ordine di id, un prodotto con la stessa chiave e il prezzo entro
+    `EQUIVALENT_PRICE_TOLERANCE` di un capogruppo già tenuto esce; altrimenti è un capogruppo
+    nuovo. Il confronto è sempre col capogruppo, mai a catena: 100, 104 e 108 danno due gruppi."""
+    anchors = {}
+    kept = []
+    for product in sorted(products, key=id_key):
+        group = anchors.setdefault(_equivalence_key(product), [])
+        if any(abs(product.price - a.price) <= a.price * EQUIVALENT_PRICE_TOLERANCE for a in group):
+            continue
+        group.append(product)
+        kept.append(product)
+    return kept
 
 
 RECHECK_AFTER = timedelta(hours=24)   # RF-34
@@ -269,15 +326,34 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         candidates = [p for p in candidates if keep(p)]
         if not candidates:
             return NoChoice(name)
-    candidates.sort(key=lambda p: (-area_score(p, criteria.area), not _within_budget(p, criteria),
-                                   not _product_duration_ok(p, criteria, today), p.price, p.id))
+    candidates = one_per_equivalence_group(candidates)   # RF-61: mai vuoto
+    trips = {p.id: departure(p, criteria.period, today) for p in candidates}   # mai None: filtro "dates"
+    score_of = {p.id: area_score(p, criteria.area) for p in candidates}
+    within_of = {p.id: _within_budget(p, criteria) for p in candidates}
+    fits_of = {p.id: _duration_ok(nights_between(*trips[p.id]), criteria) for p in candidates}
+
+    def rank(p: Product) -> tuple:
+        # RF-60. La partenza si ordina per data: ogni partenza valida è già all'inizio del periodo
+        # o dopo (o a oggi o dopo), quindi la distanza dall'inizio cresce con la data.
+        return (-score_of[p.id], not within_of[p.id], not fits_of[p.id],
+                # livello 4, livello e lezioni: neutro fino a M21-C (RF-62..64)
+                trips[p.id][0], not _promoted(p), p.price, id_key(p))
+
+    candidates.sort(key=rank)
     best = candidates[0]
-    start, end = departure(best, criteria.period, today)
-    score = area_score(best, criteria.area)
-    within = _within_budget(best, criteria)
-    nights = nights_between(start, end)
-    fits = _duration_ok(nights, criteria)
-    cheaper_skipped = any(p.price < best.price and area_score(p, criteria.area) == score
-                          and _within_budget(p, criteria) == within for p in candidates)
-    reason = _reason(best, criteria, start, end, score, within, fits, cheaper_skipped)
-    return Choice(best, start, end, reason, score, within, nights, fits)
+    start, end = trips[best.id]
+    score, within, fits = score_of[best.id], within_of[best.id], fits_of[best.id]
+    peers = [p for p in candidates[1:] if score_of[p.id] == score and within_of[p.id] == within]
+    cheaper = [p for p in peers if p.price < best.price]
+    same_length = [p for p in cheaper if fits_of[p.id] == fits]
+    why = Why(cheapest=not same_length, cheaper_skipped=bool(cheaper) and not same_length,
+              departure_won=any(trips[p.id][0] > start for p in same_length),
+              featured_won=_promoted(best) and any(trips[p.id][0] == start and not _promoted(p)
+                                                   for p in same_length))
+    reason = _reason(best, criteria, start, end, score, within, fits, why)
+    return Choice(best, start, end, reason, score, within, nights_between(start, end), fits)
+
+
+def _promoted(product: Product) -> bool:
+    """RF-60, livello 6: `featured` o offerta speciale di HofJ, letti dal sync (M21-B)."""
+    return product.featured or product.special_offer

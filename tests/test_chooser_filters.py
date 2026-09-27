@@ -1,8 +1,9 @@
-"""M21-E: `choose` e `cheapest_total` condividono i filtri duri. Le sequenze sotto sono state
-registrate con il chooser di prima (commit 4b5881b), sulle fixture `catalog.json` e
-`catalog-tennis.json`: rifiutando ogni volta la scelta si ottiene tutto l'elenco dei candidati
-filtrati e ordinati. Se il refactor dei filtri cambiasse anche un solo candidato o l'ordine, la
-sequenza cambierebbe. Le sequenze dipendono dalle fixture e dall'ordinamento: M21-B le rivedrà.
+"""M21-E: `choose` e `cheapest_total` condividono i filtri duri. Le sequenze sotto sono
+registrate sulle fixture `catalog.json` e `catalog-tennis.json`: rifiutando ogni volta la scelta
+si ottiene tutto l'elenco dei candidati filtrati e ordinati. Se un filtro o l'ordinamento
+cambiasse anche un solo candidato o l'ordine, la sequenza cambierebbe. Registrate con il chooser
+v2 (commit 4b5881b) e ri-registrate in M21-B con l'ordinamento v3 di RF-60 (stessi insiemi di
+prodotti, ordine per partenza, `featured`, prezzo, id numerico); elencate in `docs/decisions.md`.
 """
 import os
 import unittest
@@ -25,27 +26,28 @@ DEC = Period(date(2026, 12, 1), date(2026, 12, 31), "dicembre")
 SEQUENCES = {
     "padel Spagna ottobre 2, 800": (
         Criteria("padel", geo.find_area("Spagna"), OCT, 2, Decimal("800")), NOW, None,
-        "1023 1027 1078 257 239 250 645 896 181 995 1013 308 273 648 886 1009 207 910 "
-        "278 342 230 186 999 426 302 443 270 256 218 235 688 766 210 229 244 201 190 "
-        "217 291 296 1051 751 330 940 1071 221 944 663 948 457 1043 969 925 197 985 454"),
+        "1023 257 1027 1078 239 181 186 256 1013 910 426 648 250 308 273 995 218 235 230 270 "
+        "999 302 896 886 1009 207 645 342 443 278 688 766 201 210 229 244 190 330 751 940 "
+        "663 197 296 217 221 948 1071 985 1051 925 944 457 969 1043 454 291"),
     "tennis 3 persone": (
         Criteria("tennis", None, None, 3), NOW, None,
-        "1044 695 893 1087 931 369 988 707 1034 523 860 697 894 716 1031 854 608 855 "
-        "955 710 1003 959 373 430 826 363 960 1075 378 1042 970 372 626 1020 506 1037"),
+        "363 1044 931 369 988 707 523 716 608 1003 373 430 626 1020 506 1037 710 855 955 826 "
+        "860 695 854 960 1034 1087 378 970 1042 372 697 1031 959 1075 894 893"),
     "any dicembre 1, weekend": (
         Criteria("any", None, DEC, 1, duration_min_nights=1, duration_max_nights=3), NOW, None,
-        "1059 1065 688 201 988 239 645 181 1071 995 1013 308 273 1003 1009 207 278 1075 "
-        "766 210 244 697 221 710 959 663 964 569 186 999 426 302 443 270 763 1055 256 "
-        "235 1020 1037 624 748"),
+        "239 688 201 181 278 1013 1003 1009 1071 308 273 995 1075 1059 1065 207 988 645 186 "
+        "256 766 663 426 235 1020 1037 959 964 569 244 443 270 697 221 710 999 302 210 624 "
+        "763 748 1055"),
     "padel Italia 5, tetto 2000": (
         Criteria("padel", geo.find_area("Italia"), None, 5, Decimal("3000")), NOW, Decimal("2000"),
-        "688 766 210 229 244 190 1059 1065 1023 1027 201 1078 257"),
+        "688 766 210 229 244 190 201 1023 257 1027 1078 1059 1065"),
     "padel 2 senza now": (
         Criteria("padel", None, None, 2), None, None,
-        "1059 1065 688 766 210 229 244 1023 1027 201 190 1078 257 217 291 239 1090 1093 "
-        "296 250 1051 751 645 896 330 181 940 1071 995 1013 308 221 273 648 886 944 "
-        "1009 207 663 910 278 964 569 342 482 948 230 186 393 999 426 457 1043 969 302 "
-        "925 443 270 197 763 1055 256 218 235 985 454 838 624 622 748"),
+        "330 181 186 256 688 766 210 229 244 201 296 250 1051 751 940 995 1071 1013 308 273 "
+        "1009 663 482 426 197 622 218 235 239 230 270 190 217 221 999 302 838 1023 910 648 "
+        "257 1027 896 886 948 207 645 985 342 443 278 1078 925 944 457 969 1043 454 291 393 "
+        "964 569 1059 1065 624 763 748 1055 1090 1093"),
+
 }
 
 
@@ -55,7 +57,7 @@ def catalog():
 
 
 class ChooseUnchangedTest(unittest.TestCase):
-    """Il refactor dei filtri non cambia nessuna scelta di `choose`."""
+    """Filtri e ordinamento v3 fissati sulle fixture: nessuna scelta di `choose` cambia."""
 
     @classmethod
     def setUpClass(cls):

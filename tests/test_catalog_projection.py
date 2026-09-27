@@ -30,14 +30,20 @@ class ProjectDetailTest(unittest.TestCase):
         self.assertEqual(sorted(catalog), sorted([
             "id", "title", "slug", "shortDescription", "price", "currency", "minPax", "maxPax",
             "minDate", "maxDate", "availabilities", "defaultDurationInDays", "updatedAt",
-            "category", "venue", "destination", "hotels"]))
+            "category", "venue", "destination", "hotels", "featured", "isSpecialOffer"]))
         self.assertEqual(catalog["category"]["slug"], "padel")
         self.assertEqual(catalog["destination"]["geohierarchy"], "IT_123")
         self.assertEqual(catalog["hotels"]["data"][0]["attributes"], {"name": "Hotel Uno"})
         self.assertEqual(catalog["price"], 340)
+
+    def test_keeps_featured_and_special_offer_flags(self):
+        """M21-B (RF-60): le due etichette del sync passano dalla proiezione."""
+        catalog = cat.project_detail(detail_of(item(12, featured=True, isSpecialOffer=True)))
+        self.assertEqual((catalog["featured"], catalog["isSpecialOffer"]), (True, True))
 
     def test_missing_fields_become_none(self):
         catalog = cat.project_detail({"id": "1"})
         self.assertIsNone(catalog["venue"])
         self.assertIsNone(catalog["hotels"])
         self.assertIsNone(catalog["price"])
+        self.assertIsNone(catalog["featured"])

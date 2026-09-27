@@ -1559,6 +1559,8 @@
     ],
     "defaultDurationInDays": 3,
     "updatedAt": "2026-09-25T10:39:37.183Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2024,6 +2026,8 @@
     ],
     "defaultDurationInDays": 5,
     "updatedAt": "2026-09-25T10:39:37.627Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2418,6 +2422,8 @@
     ],
     "defaultDurationInDays": 7,
     "updatedAt": "2026-09-25T10:39:40.589Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -2751,6 +2757,8 @@
     ],
     "defaultDurationInDays": 5,
     "updatedAt": "2026-09-25T10:39:40.802Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3084,6 +3092,8 @@
     ],
     "defaultDurationInDays": 5,
     "updatedAt": "2026-09-25T10:39:41.065Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3372,6 +3382,8 @@
     ],
     "defaultDurationInDays": 2,
     "updatedAt": "2026-09-25T10:39:41.383Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3679,6 +3691,8 @@
     ],
     "defaultDurationInDays": 5,
     "updatedAt": "2026-09-25T10:39:41.595Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3947,6 +3961,8 @@
     "availabilities": [],
     "defaultDurationInDays": 3,
     "updatedAt": "2026-09-25T10:39:42.273Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4280,6 +4296,8 @@
     ],
     "defaultDurationInDays": 3,
     "updatedAt": "2026-09-25T10:39:42.429Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4549,6 +4567,8 @@
     ],
     "defaultDurationInDays": 1,
     "updatedAt": "2026-09-25T10:39:42.627Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "15",
      "name": "Tournaments",
@@ -4819,6 +4839,8 @@
     ],
     "defaultDurationInDays": 6,
     "updatedAt": "2026-09-25T10:39:42.874Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5196,6 +5218,8 @@
     "availabilities": [],
     "defaultDurationInDays": 3,
     "updatedAt": "2026-09-25T10:39:42.964Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5577,6 +5601,8 @@
     ],
     "defaultDurationInDays": 5,
     "updatedAt": "2026-09-25T10:39:43.136Z",
+    "featured": false,
+    "isSpecialOffer": false,
     "category": {
      "id": "14",
      "name": "Holidays",

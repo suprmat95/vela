@@ -37,6 +37,7 @@ def _product_row(p: Product) -> dict:
         "fetched_at": p.fetched_at, "bookable": p.bookable,
         "bookable_checked_at": p.bookable_checked_at, "archived": p.archived,
         "provider_id": p.provider_id, "brand": p.brand,
+        "featured": p.featured, "special_offer": p.special_offer,
     }
 
 
@@ -52,7 +53,8 @@ def _product(m, raw: Optional[dict]) -> Product:
         duration_days=m["duration_days"], hofj_updated_at=m["hofj_updated_at"],
         raw=raw if raw is not None else {}, fetched_at=m["fetched_at"], bookable=m["bookable"],
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
-        provider_id=m["provider_id"], brand=m["brand"])
+        provider_id=m["provider_id"], brand=m["brand"],
+        featured=bool(m["featured"]), special_offer=bool(m["special_offer"]))
 
 
 class PostgresProducts:
