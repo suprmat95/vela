@@ -219,3 +219,35 @@ Import error on `parse_budget_scope`, as expected. Implementing in `intent.py`:
 Green. Full suite and lint:
 
 - 🔧 Bash: Run full suite and lint
+
+No existing test changed. Commit 2:
+
+- 🔧 Bash: Commit parser rules
+
+- 🔧 Bash: Read chooser fixture test and support helpers
+
+- 🔧 Bash: List fixtures and loader
+
+I'll generate the expected table from the current code (before any change to `chooser.py`) over the recorded padel and tennis catalogues, and paste it in as literals.
+
+- 🔧 Bash: Generate choose results on the fixture grid
+
+- 🔧 Bash: Inspect generated table
+
+- 🔧 Bash: Generate full candidate orderings by exhausting rejections
+
+Those five sequences cover 217 choices, every hard filter and both `now` modes. I'll write them into a new test file, which should pass on the current code, then the red `cheapest_total` tests.
+
+- 🔧 Bash: Write characterization test for choose and run it
+
+Pax 20 still finds a product (no `maxPax` on it). I'll use `sport` instead. `pax` and the other filters already have synthetic `NoChoice` tests in `test_chooser.py`; checking that:
+
+- 🔧 Bash: Check existing NoChoice coverage
+
+All eight filter names are already covered synthetically. I'll swap the pax case for sport:
+
+- 🔧 Bash: Fix filter case and rerun characterization test
+
+Green on the current code. I'll commit the safety net separately, before touching `chooser.py`:
+
+- 🔧 Bash: Commit characterization test
