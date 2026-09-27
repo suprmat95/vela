@@ -325,7 +325,9 @@ The five asks, one per subsection.
 ### 4.1 The architecture that holds, and the diff in our thinking
 
 **What holds.** The conversation (intent, proposal, rejection, details) spends no HofJ call. It
-reads Postgres, scales with instances, and stayed under 220 ms p95 in every run. The purchase
+reads Postgres, and stayed under 220 ms p95 in every run, up to the highest load we generated
+(34 req/s on one instance). Beyond that it scales by adding instances, which we have not measured
+(§4.5). The purchase
 is capped by physics: ~100 HofJ calls a minute. The design turns that cap into a **declared
 wait** instead of errors:
 - a queue in Postgres;
@@ -394,7 +396,7 @@ What we measured and what we projected:
 
 | | Measured, 2,500 travellers in 5 min (after M19) | Projected, 50,000 in 10 min (after M19) |
 |---|---|---|
-| Anna's proposal | 15 ms | conversation load ~420 req/s, **not measured** (see below) |
+| Anna's proposal | 15 ms, at a peak of 34 req/s | not measured: the conversation would reach ~420 req/s (§4.5) |
 | Marco: link / confirmed | 90 s / 95 s | link after ~20 min |
 | Anna: wait for the link | link at 332 s (she arrived at 180 s) | ~121 min |
 | Last traveller | — | ~201 min; queue drained in 3.5 h |
@@ -402,8 +404,10 @@ What we measured and what we projected:
 - **What degrades:** only the wait for the link, and it is declared. Our first prediction, "Marco
   gets the link around minute 3", is **refuted** at 10,000 and 50,000 travellers: with ~1,000
   accepts a minute he has hundreds of people ahead of him.
-- **What never degrades:** the conversation (0 HofJ calls; worst p95 220 ms at 34 req/s) and
-  the confirmation of whoever has already paid.
+- **What never degrades:** the confirmation of whoever has already paid, and the conversation's
+  use of HofJ, which stays at 0 calls at any load. Its response time we have measured only up to
+  34 req/s on one instance (worst p95 220 ms, 0 errors). At 50,000 travellers it depends on
+  running enough instances (§4.5).
 
 ### 4.4 `POST /v1/bookings` is an idempotent upsert on `itineraryId`
 
@@ -512,9 +516,28 @@ How to read the tables:
 | After M19, 47.4 links/min | 3 min / 19 min / 0.7 h | 20 min / 121 min / 201 min / 3.5 h |
 
 HofJ calls per minute are the same at any N beyond saturation: the boundary is decided by the
-limiter, not by the load. The conversation load at 50,000 is **not** measured: ~420 req/s is 12
-times the measured peak of 34 req/s on one uvicorn process. The projection says we need more
-instances for the conversation, not that one instance would hold.
+limiter, not by the load.
+
+**The conversation at 50,000 is not measured.** The projection puts the REST load at the end of
+the arrivals at ~420 req/s:
+- ~208 req/s from new travellers (83 a second, 2.5 requests each: intent, proposal, 30%
+  rejections, 20% accepts);
+- ~212 req/s from ~9,500 people in the queue asking for their status every ~45 s.
+
+The highest load we generated is 34 req/s, on one uvicorn process that also runs the 10
+workers; there the worst p95 was already 200–220 ms. 34 req/s is the most we tried, not the
+limit we found. If one instance held only that, 420 req/s would need about 13 instances
+(**predicted**, an upper bound). That assumes linear scaling and a shared Postgres that keeps
+up, and neither has been tested.
+
+Two things make the real load heavier than the bench:
+- in `loadtest` mode `accept_proposal` does not wait. In `live` it can hold a thread for up to
+  100 s while the price is fetched (pool of 40);
+- every `get_proposal` reads the whole catalogue from Postgres, because there is no
+  per-instance cache (§6).
+
+The next measurement would be a step test with the same scenario and more travellers, until the
+proposal p95 passes 500 ms (§7).
 
 **Predictions of the second reading, checked:**
 
@@ -609,7 +632,7 @@ instances for the conversation, not that one instance would hold.
 - **Measure what we only estimated:**
   - the M19 run with 60% payers;
   - a cache run with price refusals, and one with the cache off;
-  - the conversation at hundreds of req/s across instances;
+  - the conversation's limit on one instance (a step test up to 500 ms p95), then across instances;
   - the worker in its own process.
 - **Hardening:** JSON logs, the delete command, a catalogue cache per instance.
 - **Hotel change**, if HofJ confirms the list and the `PATCH` (reopen conditions in the M22 plan).

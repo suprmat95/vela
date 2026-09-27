@@ -1302,3 +1302,13 @@ e di M21.
 | Lacune dichiarate | `/mcp` senza autenticazione (M8 non fatta), niente log JSON né comando di cancellazione (M14), niente catalogo in memoria per istanza (RNF-12), criterio vocale da eseguire, A2A non fatto | Il documento descrive il sistema com'è, non la spec |
 | Mapping A2A | Resta una proposta non validata nei prossimi passi | Come nella bozza; non confermato |
 | Fuori portata | Testo superato altrove, da correggere in un'altra task: tabella Settings del README, stato di M19 e M23 in roadmap, riferimenti al webhook e RNF-10 in spec, Anna "minuto 6" e timeout 15 s in `loadtest/README.md`, "~43 link/min" in `RESULTS.md`, criterio 5 in `acceptance.md` | Una task alla volta |
+
+## 2026-09-27 — Carico della conversazione a 50.000: dichiarato, non misurato
+
+Origine: in `ARCHITECTURE.md` "la conversazione non degrada mai" poggiava su 34 req/s misurati,
+mentre la proiezione a 50.000 viaggiatori arriva a ~420 req/s.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Come trattarlo | Solo testo (opzione 1): `ARCHITECTURE.md` §4.1, §4.3, §4.5 dicono che il tempo di risposta è misurato fino a 34 req/s su un'istanza, scompongono i ~420 req/s (≈208 arrivi + ≈212 polling della coda) e stimano al massimo ~13 istanze (predicted, scala lineare e Postgres non verificati) | Scelta dell'utente. Scartati per ora: un giro a gradini per trovare il limite di un'istanza (opzione 2, avviata e poi fermata dall'utente) e la riduzione del carico con codice nuovo (opzione 3) |
+| Limiti del banco dichiarati | In `loadtest` l'attesa di `accept_proposal` è 0 (in `live` fino a 100 s su un pool di 40); `get_proposal` legge tutto il catalogo senza cache per istanza | Il banco sottostima il carico reale della conversazione |
