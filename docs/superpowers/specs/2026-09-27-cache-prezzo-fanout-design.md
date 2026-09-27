@@ -1,7 +1,7 @@
 # Cache del prezzo con fanout: design
 
 Data: 2026-09-27. Origine: brainstorming "ridurre le chiamate ad HofJ" (branch `task/cache`).
-Tocca spec RF-14, RF-16, RF-45, RF-46, RF-48, RF-49 e aggiunge un requisito nuovo (§4.10).
+Tocca spec RF-14, RF-16, RF-45, RF-46, RF-48, RF-49 e aggiunge RF-84 (§4.10).
 Decisioni in `docs/decisions.md` (2026-09-27, "Cache del prezzo con fanout").
 
 ## Problema
@@ -54,7 +54,11 @@ Postgres compresi.
 `(product_id, start_date, adults, rooms, currency)`, con `adults = order.pax`. Il brand è
 implicito nel prodotto.
 
-### Dati (migrazione `0012_price_quotes`)
+### Dati (migrazione `0015_price_quotes`)
+
+Numero 0015: 0012, 0013 e 0014 sono riservati a M21-C, M21-F e M22 (`docs/decisions.md`).
+`down_revision` è la testa al momento dell'implementazione (0011); chi fa il merge per secondo
+riaggancia la catena (decisione del 2026-09-27).
 
 Tabella `price_quotes`:
 
@@ -67,9 +71,14 @@ Tabella `price_quotes`:
 | `priced_at` | timestamp, null se `pending` | base del TTL |
 | `updated_at` | timestamp | |
 
-Colonna nuova su `orders`: `follows_quote` (bool, default false). Vero per un ordine `queued`
-agganciato a un prezzo in volo, che non ha un job suo. Campo esplicito invece di dedurlo da
-"queued senza job": la deduzione è falsa nella finestra tra `orders.add` e `jobs.enqueue`.
+Colonne nuove su `orders`:
+
+- `follows_quote` (bool, default false). Vero per un ordine `queued` agganciato a un prezzo in
+  volo, che non ha un job suo. Campo esplicito invece di dedurlo da "queued senza job": la
+  deduzione è falsa nella finestra tra `orders.add` e `jobs.enqueue`.
+- `confirmed_total` (numeric, null). Il totale che il viaggiatore ha confermato su un ordine
+  senza carrello; il job lo confronta con quello del carrello e `get_order_status` lo usa per
+  dire "il prezzo è cambiato: ora è X invece dei Y che avevi confermato".
 
 Nuova porta `QuoteRepository` in `vela/ports/repositories.py`, implementata in
 `repo_memory.py` e `repo_postgres.py`:
@@ -86,10 +95,12 @@ Nuova porta `QuoteRepository` in `vela/ports/repositories.py`, implementata in
   ordini agganciati, con `follows_quote = false`.
 - `followers(key)`: gli ordini agganciati, per la posizione in coda.
 
-### TTL
+### TTL e interruttore
 
 Campo di tuning `price_quote_ttl_seconds: int = 900` in `Settings` (non una variabile
-d'ambiente). Una riga `ready` con `priced_at` più vecchio del TTL vale come assente e il nuovo
+d'ambiente), passato da `app.py` a `Vela`. Il costruttore di `Vela` ha default 0: **0 spegne
+cache e fanout** e l'accettazione è quella di oggi. Così i test che costruiscono `Vela` a mano
+restano validi, e in produzione la cache si spegne mettendo il campo a 0. Una riga `ready` con `priced_at` più vecchio del TTL vale come assente e il nuovo
 leader la sovrascrive: nessun job di pulizia, al massimo una riga per chiave.
 
 ### Prima `accept_proposal` (RF-45)
@@ -98,13 +109,13 @@ Dopo le validazioni di oggi (dati mancanti, camere), prima di creare l'ordine:
 
 | Cache | Esito | Chiamate HofJ |
 |---|---|---|
-| `ready`, non scaduta | ordine creato `awaiting_confirmation` con `total` dalla cache, senza `itinerary_id`, senza job; risposta immediata | 0 |
+| `ready`, non scaduta, prodotto `bookable` | ordine creato `awaiting_confirmation` con `total` dalla cache, senza `itinerary_id`, senza job; risposta immediata | 0 |
 | assente, scaduta, o leader non più `queued` | `claim` riuscito: ordine `queued` + job d'acquisto come oggi | 5 |
 | `pending` con leader vivo (o `claim` perso) | ordine `queued` con `follows_quote = true`, senza job; `_await_progress` come oggi | 0 |
 
 Ordine dei passi, per non perdere un fanout concorrente:
 
-1. si legge la cache: `ready` e non scaduta → hit, fine;
+1. si legge la cache: `ready`, non scaduta e prodotto `bookable` → hit, fine;
 2. altrimenti l'ordine si crea già `queued` con `follows_quote = true` (serve il suo id come
    leader, e un `publish` o un `release` che arrivano ora lo vedono);
 3. `claim`: se riesce, `follows_quote = false` e si accoda il job;
@@ -116,16 +127,17 @@ Un ordine sostitutivo (RF-17) segue le stesse regole, con l'`enqueued_at` eredit
 
 ### Job d'acquisto (RF-46)
 
-**Passo 3, primo prezzo** (`order.total` è null, caso di oggi): dopo aver salvato il totale e
-`awaiting_confirmation`, se l'ordine è il leader della sua chiave chiama `publish`. Il leader
-ha il suo carrello: alla conferma riparte dal passo 4 come oggi.
+**Passo 3, primo prezzo** (`confirmed_total` è null, caso di oggi): se la chiave ha una riga in
+`price_quotes` (la cache è in uso) il job chiama `publish` **prima** di salvare l'ordine
+`awaiting_confirmation`: al contrario, un agganciato potrebbe vedere il leader non più `queued`
+con la riga ancora `pending` e rilasciare tutti per errore. Il leader ha il suo carrello: alla
+conferma riparte dal passo 4 come oggi.
 
 **Conferma di un ordine senza carrello** (hit o agganciato, `itinerary_id` null): `_confirm`
-lo rimette `queued` e accoda il job dal **passo 0**. Al passo 3 `order.total` è già valorizzato:
-vuol dire "il viaggiatore ha già confermato questo importo".
+lo rimette `queued` con `confirmed_total = total` e accoda il job dal **passo 0**. Al passo 3:
 
-- totale del carrello uguale a `order.total`: il job prosegue al passo 4 (link) senza chiedere
-  di nuovo;
+- totale del carrello uguale a `confirmed_total`: il job prosegue al passo 4 (link) senza
+  chiedere di nuovo;
 - diverso: l'ordine torna `awaiting_confirmation` con il nuovo totale, la cache della chiave
   viene aggiornata (`ready`, nuovo `priced_at`) e la risposta usa una frase nuova ("il prezzo è
   cambiato: ora è X euro, confermi?"). Il sì successivo riparte dal passo 4: il carrello c'è.
@@ -175,6 +187,11 @@ esclude già dagli scarti chi non ha `wait_seconds`.
 
 ## Gestione degli errori
 
+- Crash tra `release` (gli agganciati perdono `follows_quote`) e l'accodamento dei loro job:
+  quegli ordini restano `queued` senza job. Finestra di pochi millisecondi, accettata; un job
+  accodato "per sicurezza" da `get_order_status` rischierebbe due job d'acquisto sullo stesso
+  ordine, cioè due carrelli.
+
 - 429 sul leader: il leader aspetta la finestra successiva senza contare il tentativo (RF-38);
   gli agganciati aspettano con lui, la riga resta `pending`.
 - Errore di rete o timeout sul leader: tentativi come oggi; alla fine `failed` e ripiego.
@@ -201,12 +218,14 @@ Repository in memoria (sempre) e Postgres (con `DATABASE_URL`):
 - posizione in coda di un agganciato = quella del leader;
 - load test: `journey` con accettazione `200 awaiting_confirmation` arriva a conferma e
   pagamento (`tests/test_loadtest_journey.py`);
-- Postgres: `claim` concorrente da più thread, un solo leader; migrazione `0012` su e giù.
+- Postgres: `claim` concorrente da più thread, un solo leader; migrazione `0015` su e giù.
 
 ## Task
 
-1. Migrazione `0012`, `QuoteRepository` (memoria + Postgres), `follows_quote` su `orders`.
-2. `accept_proposal`: hit, leader, agganciato; posizione in coda.
-3. Job d'acquisto: `publish`, conferma senza carrello, prezzo cambiato, `release_quote` nelle
-   uscite e rete di sicurezza.
-4. Frase nuova, `loadtest/journey.py` per gli hit, spec (RF nuovo in §4.10 e aggiornamenti), `decisions.md`, roadmap.
+1. Migrazione `0015`, `QuoteRepository` (memoria + Postgres), `follows_quote` e
+   `confirmed_total` su `orders`.
+2. `accept_proposal`: hit, leader, agganciato; posizione in coda; `publish` al passo 3 del
+   leader; `Settings` e cablaggio.
+3. Conferma senza carrello: `confirmed_total`, job dal passo 0, prezzo cambiato e frase nuova.
+4. Ripiego: `release_quote` nelle uscite del leader e rete di sicurezza.
+5. `loadtest/journey.py` per gli hit, spec (RF nuovo in §4.10 e aggiornamenti), `decisions.md`, roadmap.
