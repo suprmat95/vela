@@ -214,12 +214,12 @@ def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = 
     Senza `router` (test con un client finto) tutti i brand usano `vela.hofj`."""
     router = router or SingleClientRouter(vela.hofj)
     notifier = notifier or build_notifier(settings)
-    purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
+    purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
                            new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
     booking = BookingJob(vela.repos, router, now=vela.now,
                          max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff,
-                         new_id=vela.new_id)
+                         new_id=vela.new_id, defaults=vela.defaults)
     check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
                             poll_seconds=settings.payment_poll_seconds)
     sms = SmsJob(vela.repos, notifier, now=vela.now)

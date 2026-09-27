@@ -1,7 +1,7 @@
 """Processore dei job (RF-47, RF-50): un giro preleva un job, prende i gettoni e lo esegue.
 
 Nessuna chiamata a HofJ parte senza gettoni presi dal token bucket condiviso (RF-37, M18): un
-acquisto prende i gettoni dei passi che restano, una prenotazione un gettone della classe
+acquisto prende i gettoni dei passi che restano, una prenotazione quelli dei suoi passi (M19) della classe
 `booking` (che non lascia la soglia agli acquisti). Senza gettoni il job torna in coda
 all'istante in cui un acquisto potrà partire, senza contare un tentativo. Un 429 svuota il
 bucket (RF-38) e il job non si ripete subito.
@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Callable, Dict, Optional, Tuple
 
 from vela.domain.models import Job, JobKind, JobStatus, QuotaClass
+from vela.domain.booking import booking_calls_needed
 from vela.domain.purchase import calls_needed
 from vela.domain.quota import WINDOW
 from vela.ports.hofj import HofJError, HofJRouter, QuotaError
@@ -27,7 +28,7 @@ def quota_needs(job: Job) -> Tuple[Optional[QuotaClass], int]:
     if job.kind == JobKind.PURCHASE:
         return QuotaClass.PURCHASE, calls_needed(job)
     if job.kind == JobKind.BOOKING:
-        return QuotaClass.BOOKING, 1
+        return QuotaClass.BOOKING, booking_calls_needed(job)   # M19: cliente, pax, booking
     return None, 0      # verifica del pagamento e SMS: nessuna chiamata HofJ
 
 

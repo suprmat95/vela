@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Optional, Set
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
                                 PriceQuote, Product, Proposal, QuotaClass, QuoteKey, QuoteStatus,
                                 Rejection)
-from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
@@ -284,7 +284,7 @@ class MemoryJobs:
 
 
 class MemoryRepositories:
-    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20,
+    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
                  quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.quota_rules = BucketRules(quota_margin, booking_reserve, quota_burst, quota_floor)
         self._catalog_lock = threading.Lock()
@@ -313,7 +313,7 @@ class MemoryRepositories:
 class MemoryQuota:
     """Token bucket in memoria (test e replay): stesse regole di Postgres, lock di processo."""
 
-    def __init__(self, margin: float = 0.10, reserve: float = 0.20, rules: Optional[BucketRules] = None):
+    def __init__(self, margin: float = 0.10, reserve: float = DEFAULT_RESERVE, rules: Optional[BucketRules] = None):
         self.rules = rules or BucketRules(margin, reserve)
         self._lock = threading.Lock()
         self._bucket: Optional[QuotaBucket] = None

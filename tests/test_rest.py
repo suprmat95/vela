@@ -228,7 +228,7 @@ class ProposalEndpointsTest(unittest.TestCase):
         self.assertEqual(r.status_code, 202, r.text)
         body = r.json()
         self.assertEqual(body, {"outcome": "order_queued", "order_id": body["order_id"],
-                                "status": "queued", "position": 1, "wait_seconds": 4,
+                                "status": "queued", "position": 1, "wait_seconds": 2,
                                 "say": body["say"]})
         self.assertEqual(r.headers["location"], "/v1/orders/%s" % body["order_id"])
         self.assertNotIn("http", body["say"])

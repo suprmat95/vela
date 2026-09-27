@@ -100,7 +100,7 @@ class CatalogHealthTest(unittest.TestCase):
         r = catalog_client([make_product(1)]).get("/health")
         self.assertEqual(r.json()["quota"], {
             "limit_per_minute": 120, "effective_limit": 108, "burst": 8, "rate_per_minute": 100.0,
-            "purchase_floor": 2, "tokens": 8.0, "purchases_per_minute": 16.0, "needs_refresh": True,
+            "purchase_floor": 3, "tokens": 8.0, "purchases_per_minute": 46.51162790697674, "needs_refresh": True,   # M19: 100 × (1 − 0,15/2,15) ÷ 2
             "hofj_window_start": "2026-09-25T13:00:00+00:00",
             "hofj_window_end": "2026-09-25T13:01:00+00:00"})
 

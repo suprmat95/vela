@@ -11,7 +11,6 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, FlakyPayments, StubPayments, make_product
 from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
-from vela.config import DEFAULT_TRAVELER
 from vela.domain import say
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, NoMatch, Order,
                                 OrderStatus, Participant, Period, Proposal, ProposalMade,
@@ -47,7 +46,7 @@ class Setup:
         self.payments = payments or StubPayments()
         self.proposed = []
         ids = iter("new%d" % i for i in range(1, 100))
-        self.job = PurchaseJob(self.repos, SingleClientRouter(self.hofj), self.payments, self.propose, DEFAULT_TRAVELER,
+        self.job = PurchaseJob(self.repos, SingleClientRouter(self.hofj), self.payments, self.propose,
                                now=fixed_now, max_attempts=3)
         self.new_id = lambda: next(ids)
         self.repos.jobs.enqueue(Job("j1", JobKind.PURCHASE, "o1", JobStatus.PENDING, NOW, NOW))
@@ -86,7 +85,7 @@ class Setup:
 class CallsNeededTest(unittest.TestCase):
     def test_calls_needed_decreases_with_steps(self):
         base = Job("j", JobKind.PURCHASE, "o", JobStatus.RUNNING, NOW, NOW)
-        self.assertEqual([calls_needed(replace(base, step=s)) for s in range(6)], [5, 4, 3, 1, 0, 0])
+        self.assertEqual([calls_needed(replace(base, step=s)) for s in range(6)], [2, 1, 1, 1, 0, 0])
 
 
 class HappyPathTest(unittest.TestCase):
@@ -94,8 +93,7 @@ class HappyPathTest(unittest.TestCase):
         """Decisione 2026-09-26: dopo il totale l'ordine aspetta la conferma, niente link."""
         s = Setup(hofj=FakeHofJ(total=Decimal("720")))
         result = s.run()
-        self.assertEqual(s.methods(), ["create_itinerary", "set_customer", "get_pax", "set_pax",
-                                       "get_itinerary"])
+        self.assertEqual(s.methods(), ["create_itinerary", "get_itinerary"])   # M19
         order = s.order()
         self.assertEqual(order.status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual((order.itinerary_id, order.total, order.currency), ("it-1", Decimal("720"), "EUR"))
@@ -120,14 +118,14 @@ class HappyPathTest(unittest.TestCase):
         self.assertEqual(s.payments.descriptions, ["Padel a Valencia 1"])
         self.assertEqual((result.job.status, result.job.step), (JobStatus.DONE, 5))
 
-    def test_customer_and_pax_come_from_the_order_traveler_and_defaults(self):
+    def test_customer_and_pax_wait_for_the_booking(self):
+        """M19: cliente e passeggeri passano nel job di prenotazione, dopo il pagamento."""
         s = Setup()
         s.run()
-        customer = s.hofj.customers["it-1"]
-        self.assertEqual((customer.first_name, customer.email, customer.city),
-                         ("Anna", "a@x.it", DEFAULT_TRAVELER.city))
-        self.assertEqual([(p.ref_id, p.first_name) for p in s.hofj.pax["it-1"]],
-                         [("ref-0", "Anna"), ("ref-1", "Bo")])
+        s.run(step=4)
+        self.assertEqual(s.hofj.customers, {})
+        self.assertEqual([p.first_name for p in s.hofj.pax["it-1"]], [None, None])
+        self.assertNotIn("set_pax", s.methods())
 
     def test_itinerary_request_uses_the_proposal_and_the_rooms_of_the_order(self):
         """RF-14, RF-67 (M21-D): le camere dell'ordine, non più 1 fisso."""
@@ -146,20 +144,23 @@ class HappyPathTest(unittest.TestCase):
 
 class ResumeTest(unittest.TestCase):
     def test_each_step_is_saved_before_the_next(self):
-        s = Setup(hofj=FakeHofJ(fail_at={"set_pax": [UpstreamError("timeout")]}))
+        s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [UpstreamError("timeout")]}))
         s.run()
         self.assertEqual(s.order().itinerary_id, "it-1")
-        self.assertEqual(s.saved_job().step, 2)
+        self.assertEqual(s.saved_job().step, 3)   # M19: dall'itinerario si salta al totale
         self.assertEqual(s.order().status, OrderStatus.QUEUED)
 
-    def test_resume_after_customer_does_not_recreate_itinerary(self):
-        s = Setup()
-        s.hofj.create_itinerary(make_product(1), date(2026, 10, 1), 2, 1, "EUR")
-        s.repos.orders.save(replace(s.order(), itinerary_id="it-1"))
-        s.hofj.calls.clear()
-        s.run(step=2)
-        self.assertEqual(s.methods(), ["get_pax", "set_pax", "get_itinerary"])
-        self.assertEqual(s.order().status, OrderStatus.AWAITING_CONFIRMATION)
+    def test_job_from_before_m19_at_customer_or_pax_goes_to_the_total(self):
+        """Un job salvato dal codice di prima al passo 1 o 2 non chiama più cliente e pax."""
+        for step in (1, 2):
+            s = Setup()
+            s.hofj.create_itinerary(make_product(1), date(2026, 10, 1), 2, 1, "EUR")
+            s.repos.orders.save(replace(s.order(), itinerary_id="it-1"))
+            s.hofj.calls.clear()
+            result = s.run(step=step)
+            self.assertEqual(s.methods(), ["get_itinerary"], step)
+            self.assertEqual(s.order().status, OrderStatus.AWAITING_CONFIRMATION)
+            self.assertEqual(result.job.step, 4)
 
     def test_resume_at_total_reads_only_the_total(self):
         s = Setup()
@@ -179,11 +180,11 @@ class ResumeTest(unittest.TestCase):
 
 class RetryTest(unittest.TestCase):
     def test_network_error_retries_next_window(self):
-        s = Setup(hofj=FakeHofJ(fail_at={"set_customer": [UpstreamError("timeout")]}))
+        s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [UpstreamError("timeout")]}))
         result = s.run()
         job = result.job
         self.assertEqual((job.status, job.attempts, job.run_after, job.step),
-                         (JobStatus.PENDING, 1, NEXT_WINDOW, 1))
+                         (JobStatus.PENDING, 1, NEXT_WINDOW, 3))
         self.assertIn("timeout", job.last_error)
         self.assertIsNone(job.locked_at)
         self.assertEqual(s.saved_job(), job)
@@ -204,7 +205,7 @@ class RetryTest(unittest.TestCase):
         self.assertEqual(s.order().orphan_itineraries, 1)
 
     def test_timeout_after_the_itinerary_is_not_an_orphan(self):
-        s = Setup(hofj=FakeHofJ(fail_at={"set_customer": [UpstreamTimeout("timeout")]}))
+        s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [UpstreamTimeout("timeout")]}))
         s.run()
         self.assertEqual(s.order().orphan_itineraries, 0)
 
@@ -229,11 +230,11 @@ class RetryTest(unittest.TestCase):
         self.assertEqual(s.order().failure_reason, say.failure_reason("upstream", "en"))
 
     def test_quota_error_reschedules_without_counting_an_attempt(self):
-        s = Setup(hofj=FakeHofJ(fail_at={"get_pax": [QuotaError("429")]}))
+        s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [QuotaError("429")]}))
         result = s.run(attempts=1)
         self.assertTrue(result.hit_429)
         self.assertEqual((result.job.status, result.job.attempts, result.job.run_after, result.job.step),
-                         (JobStatus.PENDING, 1, NEXT_WINDOW, 2))
+                         (JobStatus.PENDING, 1, NEXT_WINDOW, 3))
 
     def test_payments_error_retries_then_fails(self):
         s = Setup(payments=FlakyPayments(failures=5))
@@ -269,7 +270,7 @@ class ProductErrorTest(unittest.TestCase):
         self.assertIsNone(order.replacement_proposal_id)
 
     def test_product_error_after_the_itinerary_is_treated_as_network(self):
-        s = Setup(hofj=FakeHofJ(fail_at={"set_customer": [ProductError("strano")]}))
+        s = Setup(hofj=FakeHofJ(fail_at={"get_itinerary": [ProductError("strano")]}))
         result = s.run()
         self.assertEqual((result.job.status, result.job.attempts), (JobStatus.PENDING, 1))
         self.assertTrue(s.repos.products.get("1").bookable)
@@ -294,15 +295,16 @@ class CancelledTest(unittest.TestCase):
 
     def test_cancelled_between_steps_stops_before_the_next(self):
         s = Setup()
-        original = s.hofj.set_customer
+        save = s.repos.orders.save
 
-        def cancel_during_customer(itinerary_id, customer):
-            original(itinerary_id, customer)
-            s.repos.orders.save(replace(s.order(), status=OrderStatus.CANCELLED))
+        def cancel_after_the_itinerary(order):   # la rinuncia arriva tra il passo 0 e il 3
+            save(order)
+            if order.itinerary_id and order.status == OrderStatus.QUEUED:
+                save(replace(order, status=OrderStatus.CANCELLED))
 
-        s.hofj.set_customer = cancel_during_customer
+        s.repos.orders.save = cancel_after_the_itinerary
         result = s.run()
-        self.assertEqual(s.methods(), ["create_itinerary", "set_customer"])
+        self.assertEqual(s.methods(), ["create_itinerary"])
         self.assertEqual(result.job.status, JobStatus.DONE)
         self.assertEqual(s.order().status, OrderStatus.CANCELLED)
         self.assertEqual(s.payments.links, [])

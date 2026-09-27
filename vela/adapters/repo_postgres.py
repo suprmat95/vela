@@ -18,7 +18,7 @@ from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, Jo
                                 OrderStatus, PriceQuote, Product, Proposal, QuotaClass, QuoteKey,
                                 QuoteStatus, Rejection, criteria_from_dict, criteria_to_dict,
                                 profile_from_dict, profile_to_dict)
-from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
@@ -513,7 +513,7 @@ class PostgresQuota:
     `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prendono gli stessi
     gettoni. Le regole sono quelle pure di `vela.domain.quota`."""
 
-    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20,
+    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = DEFAULT_RESERVE,
                  rules: Optional[BucketRules] = None):
         self.engine = engine
         self.rules = rules or BucketRules(margin, reserve)
@@ -575,7 +575,7 @@ CATALOG_LOCK_KEY = 7_646_512_010
 
 
 class PostgresRepositories:
-    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20,
+    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
                  quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.engine = engine
         self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock

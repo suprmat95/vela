@@ -75,8 +75,8 @@ class LaunchBurstTest(unittest.TestCase):
         waits = [a.wait_seconds for a in accepted]
         self.assertEqual(waits, sorted(waits))
         self.assertEqual((accepted[0].position, accepted[-1].position), (1, 200))
-        self.assertEqual(accepted[-1].wait_seconds, 750)      # 200 × 60 ÷ 16 (M18)
-        self.assertIn("13 minuti", accepted[-1].say)
+        self.assertEqual(accepted[-1].wait_seconds, 258)      # 200 × 60 ÷ 46,5 (M19)
+        self.assertIn("5 minuti", accepted[-1].say)
         self.assertEqual(w.hofj._used, 1)                     # solo la lettura della quota al boot
 
     def test_throughput_never_exceeds_effective_limit_per_window(self):
@@ -93,7 +93,7 @@ class LaunchBurstTest(unittest.TestCase):
         errors = [j.last_error for j in w.repos.jobs._jobs.values() if j.last_error]
         self.assertEqual([e for e in errors if "QuotaError" in e], [])
         minutes = (w.clock() - NOW).total_seconds() / 60
-        self.assertLess(minutes, 11)                           # ~200 ÷ 20 acquisti/min senza booking
+        self.assertLess(minutes, 5)                            # M19: ~200 ÷ 50 acquisti/min senza booking
 
     def test_declared_wait_is_prudent_and_close_to_the_real_one(self):
         """RF-48 con la soglia di M18: l'attesa conta l'80% del ritmo, quindi senza prenotazioni
@@ -142,13 +142,13 @@ class EndToEndTest(unittest.TestCase):
 
     def test_restart_mid_job_resumes_without_new_itinerary(self):
         """RF-27: il processo muore a metà acquisto; un'altra istanza riprende dopo il lease."""
-        hofj = FakeHofJ(fail_at={"set_pax": [RuntimeError("processo ucciso")]})
+        hofj = FakeHofJ(fail_at={"get_itinerary": [RuntimeError("processo ucciso")]})
         w = Launch(hofj=hofj)
         order = w.accept(1)[0]
         with self.assertRaises(RuntimeError):
             w.worker.processor.run_once()
         job = w.repos.jobs.active_for_order(order.order_id, JobKind.PURCHASE)
-        self.assertEqual((job.status, job.step), (JobStatus.RUNNING, 2))
+        self.assertEqual((job.status, job.step), (JobStatus.RUNNING, 3))   # M19: dopo l'itinerario
         restarted = Launch(hofj=hofj, repos=w.repos, clock=Clock(w.clock() + timedelta(minutes=3)))
         restarted.worker.drain()
         self.assertEqual(restarted.repos.orders.get(order.order_id).status, OrderStatus.AWAITING_CONFIRMATION)

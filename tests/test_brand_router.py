@@ -7,7 +7,6 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.hofj_router import BrandRouter, SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
-from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, NoMatch, Order,
                                 OrderStatus, Proposal, TravelerProfile)
@@ -78,7 +77,7 @@ class TennisOrderTest(unittest.TestCase):
 
     def purchase(self, r):
         job = PurchaseJob(self.repos, r, StubPayments(), lambda intent: NoMatch("i1", "x", "x"),
-                          DEFAULT_TRAVELER, now=lambda: NOW)
+                          now=lambda: NOW)
         self.repos.jobs.enqueue(Job("j1", JobKind.PURCHASE, "o1", JobStatus.PENDING, NOW, NOW))
         return job.run(replace(self.repos.jobs.get("j1"), status=JobStatus.RUNNING), NEXT_WINDOW)
 
@@ -96,7 +95,7 @@ class TennisOrderTest(unittest.TestCase):
         self.purchase(r)
         self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.AWAITING_CONFIRMATION)
         self.assertEqual([c[0] for c in terrarossa.calls],
-                         ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
+                         ["create_itinerary", "get_itinerary"])   # M19
         self.assertEqual(weebora.calls, [])
 
     def test_booking_retry_after_a_restart_still_uses_terrarossa(self):
@@ -111,8 +110,8 @@ class TennisOrderTest(unittest.TestCase):
         job = BookingJob(self.repos, r3, now=lambda: NOW)
         job.run(replace(self.repos.jobs.get("b1"), status=JobStatus.RUNNING), NEXT_WINDOW)
         self.assertEqual(self.repos.orders.get("o1").booking_code, "R-TENNIS")
-        self.assertEqual([c[0] for c in terrarossa2.calls + terrarossa3.calls],
-                         ["create_booking", "create_booking"])
+        self.assertEqual([c[0] for c in terrarossa2.calls + terrarossa3.calls],   # M19: cliente e pax una volta
+                         ["set_customer", "set_pax", "create_booking", "create_booking"])
         self.assertEqual(weebora2.calls + weebora3.calls, [])
 
     def test_pre_m10_tennis_product_without_brand_uses_terrarossa(self):

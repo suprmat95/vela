@@ -84,7 +84,7 @@ class MB1TennisTest(unittest.TestCase):
         self.assertEqual((mb.product(proposal).id, mb.product(proposal).brand), ("11", "terrarossa.com"))
         self.assertEqual(mb.buy(proposal).status, OrderStatus.AWAITING_PAYMENT)
         self.assertEqual(mb.cart_calls("terrarossa.com"),
-                         ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
+                         ["create_itinerary", "get_itinerary"])   # M19
         self.assertEqual(mb.cart_calls("weebora.com"), [])
 
 
