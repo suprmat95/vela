@@ -1255,3 +1255,75 @@ in The path of a purchase manca la possibilità di chiedere maggiori info su un 
 - 🔧 Bash: Locate the rejection row in the purchase table
 
 - 🔧 Bash: Insert details step and renumber the table
+
+- 🔧 Bash: Verify and commit the table change
+
+Ho aggiunto il passo nella tabella "The path of a purchase", nel commit `7269529` (nessun push).
+
+Il nuovo passo 3 è `get_proposal_details`: si può chiamare in qualsiasi momento e risponde a "cosa è incluso?" con programma giorno per giorno, hotel, club e orari di gioco. I dati sono quelli del prodotto che il sync ha già salvato, quindi costa 0 chiamate a HofJ, non cambia lo stato e funziona anche su una proposta rifiutata. L'ho verificato nel codice (`vela/domain/usecases.py:249`) e nella voce "Dettagli del pacchetto (RF-83)" di `decisions.md`. I passi successivi slittano di uno, da 4 a 9.
+
+Il resto del documento lo copriva già: la §3.1 spiega perché è un caso d'uso separato, e il budget di quota in §4.2 lo conta tra le chiamate "browse" a costo zero.
+
+## Utente 19:41
+
+ma sei allineato con master? non hai parlato della cache
+
+## Agente 19:41
+
+- 🔧 Bash: Check whether master moved since the merge
+
+Il branch è allineato: né `master` né `origin/master` si sono mossi dal merge (`5ec87aa` è già dentro). Controllo se esiste lavoro sulla cache fuori da `master`.
+
+- 🔧 Bash: Find unmerged branches and cache-related commits
+
+- 🔧 Bash: Inspect unmerged branches that may affect the doc
+
+- 🔧 Bash: Read unmerged decisions and cache mentions
+
+- 🔧 Bash: Read the new load test results on the unmerged branch
+
+Sì, sono allineato con `master`: dal merge non è cambiato niente, l'ultimo commit resta `5ec87aa`. Però ci sono due branch non ancora su `master` che toccano proprio questo documento, e uno riguarda la cache.
+
+**1. La cache: una scelta deliberata che manca** (branch `task/m19`, commit `5493aa1`, del 27/09 alle 18:35)
+
+La cache del prezzo c'è nel documento: §3.6, la tabella del percorso e il budget in §4.2. Manca però una voce di `decisions.md` che su `master` non esiste: "Link a 2 chiamate: la GET del totale resta (scelta deliberata)". La voce stessa dice "da riportare tra le scelte deliberate di `ARCHITECTURE.md`". In sintesi:
+- **Scelta:** anche chi ha il prezzo dalla cache fa la GET del totale prima del link, quindi 2 chiamate. `POST /v1/itineraries` restituisce solo l'id, e in 15 minuti HofJ può cambiare prezzo o hotel. La GET è l'unico controllo prima che il viaggiatore paghi.
+- **Alternativa scartata:** un link a 1 chiamata, con la GET spostata nel booking. Si sarebbe arrivati a circa 90 link/min invece di 47 e allo smaltimento a 50.000 in circa 1,8 h invece di 3,5. Il costo: se il prezzo fosse cambiato, prenotazione fallita e rimborso a mano, oltre a dover cambiare RF-16.
+- **Quando riaprirla:** se HofJ restituisce il checkout nella risposta della POST, oppure se nei giri `live` i cambi di prezzo dopo un hit risultano praticamente zero.
+
+**2. Un nuovo load test che smentisce i numeri del documento** (branch `suprmat95/last-load-test`, 4 commit del 27/09 fino alle 19:37)
+
+È stato fatto un giro da 10.000 viaggiatori con quattro gruppi, e `RESULTS.md` è stato riscritto da capo. Cambia tre cose importanti:
+- **Il picco misurato è 87 req/s su un'istanza, non 34.** Il p95 sale a 0,8-1,1 s, sopra i 500 ms di RNF-05, e ci sono **3 errori 500** perché il pool di connessioni al DB (5 + 10) si esaurisce. Quindi "34 req/s, zero errori" e la stima di "circa 13 istanze" in §4.3 e §4.5 sono superate: il primo limite di Vela, prima della quota, è il pool del database.
+- **I nuovi numeri:** 44,4 link/min; proiezione a 50.000 con circa 454 req/s; metà dei paganti riesce a pagare solo dopo circa 2 ore.
+- **I giri vecchi escono da `RESULTS.md`** (restano nella storia git). Diverse sezioni che il documento cita, come "Cosa cambia con M18" e "Dopo il fix", non esisterebbero più.
+
+**Come procedere.** Il punto 1 è una decisione già presa, anche se non ancora su `master`: lo aggiungo ora come trade-off nella §3.6, citando la voce di `decisions.md`. Per il punto 2 conviene aspettare che `last-load-test` sia su `master`, riallinearmi e poi riscrivere §4.3, §4.5 e la parte sui gap, con il pool del DB come primo limite. Scriverlo adesso da un branch non mergiato rischia di lasciare numeri e link sbagliati se quel branch cambia.
+
+Vanno bene questi due passi, o preferisci che usi subito anche i numeri del nuovo load test?
+
+## Utente 19:43
+
+il branch task/cache non è mergiato?
+
+## Agente 19:43
+
+- 🔧 Bash: Check whether task/cache is merged into master
+
+Sì, `task/cache` è mergiato: tutto il branch, compreso l'ultimo commit `de74ee4` delle 16:14, è su `master`. Il merge è `526459e` ("Merge branch 'task/cache'"), e c'è anche `686001f` per `task/loadtest-cache`. Siccome il mio branch contiene `master`, la cache del prezzo è già nel codice che il documento descrive.
+
+Il pezzo di cache che manca non viene da `task/cache`. È la decisione di tenere la GET del totale anche per chi ha il prezzo dalla cache, e sta in un commit successivo su `task/m19` (`5493aa1`), che non è su `master`.
+
+Restano valide le due proposte di prima:
+1. aggiungere adesso quella scelta nella §3.6;
+2. aspettare che `last-load-test` sia su `master` prima di aggiornare i numeri del carico.
+
+## Utente 19:46
+
+Ok in architecture riesci a fare un grafico di un funnel di acquisto spiegando chi serve ogni passaggio=
+
+## Agente 19:46
+
+"Ok" vuol dire che procedo con il punto 1: aggiungo nella §3.6 la scelta di tenere la GET del totale. Poi ti propongo il grafico.
+
+- 🔧 Bash: Find the price cache block in section 3.6

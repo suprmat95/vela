@@ -193,13 +193,26 @@ pay (look-to-book). Two changes moved the calls to where they buy something.
     price does not outlive the peak).
   - *Trade-off:* a cache hit has no cart, so an unbookable product is discovered only after the
     "yes". A stale price costs one more confirmation round.
+- **Deliberate choice: the total is read again before every link, even after a cache hit.**
+  - *Why:* `POST /v1/itineraries` returns only the itinerary id, so the amount to pay can be
+    read only with `GET /v1/itineraries/{id}`, and the link always carries the cart's total.
+    The cache key matches the cart exactly, so the risk is time: within the 15-minute TTL HofJ
+    can change the price or the default hotel, and this read is the only check before the
+    traveller pays.
+  - *Rejected:* a 1-call link for cache hits, with the read moved into the booking job. It
+    would give ~90 links/min instead of 47 at 2% payers and drain 50,000 travellers in ~1.8 h
+    instead of ~3.5 h (**predicted**). The cost: a changed price would be found only after
+    payment, meaning a failed booking and a manual refund.
+  - *Reopen if* HofJ returns the checkout in the `POST` response, or if `live` runs show that
+    prices almost never change after a cache hit (`quote_price_changed` log lines).
 - **Result (measured, 2,500 travellers).** With the cache, 473 of 487 accepts heard the actual
   price at once. After M19, links per minute went from 17.8 to **47.4** on the same ~100
   calls/min: 2.11 calls per link, 3.00 per booking. *Not like-for-like:* the M19 run had 2% of
   travellers paying against 60% before; at 60% the estimate is ~26 links/min (**predicted**, run
   not done).
 - **Evidence.** `decisions.md`: "M19 passo 1", "M19 passo 2: decisioni approvate", "Cache del
-  prezzo con fanout (RF-84)"; [`docs/api/customer-pax.md`](docs/api/customer-pax.md).
+  prezzo con fanout (RF-84)", "Link a 2 chiamate: la GET del totale resta (scelta deliberata)"
+  (on branch `task/m19`, not yet on `master`); [`docs/api/customer-pax.md`](docs/api/customer-pax.md).
 
 ### 3.7 A timeout is an uncertain outcome
 
