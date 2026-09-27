@@ -386,3 +386,5 @@ For commit 5, first the RED test on the MCP `get_proposal` description, then the
 - 🔧 Bash: Show the one failing test
 
 - 🔧 Bash: Fix the description test, run suite and lint on SQLite and Postgres, commit the docs, remove the throwaway Postgres
+
+- 🔧 Bash: Fix the stale trap comment in the REST doc, commit it, and count the branch commits and changed files

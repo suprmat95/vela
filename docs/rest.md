@@ -136,8 +136,9 @@ Lo script esegue il flusso e cronometra ogni passo (latenza per M13). Il token s
 # criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, prezzo
 # effettivo, secondo accept (la conferma), link, pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
 uv run python scripts/rest_flow.py https://vela-n506.onrender.com
-# criterio 4: la prima proposta di INTENT_TRAP è la trappola della fixture di staging; dopo
-# l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
+# criterio 4: con una fixture di prova che contiene la trappola e il 78 archiviato
+# (`add_trap(catalog, "78", archive_template=True)`, M21-B) la prima proposta di INTENT_TRAP è la
+# trappola; dopo l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
 uv run python scripts/rest_flow.py https://vela-n506.onrender.com --trap
 ```
 
