@@ -280,6 +280,42 @@ class RepositoryContract:
         self.repos.orders.add(o)
         self.assertEqual(self.repos.orders.get("o1"), o)
 
+    def test_order_roundtrip_with_last_seen(self):
+        """M19: `last_seen_at` (0016) si scrive all'inserimento e con `touch`."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        o = replace(order(), last_seen_at=NOW)
+        self.repos.orders.add(o)
+        self.assertEqual(self.repos.orders.get("o1"), o)
+
+    def test_touch_is_throttled(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        gap = timedelta(seconds=60)
+        self.assertTrue(self.repos.orders.touch("o1", NOW, gap))                # nullo: scrive
+        self.assertFalse(self.repos.orders.touch("o1", NOW + timedelta(seconds=59), gap))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW)
+        self.assertTrue(self.repos.orders.touch("o1", NOW + timedelta(seconds=61), gap))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW + timedelta(seconds=61))
+        self.assertFalse(self.repos.orders.touch("nope", NOW, gap))
+
+    def test_save_never_moves_last_seen(self):
+        """Un `save` scrive l'ordine letto prima: non deve riportare indietro un `touch` arrivato
+        nel frattempo, né un `touch` deve riportare indietro lo stato."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        stale = self.repos.orders.get("o1")
+        self.repos.orders.touch("o1", NOW + timedelta(minutes=5), timedelta(seconds=60))
+        self.repos.orders.save(replace(stale, status=OrderStatus.EXPIRED))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW + timedelta(minutes=5))
+        self.assertTrue(self.repos.orders.save_if_status(replace(stale, status=OrderStatus.PAID_PENDING_BOOKING,
+                                                                 last_seen_at=None), OrderStatus.EXPIRED))
+        current = self.repos.orders.get("o1")
+        self.assertEqual((current.status, current.last_seen_at),
+                         (OrderStatus.PAID_PENDING_BOOKING, NOW + timedelta(minutes=5)))
+
     def test_quote_claim_first_wins_then_refused_while_leader_queued(self):
         self.quote_world(2)
         self.assertIsNone(self.repos.quotes.get(self.KEY))

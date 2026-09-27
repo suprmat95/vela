@@ -201,7 +201,13 @@ def _order_row(o: Order) -> dict:
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
         "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
         "follows_quote": o.follows_quote, "confirmed_total": o.confirmed_total,
+        "last_seen_at": o.last_seen_at,
     }
+
+
+def _order_update(o: Order) -> dict:
+    """M19: i `save` non scrivono `last_seen_at`, che si muove solo con `touch`."""
+    return {k: v for k, v in _order_row(o).items() if k not in ("id", "last_seen_at")}
 
 
 def _order(m) -> Order:
@@ -213,7 +219,8 @@ def _order(m) -> Order:
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
                  enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
                  orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"],
-                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"])
+                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"],
+                 last_seen_at=m["last_seen_at"])
 
 
 class PostgresOrders:
@@ -245,13 +252,21 @@ class PostgresOrders:
         return None if m is None else _order(m)
 
     def save(self, order: Order) -> None:
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             conn.execute(update(orders_t).where(orders_t.c.id == order.id).values(**values))
 
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order_id,
+                or_(orders_t.c.last_seen_at.is_(None), orders_t.c.last_seen_at <= at - min_interval))
+                .values(last_seen_at=at))
+        return res.rowcount == 1
+
     def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
         """Un solo `UPDATE ... WHERE status = expected`: tra due scritture concorrenti vince una."""
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             res = conn.execute(update(orders_t).where(orders_t.c.id == order.id,
                                                       orders_t.c.status == expected.value).values(**values))
@@ -395,7 +410,7 @@ class PostgresQuotes:
         return sorted((_order(m) for m in rows), key=lambda o: o.id)
 
     def detach(self, order: Order) -> bool:
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             res = conn.execute(update(orders_t).where(
                 orders_t.c.id == order.id, orders_t.c.status == OrderStatus.QUEUED.value,

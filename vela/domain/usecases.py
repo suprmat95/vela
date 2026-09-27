@@ -34,6 +34,7 @@ from vela.ports.repositories import DuplicateOrder, Repositories
 __all__ = ["Vela", "NotFound", "utcnow", "random_id", "summary_of"]
 
 log = logging.getLogger(__name__)
+SIGN_OF_LIFE_EVERY = timedelta(seconds=60)   # M19: al massimo una scrittura di `last_seen_at` al minuto
 
 
 def utcnow() -> datetime:
@@ -272,7 +273,8 @@ class Vela:
         quotes_on = self.price_quote_ttl > timedelta(0)
         order = Order(self.new_id(), proposal.id, intent.id, proposal.product_id, OrderStatus.QUEUED,
                       proposal.pax, proposal.price_from, None, proposal.currency, profile, now, now,
-                      enqueued_at=enqueued_at, rooms=chosen, follows_quote=quotes_on)
+                      enqueued_at=enqueued_at, rooms=chosen, follows_quote=quotes_on,
+                      last_seen_at=now)   # M19: l'accettazione è un segno di vita
         cached = self._cached_total(order, proposal, product, now) if quotes_on else None
         if cached is not None:   # RF-84: hit, nessun job e nessuna chiamata
             order = replace(order, status=OrderStatus.AWAITING_CONFIRMATION, total=cached,
@@ -337,6 +339,7 @@ class Vela:
         link; senza (RF-84, prezzo dalla cache) riparte dal carrello e al passo 3 confronta il
         totale con quello confermato qui."""
         now = self.now()
+        self.repos.orders.touch(order.id, now, SIGN_OF_LIFE_EVERY)   # M19
         cart = order.itinerary_id is not None
         confirmed = order if cart else replace(order, confirmed_total=order.total)
         self.repos.orders.save(replace(confirmed, status=OrderStatus.QUEUED, updated_at=now))
@@ -391,6 +394,7 @@ class Vela:
 
     def get_order_status(self, order_id: str) -> OrderStatusResponse:
         order = self.orders.get(order_id)
+        self.repos.orders.touch(order.id, self.now(), SIGN_OF_LIFE_EVERY)   # M19: segno di vita
         if order.follows_quote:   # RF-84: un leader uscito senza rilascio non blocca nessuno
             unstick(self.repos, order, self.now(), self.new_id, self.now() - self.price_quote_ttl)
             order = self.orders.get(order_id)
@@ -413,6 +417,8 @@ class Vela:
                                        say.say_replaced(proposal.product, proposal.proposal, lang, rooms),
                                        proposal=proposal)
         estimate = order.price_from * order.pax
+        if status == OrderStatus.EXPIRED and order.payment_url is None:   # M19: scaduto in coda
+            return OrderStatusResponse(order.id, status, say.say_expired_silent(lang))
         payable = status == OrderStatus.AWAITING_PAYMENT
         if payable:
             self._check_payment_now(order.id)

@@ -87,6 +87,7 @@ class Settings:
     accept_wait_seconds: int = 100                     # accept aspetta prezzo e link (2026-09-26), < 120 s di ElevenLabs
     accept_poll_seconds: float = 1.0                   # rilettura dell'ordine durante l'attesa
     price_quote_ttl_seconds: int = 900                 # RF-84: vita del prezzo in cache; 0 = cache e fanout spenti
+    silent_order_minutes: int = 15                     # M19: ordine in coda senza segni di vita → expired; 0 = mai
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
 

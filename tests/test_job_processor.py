@@ -40,7 +40,7 @@ class Clock:
 
 
 class World:
-    def __init__(self, hofj=None, quota=None):
+    def __init__(self, hofj=None, quota=None, silent_after=None):
         self.clock = Clock()
         self.repos = MemoryRepositories()
         self.repos.products.upsert_many([make_product(i, price=300 + i) for i in range(1, 6)])
@@ -49,7 +49,7 @@ class World:
         payments = StubPayments()
         router = SingleClientRouter(self.hofj)
         purchase = PurchaseJob(self.repos, router, payments, lambda intent: NoMatch("i1", "x", "x"),
-                               now=self.clock, max_attempts=3)
+                               now=self.clock, max_attempts=3, silent_after=silent_after)
         booking = BookingJob(self.repos, router, now=self.clock)
         orders = OrderService(self.repos, self.hofj, now=self.clock)
         check = PaymentCheckJob(self.repos, payments, orders, now=self.clock)
@@ -177,6 +177,27 @@ class SchedulingTest(unittest.TestCase):
         w.processor.run_once()
         self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 2)
         self.assertEqual(w.repos.jobs.get("j1").step, 3)
+
+
+class SilentOrderTest(unittest.TestCase):
+    def test_silent_order_expires_before_taking_tokens(self):
+        """M19: la scadenza costa zero chiamate e zero gettoni."""
+        w = World(silent_after=timedelta(minutes=15))
+        w.boot()
+        w.purchase(1, seconds_ago=16 * 60)
+        tokens = w.repos.quota.snapshot(w.clock())["tokens"]
+        self.assertTrue(w.processor.run_once())
+        self.assertEqual(w.status(1), OrderStatus.EXPIRED)
+        self.assertEqual(w.hofj_methods(), [])
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], tokens)
+        self.assertEqual(w.repos.jobs.get("j1").status, JobStatus.DONE)
+
+    def test_live_order_runs_as_before(self):
+        w = World(silent_after=timedelta(minutes=15))
+        w.boot()
+        w.purchase(1, seconds_ago=14 * 60)
+        w.processor.run_once()
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
 
 
 class QuotaErrorTest(unittest.TestCase):

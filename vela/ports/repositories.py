@@ -1,5 +1,5 @@
 """Repository del dominio (RNF-01): intenti, proposte, ordini, rifiuti e catalogo stanno fuori dal processo."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import ContextManager, Dict, Iterable, List, NamedTuple, Optional, Protocol, Set
 
@@ -54,6 +54,10 @@ class OrderRepository(Protocol):
         """Salva solo se l'ordine è ancora in `expected`, in modo atomico; dice se ha salvato."""
     def ids_with_status(self, status: OrderStatus) -> List[str]: ...
     def orphan_itineraries_total(self) -> int: ...
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        """M19: `last_seen_at = at` se è nullo o più vecchio di `min_interval`; dice se ha scritto.
+        È l'unica scrittura di `last_seen_at` dopo l'inserimento: `save` e `save_if_status` non
+        lo toccano, così una scrittura con l'ordine letto prima non lo riporta indietro."""
 
 
 class RejectionRepository(Protocol):

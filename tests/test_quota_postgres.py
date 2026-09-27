@@ -38,8 +38,8 @@ class PostgresQuotaTest(QuotaContract, unittest.TestCase):
         return PostgresQuota(self.engine, margin=0.10, reserve=0.20)
 
     def test_concurrent_acquire_never_exceeds_limit(self):
-        """8 worker × 25 tentativi (200 > 6) sullo stesso istante: concessi esattamente i 6
-        gettoni sopra la soglia, e alle prenotazioni restano i 2 della soglia."""
+        """8 worker × 25 tentativi (200 > 5) sullo stesso istante: concessi esattamente i 5
+        gettoni sopra la soglia, e alle prenotazioni restano i 3 della soglia (M19)."""
         granted = []
         lock = threading.Lock()
 
@@ -48,7 +48,7 @@ class PostgresQuotaTest(QuotaContract, unittest.TestCase):
             with lock:
                 granted.append(mine)
 
-        for cls, expected in ((QuotaClass.PURCHASE, 6), (QuotaClass.BOOKING, 2)):
+        for cls, expected in ((QuotaClass.PURCHASE, 5), (QuotaClass.BOOKING, 3)):
             granted.clear()
             threads = [threading.Thread(target=worker, args=(cls,)) for _ in range(8)]
             for t in threads:

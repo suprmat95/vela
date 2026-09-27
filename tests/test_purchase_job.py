@@ -31,7 +31,7 @@ def fixed_now():
 class Setup:
     """Un intento, una proposta sul prodotto 1, un ordine `queued` e il suo job d'acquisto."""
 
-    def __init__(self, hofj=None, payments=None, products=None, language="it"):
+    def __init__(self, hofj=None, payments=None, products=None, language="it", **job):
         self.repos = MemoryRepositories()
         self.repos.products.upsert_many(products or [
             make_product(1, price=350, destination="Valencia"),
@@ -47,7 +47,7 @@ class Setup:
         self.proposed = []
         ids = iter("new%d" % i for i in range(1, 100))
         self.job = PurchaseJob(self.repos, SingleClientRouter(self.hofj), self.payments, self.propose,
-                               now=fixed_now, max_attempts=3)
+                               now=fixed_now, max_attempts=3, **job)
         self.new_id = lambda: next(ids)
         self.repos.jobs.enqueue(Job("j1", JobKind.PURCHASE, "o1", JobStatus.PENDING, NOW, NOW))
 
@@ -308,6 +308,70 @@ class CancelledTest(unittest.TestCase):
         self.assertEqual(result.job.status, JobStatus.DONE)
         self.assertEqual(s.order().status, OrderStatus.CANCELLED)
         self.assertEqual(s.payments.links, [])
+
+
+class SilentOrderTest(unittest.TestCase):
+    """M19: un ordine in coda senza segni di vita da N minuti scade senza chiamate, a meno che il
+    viaggiatore non abbia sentito "ti mando il link per SMS"."""
+
+    PHONE = "+39 333 123 4567"
+
+    def world(self, silent_minutes=16, last_seen=None, sms=False, total=None, phone=PHONE, **kw):
+        s = Setup(silent_after=timedelta(minutes=15), sms_enabled=sms, **kw)
+        at = NOW - timedelta(minutes=silent_minutes)
+        s.repos.orders.save(replace(s.order(), created_at=at, total=total,
+                                    traveler=replace(PROFILE, phone=phone)))
+        if last_seen is not None:
+            s.repos.orders.touch("o1", NOW - timedelta(minutes=last_seen), timedelta(0))
+        return s
+
+    def skip(self, s):
+        return s.job.skip(s.running())
+
+    def test_silent_order_expires_without_calls(self):
+        s = self.world()
+        result = self.skip(s)
+        self.assertEqual(result.job.status, JobStatus.DONE)
+        self.assertEqual(s.saved_job(), result.job)
+        order = s.order()
+        self.assertEqual((order.status, order.updated_at, order.payment_url),
+                         (OrderStatus.EXPIRED, NOW, None))
+        self.assertEqual(s.methods(), [])
+        self.assertEqual(s.payments.links, [])
+
+    def test_a_recent_sign_of_life_keeps_the_order(self):
+        s = self.world(silent_minutes=60, last_seen=10)
+        self.assertIsNone(self.skip(s))
+        self.assertEqual(s.order().status, OrderStatus.QUEUED)
+
+    def test_fifteen_minutes_are_not_enough(self):
+        self.assertIsNone(self.skip(self.world(silent_minutes=15)))
+
+    def test_announced_sms_keeps_a_silent_order(self):
+        """Dopo la conferma (totale noto) con l'SMS attivo e un numero valido Vela ha detto "te
+        lo mando per SMS": il viaggiatore può tacere."""
+        s = self.world(silent_minutes=120, sms=True, total=Decimal("700"))
+        self.assertIsNone(self.skip(s))
+
+    def test_no_sms_is_announced_while_waiting_for_the_price(self):
+        s = self.world(sms=True, total=None)
+        self.assertEqual(self.skip(s).job.status, JobStatus.DONE)
+        self.assertEqual(s.order().status, OrderStatus.EXPIRED)
+
+    def test_no_sms_without_a_valid_number(self):
+        s = self.world(sms=True, total=Decimal("700"), phone="nessuno")
+        self.assertEqual(self.skip(s).job.status, JobStatus.DONE)
+
+    def test_off_without_a_limit(self):
+        s = Setup()
+        s.repos.orders.save(replace(s.order(), created_at=NOW - timedelta(days=1)))
+        self.assertIsNone(s.job.skip(s.running()))
+
+    def test_only_queued_orders(self):
+        s = self.world()
+        s.repos.orders.save(replace(s.order(), status=OrderStatus.CANCELLED))
+        self.assertIsNone(self.skip(s))
+        self.assertEqual(s.order().status, OrderStatus.CANCELLED)
 
 
 class SmsLinkTest(unittest.TestCase):

@@ -79,6 +79,9 @@ class JobProcessor:
         job = self.repos.jobs.claim(now, self.lease_seconds)
         if job is None:
             return False
+        skip = getattr(self.handlers[job.kind], "skip", None)
+        if skip is not None and skip(job) is not None:   # M19: ordine silenzioso, zero gettoni
+            return True
         cls, needed = quota_needs(job)
         if needed and not quota.acquire(cls, needed, now):
             self.repos.jobs.save(replace(job, status=JobStatus.PENDING, locked_at=None,

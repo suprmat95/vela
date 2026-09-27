@@ -492,6 +492,17 @@ _STATUS = {
 }
 
 
+def say_expired_silent(lang: str = "it") -> str:
+    """M19: l'ordine in coda è scaduto perché il viaggiatore non ha più dato segni di vita.
+    Nessun addebito: il link non era mai partito."""
+    if lang == "en":
+        return ("I closed the order because I didn't hear from you for a while as it waited in the "
+                "queue; you haven't been charged anything. Tell me if you want me to prepare a new "
+                "proposal.")
+    return ("Ho chiuso l'ordine perché mentre era in coda non ti ho sentito per un po'; non hai pagato "
+            "niente. Dimmi se vuoi che prepari una nuova proposta.")
+
+
 _AWAITING_AMOUNT = {
     "it": "L'ordine è in attesa del pagamento di %s: usa il link che ti ho mandato.",
     "en": "The order is waiting for payment of %s: use the link I sent you.",

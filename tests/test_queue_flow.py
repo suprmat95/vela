@@ -123,6 +123,33 @@ class LaunchBurstTest(unittest.TestCase):
         self.assertGreater(len(queued), 100)                   # la coda degli acquisti è ancora lì
 
 
+class SilentOrdersTest(unittest.TestCase):
+    def test_worker_is_wired_with_fifteen_minutes(self):
+        purchase = Launch().worker.processor.handlers[JobKind.PURCHASE]
+        self.assertEqual((purchase.silent_after, purchase.sms_enabled), (timedelta(minutes=15), False))
+
+    def test_silent_travelers_leave_the_queue_without_calls(self):
+        """M19: in una coda lunga chi tace scade, chi chiede lo stato arriva al prezzo."""
+        w = Launch()
+        w.worker.processor.handlers[JobKind.PURCHASE].silent_after = timedelta(minutes=2)
+        orders = w.accept(200)                          # ~4 minuti di coda a ~50 acquisti/min
+        talking = orders[::2]
+
+        def poll():                                     # ogni 30 s, come il viaggiatore del banco
+            if w.clock().second % 30 == 0:
+                for o in talking:
+                    w.vela.get_order_status(o.order_id)
+
+        w.run(lambda: all(s != OrderStatus.QUEUED for s in w.statuses(orders)), watch=poll)
+        self.assertTrue(all(s == OrderStatus.AWAITING_CONFIRMATION for s in w.statuses(talking)))
+        expired = [w.repos.orders.get(o.order_id) for o in orders[1::2]]
+        expired = [o for o in expired if o.status == OrderStatus.EXPIRED]
+        self.assertGreater(len(expired), 20)
+        self.assertTrue(all(o.itinerary_id is None and o.orphan_itineraries == 0 for o in expired))
+        priced = sum(1 for s in w.statuses(orders) if s == OrderStatus.AWAITING_CONFIRMATION)
+        self.assertEqual(len(w.hofj._itineraries), priced)   # nessun carrello per chi è scaduto
+
+
 class EndToEndTest(unittest.TestCase):
     def test_replacement_flow_end_to_end(self):
         hofj = FakeHofJ(fail_at={"create_itinerary": [ProductError("404 upstream")]})

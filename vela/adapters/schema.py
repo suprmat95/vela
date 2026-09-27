@@ -96,6 +96,7 @@ orders_t = Table(
     Column("rooms", Integer, nullable=False, server_default="1"),                # 0011 (M21-D)
     Column("follows_quote", Boolean, nullable=False, server_default=text("false")),   # 0015 (RF-84)
     Column("confirmed_total", Numeric(12, 2)),                                         # 0015 (RF-84)
+    Column("last_seen_at", DateTime(timezone=True)),                                   # 0016 (M19)
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 

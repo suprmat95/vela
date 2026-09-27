@@ -15,6 +15,12 @@ dal codice di prima al passo 1 o 2 salta al 3 senza chiamate.
   4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
 
+Ordini silenziosi (M19): prima di prendere i gettoni il processore chiede `skip`. Un ordine
+`queued` senza segni di vita (`last_seen_at`, o la creazione) da più di `silent_after` passa a
+`expired` senza chiamate, e il job si chiude; se era il leader di un prezzo in cache, gli
+agganciati ricevono il loro job (RF-84, ripiego). Non scade chi ha sentito "ti mando il link per
+SMS": totale già noto (dopo la conferma), SMS attivi e un numero valido.
+
 Prima di ogni passo l'ordine viene riletto: se non è più `queued` (rinuncia, RF-49) il job si
 ferma senza altre chiamate. Esiti degli errori:
 - rete, timeout, 5xx, errore del fornitore di pagamento: nuovo tentativo nella finestra
@@ -31,9 +37,9 @@ import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
-from vela.domain import say
+from vela.domain import phone, say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection)
 from vela.domain.notify import enqueue_sms
@@ -65,9 +71,11 @@ class PurchaseJob:
     def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
                  propose: Callable[..., Union[ProposalMade, NoMatch]], now: Callable[[], datetime],
                  max_attempts: int = 3, new_id: Callable[[], str] = lambda: str(uuid.uuid4()),
-                 poll_seconds: int = 60):
+                 poll_seconds: int = 60, silent_after: Optional[timedelta] = None,
+                 sms_enabled: bool = False):
         self.repos, self.hofj, self.payments = repos, hofj, payments
         self.propose, self.now = propose, now
+        self.silent_after, self.sms_enabled = silent_after, sms_enabled
         self.max_attempts, self.new_id, self.poll_seconds = max_attempts, new_id, poll_seconds
 
     def run(self, job: Job, next_window: datetime) -> JobResult:
@@ -95,6 +103,25 @@ class PurchaseJob:
             return self._retry(job, next_window, exc, "upstream")
         except HofJError as exc:
             return self._retry(job, next_window, exc, "upstream")
+
+    def skip(self, job: Job) -> Optional[JobResult]:
+        """M19: chiude senza chiamate il job di un ordine silenzioso; None se il job va eseguito."""
+        order = self.repos.orders.get(job.order_id)
+        if self.silent_after is None or order is None or order.status != OrderStatus.QUEUED:
+            return None
+        now = self.now()
+        if now - (order.last_seen_at or order.created_at) <= self.silent_after or self._sms_announced(order):
+            return None
+        expired = replace(order, status=OrderStatus.EXPIRED, updated_at=now)
+        if not self.repos.orders.save_if_status(expired, OrderStatus.QUEUED):
+            return None   # una rinuncia o un rilascio nel frattempo: il giro normale decide
+        log.info("silent_order_expired order_id=%s", order.id)
+        release_quote(self.repos, order, now, self.new_id)   # RF-84: ripiego
+        return self._close(job, JobStatus.DONE)
+
+    def _sms_announced(self, order: Order) -> bool:
+        """Dopo la conferma Vela ha detto "te lo mando per SMS" (`say_queued` con le cifre)."""
+        return self.sms_enabled and order.total is not None and phone.tail(order.traveler.phone) is not None
 
     # --- passi -------------------------------------------------------------------------
 

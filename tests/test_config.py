@@ -75,6 +75,7 @@ class SettingsDefaultsTest(unittest.TestCase):
         self.assertEqual(s.worker_concurrency, 10)          # M18
         self.assertEqual(s.quota_margin, 0.10)
         self.assertEqual(s.expected_pay_share, 0.05)          # M19
+        self.assertEqual(s.silent_order_minutes, 15)          # M19
         self.assertAlmostEqual(s.booking_reserve, 0.15 / 2.15)   # M19: 3p / (2 + 3p)
         self.assertEqual(s.purchase_max_attempts, 3)
         self.assertEqual(s.booking_max_attempts, 5)

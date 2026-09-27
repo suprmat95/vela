@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
+from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.models import (Area, IntentCreated, IntentQuestion, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, OrderQueued, OrderStatus,
@@ -586,6 +588,57 @@ class RejectQueuedTest(unittest.TestCase):
         proposal = vela.get_proposal(iid)
         vela.accept_proposal(proposal.proposal.id)
         self.assertTrue(vela.reject_proposal(proposal.proposal.id, "no").say.startswith("I've cancelled the order. "))
+
+
+class SignsOfLifeTest(unittest.TestCase):
+    """M19: accettazione, conferma e richieste di stato sono segni di vita (`last_seen_at`)."""
+
+    def queued(self):
+        vela, _, proposal = accepted_vela()
+        vela.accept_wait_seconds = 0
+        r = vela.accept_proposal(proposal.proposal.id, FULL)
+        return vela, proposal, r.order_id
+
+    def test_accept_is_a_sign_of_life(self):
+        vela, _, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        self.assertEqual(order.last_seen_at, order.created_at)
+
+    def test_status_request_is_a_sign_of_life(self):
+        vela, _, oid = self.queued()
+        vela.now.at += timedelta(minutes=10)
+        vela.get_order_status(oid)
+        self.assertGreaterEqual(vela.repos.orders.get(oid).last_seen_at, NOW + timedelta(minutes=10))
+
+    def test_status_requests_write_at_most_once_a_minute(self):
+        vela, _, oid = self.queued()
+        vela.now.at += timedelta(minutes=10)
+        vela.get_order_status(oid)
+        seen = vela.repos.orders.get(oid).last_seen_at
+        vela.now.at += timedelta(seconds=30)
+        vela.get_order_status(oid)
+        self.assertEqual(vela.repos.orders.get(oid).last_seen_at, seen)
+
+    def test_confirmation_is_a_sign_of_life(self):
+        vela, proposal, oid = self.queued()
+        inline_worker(vela).drain()
+        vela.now.at += timedelta(minutes=10)
+        vela.accept_proposal(proposal.proposal.id)                   # la conferma
+        self.assertGreaterEqual(vela.repos.orders.get(oid).last_seen_at, NOW + timedelta(minutes=10))
+
+    def test_silent_expiry_has_its_own_sentence(self):
+        vela, proposal, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.EXPIRED))
+        r = vela.get_order_status(oid)
+        self.assertEqual((r.status, r.say), (OrderStatus.EXPIRED, say.say_expired_silent("it")))
+        self.assertEqual(vela.accept_proposal(proposal.proposal.id).say, say.say_expired_silent("it"))
+
+    def test_expired_link_keeps_its_sentence(self):
+        vela, _, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.EXPIRED, payment_url="http://pay.test/x"))
+        self.assertIn("link di pagamento è scaduto", vela.get_order_status(oid).say)
 
 
 class OrderStatusTest(unittest.TestCase):
