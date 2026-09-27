@@ -294,3 +294,31 @@ Now the RED tests for commit 1: projection keys, product flags, fixture flags, s
 Full suite green with Postgres too (1282 tests, no skips). Committing commit 1.
 
 - 🔧 Bash: Commit the migration, model, projection and fixture changes
+
+Commit 2 next: RF-61 grouping. Writing the failing tests first in a new `tests/test_chooser_ordering.py`.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m21b/tests/test_chooser_ordering.py
+
+- 🔧 Bash: Run the RF-61 tests and confirm they fail
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m21b/tests/test_chooser_ordering.py
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m21b/tests/test_chooser_ordering.py
+
+- 🔧 Bash: Confirm the corrected tests still fail before implementing
+
+Seven RED for the right reasons. Now the GREEN implementation in `chooser.py`: the id key, the equivalence key, the grouping, and its call in `choose`.
+
+- 🔧 Bash: Implement RF-61 grouping and the numeric id key in the chooser, then run the chooser tests
+
+- 🔧 Bash: Keep the string id tie-break in the sort until commit 3
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-m21b/tests/test_chooser_ordering.py
+
+- 🔧 Bash: Rerun the chooser tests
+
+- 🔧 Bash: Run the full suite and lint before committing commit 2
+
+- 🔧 Bash: Show the lint findings
+
+- 🔧 Bash: Remove the unused imports, re-check lint and tests, commit RF-61

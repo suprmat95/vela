@@ -1,7 +1,8 @@
 """Chooser v2 (RF-06, RF-07, RF-09): una sola scelta deterministica.
 
 Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, prezzo
-(dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Tra i
+(dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Dei
+prodotti equivalenti (RF-61, M21-B) resta un solo candidato, quello con l'id più basso. Tra i
 restanti ordina per aderenza all'area (dentro l'area 3, stessa regione 2, stesso paese 1),
 totale entro budget, durata compatibile (M21, RF-58), prezzo crescente, id. Area, budget e
 durata non escludono mai: se non sono rispettati la motivazione lo dichiara (RF-59). Se un filtro azzera i candidati, `NoChoice` porta il
@@ -20,6 +21,8 @@ from vela.domain.say import fmt_money, fmt_nights, fmt_span, nights_range, on_da
 FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "price", "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
+
+EQUIVALENT_PRICE_TOLERANCE = Decimal("0.05")   # RF-61: prezzo entro il 5% dell'id più basso
 
 
 @dataclass(frozen=True)
@@ -223,6 +226,35 @@ def _reason(product: Product, criteria: Criteria, start: date, end: date, score:
     return " ".join(s for s in sentences if s is not None)
 
 
+def id_key(product: Product) -> tuple:
+    """Ordine degli id (RF-60, RF-61): numerici prima, in ordine numerico ("78" < "100"); un id
+    non numerico dopo, come stringa (decisione M10 sui possibili prefissi). Mai un'eccezione."""
+    pid = product.id
+    return (0, int(pid)) if pid.isdecimal() else (1, pid)
+
+
+def _equivalence_key(product: Product) -> tuple:
+    """RF-61: stesso hotel (nessun hotel = nessun hotel), stesso titolo minuscolo senza spazi doppi,
+    stessa destinazione."""
+    return (product.hotel or "", " ".join(product.title.lower().split()), product.destination or "")
+
+
+def one_per_equivalence_group(products: Iterable[Product]) -> list:
+    """RF-61: un solo candidato per gruppo di prodotti equivalenti, quello con l'id più basso
+    (`id_key`). Scorrendo in ordine di id, un prodotto con la stessa chiave e il prezzo entro
+    `EQUIVALENT_PRICE_TOLERANCE` di un capogruppo già tenuto esce; altrimenti è un capogruppo
+    nuovo. Il confronto è sempre col capogruppo, mai a catena: 100, 104 e 108 danno due gruppi."""
+    anchors = {}
+    kept = []
+    for product in sorted(products, key=id_key):
+        group = anchors.setdefault(_equivalence_key(product), [])
+        if any(abs(product.price - a.price) <= a.price * EQUIVALENT_PRICE_TOLERANCE for a in group):
+            continue
+        group.append(product)
+        kept.append(product)
+    return kept
+
+
 RECHECK_AFTER = timedelta(hours=24)   # RF-34
 
 
@@ -269,6 +301,7 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         candidates = [p for p in candidates if keep(p)]
         if not candidates:
             return NoChoice(name)
+    candidates = one_per_equivalence_group(candidates)   # RF-61: mai vuoto
     candidates.sort(key=lambda p: (-area_score(p, criteria.area), not _within_budget(p, criteria),
                                    not _product_duration_ok(p, criteria, today), p.price, p.id))
     best = candidates[0]
