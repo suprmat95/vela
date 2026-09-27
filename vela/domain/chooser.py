@@ -235,18 +235,33 @@ def bookable(product: Product, now: Optional[datetime]) -> bool:
     return now is not None and checked is not None and now - checked >= RECHECK_AFTER
 
 
-def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
-           today: date, now: Optional[datetime] = None,
-           max_total: Optional[Decimal] = None) -> Union[Choice, NoChoice]:
-    """`max_total`: tetto dopo un rifiuto per prezzo (decisione M7), totale strettamente minore."""
-    candidates = list(products)
-    steps = (
+def _hard_filters(criteria: Criteria, today: date, now: Optional[datetime]) -> tuple:
+    """I filtri duri che dipendono solo dal catalogo e dai criteri, in ordine (RF-07)."""
+    return (
         ("archived", lambda p: not p.archived),
         ("bookable", lambda p: bookable(p, now)),
         ("trip", is_trip),
         ("sport", lambda p: criteria.sport in (None, "any") or p.sport == criteria.sport),
         ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
+    )
+
+
+def cheapest_total(products: Iterable[Product], criteria: Criteria, today: date,
+                   now: Optional[datetime] = None) -> Optional[Decimal]:
+    """RF-69, regola 4: totale del prodotto compatibile più economico, con gli stessi filtri
+    duri di `choose` e senza budget, rifiuti né tetto di prezzo; None se nessuno è compatibile."""
+    filters = _hard_filters(criteria, today, now)
+    totals = [_total(p, criteria) for p in products if all(keep(p) for _, keep in filters)]
+    return min(totals) if totals else None
+
+
+def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[str],
+           today: date, now: Optional[datetime] = None,
+           max_total: Optional[Decimal] = None) -> Union[Choice, NoChoice]:
+    """`max_total`: tetto dopo un rifiuto per prezzo (decisione M7), totale strettamente minore."""
+    candidates = list(products)
+    steps = _hard_filters(criteria, today, now) + (
         ("price", lambda p: max_total is None or _total(p, criteria) < max_total),
         ("rejected", lambda p: p.id not in rejected_ids),
     )

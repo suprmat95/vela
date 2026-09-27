@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Callable, Optional, Tuple, Union
 
 from vela.domain import geo, phone, say
-from vela.domain.chooser import Choice, choose
+from vela.domain.chooser import Choice, cheapest_total, choose
 from vela.domain.intent import parse_intent
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
@@ -76,8 +76,9 @@ class Vela:
         """RF-01..04, RF-52..54: campi strutturati > parser > fallback; i campi invalidi sono
         scartati e detti nel `say`, i conflitti con il testo vanno nei log."""
         profile = profile or TravelerProfile()
-        result = parse_intent(text, profile, today=self.now().date(), extractor=self.extractor,
-                              fields=fields)
+        now = self.now()
+        result = parse_intent(text, profile, today=now.date(), extractor=self.extractor,
+                              fields=fields, cheapest_total=self._cheapest_total(now))
         lang = result.criteria.language
         if result.question:
             return IntentQuestion(result.question, say.prefixed(
@@ -87,6 +88,13 @@ class Vela:
         _log_conflicts(intent.id, result.conflicts)
         return IntentCreated(intent.id, intent.criteria,
                              say.say_intent_created(intent.criteria, result.discarded))
+
+    def _cheapest_total(self, now: datetime):
+        """RF-69, regola 4: il catalogo si legge solo se la regola serve (decisione M21-E:
+        nessuna query in più per gli altri intenti)."""
+        def cheapest(criteria):
+            return cheapest_total(self.repos.products.list_all(), criteria, now.date(), now)
+        return cheapest
 
     # --- RF-06..11 -----------------------------------------------------------
 

@@ -251,3 +251,37 @@ All eight filter names are already covered synthetically. I'll swap the pax case
 Green on the current code. I'll commit the safety net separately, before touching `chooser.py`:
 
 - 🔧 Bash: Commit characterization test
+
+Now the red tests for rule 4: `cheapest_total` in the chooser, the rule in `read_budget`, and its use in `create_intent`. Checking how the use-case tests build `Vela`:
+
+- 🔧 Bash: Read use case test setup
+
+- 🔧 Bash: Add failing cheapest_total tests
+
+- 🔧 Bash: Run cheapest_total tests expecting failure
+
+Red (import error, `cheapest_total` doesn't exist yet). Now the chooser refactor:
+
+- 🔧 Bash: Factor out hard filters and add cheapest_total
+
+- 🔧 Bash: Show errors
+
+`support` needs `tests/` on the path; that's how the suite runs (discover with `-s tests`). Rerunning with discover and a pattern:
+
+- 🔧 Bash: Run chooser tests via discover
+
+- 🔧 Bash: Check test Clock
+
+- 🔧 Bash: Add failing rule 4 tests
+
+Red for the expected reasons. Implementing:
+
+- 🔧 Bash: Implement rule 4 in read_budget, parse_intent and create_intent
+
+Green. I'd added a `products` parameter to `_cheapest_total` that only the rejection needs; I'll remove it from this commit and bring it in with the rejection. Then full suite:
+
+- 🔧 Bash: Simplify and run full suite
+
+Green, and no existing test changed. Commit 3b:
+
+- 🔧 Bash: Commit rule 4 in create_intent

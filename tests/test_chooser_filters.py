@@ -11,7 +11,8 @@ from decimal import Decimal
 
 from vela.domain import geo
 from vela.domain.catalog import load_fixture
-from vela.domain.chooser import Choice, NoChoice, choose
+from support import make_product
+from vela.domain.chooser import Choice, NoChoice, cheapest_total, choose
 from vela.domain.models import Criteria, Period
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "..", "fixtures")
@@ -83,3 +84,42 @@ class ChooseUnchangedTest(unittest.TestCase):
             with self.subTest(failed=failed):
                 self.assertEqual(choose(self.products, criteria, set(), TODAY, NOW, max_total=cap),
                                  NoChoice(failed))
+
+
+class CheapestTotalTest(unittest.TestCase):
+    """RF-69, regola 4: totale del prodotto compatibile più economico, filtri duri senza budget."""
+
+    def test_cheapest_compatible_total(self):
+        products = [make_product(1, price=500), make_product(2, price=400)]
+        self.assertEqual(cheapest_total(products, Criteria("padel", pax=3), TODAY, NOW),
+                         Decimal("1200"))
+
+    def test_budget_and_area_do_not_filter(self):
+        products = [make_product(1, price=400, country="IT", destination="Roma")]
+        c = Criteria("padel", geo.find_area("Spagna"), pax=3, budget=Decimal("10"))
+        self.assertEqual(cheapest_total(products, c, TODAY, NOW), Decimal("1200"))
+
+    def test_hard_filters_apply(self):
+        cheap = dict(price=100)
+        products = [make_product(1, archived=True, **cheap),
+                    make_product(2, bookable=False, **cheap),
+                    make_product(3, sport="tennis", **cheap),
+                    make_product(4, windows=(("2026-12-01", "2026-12-04"),), **cheap),
+                    make_product(5, max_pax=2, **cheap),
+                    make_product(6, price=400)]
+        c = Criteria("padel", period=OCT, pax=3)
+        self.assertEqual(cheapest_total(products, c, TODAY, NOW), Decimal("1200"))
+
+    def test_nothing_compatible(self):
+        self.assertIsNone(cheapest_total([make_product(1, sport="tennis")], Criteria("padel", pax=2),
+                                         TODAY, NOW))
+
+    def test_same_candidates_as_choose_on_the_fixtures(self):
+        products = catalog()
+        for name, (criteria, now, _, _) in SEQUENCES.items():
+            with self.subTest(name=name):
+                rejected, totals = set(), []
+                while isinstance(r := choose(products, criteria, rejected, TODAY, now), Choice):
+                    totals.append(r.product.price * criteria.pax)
+                    rejected.add(r.product.id)
+                self.assertEqual(cheapest_total(products, criteria, TODAY, now), min(totals))

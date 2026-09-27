@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from vela.domain import geo
 from vela.domain.models import Criteria, Period, StructuredFields, TravelerProfile
@@ -443,13 +443,28 @@ def parse_budget_scope(text: str) -> Optional[str]:
     return None
 
 
-def read_budget(criteria: Criteria) -> Criteria:
+CheapestTotal = Callable[[Criteria], Optional[Decimal]]
+
+
+def scope_of_figure(figure: Decimal, pax: int, cheapest: Optional[Decimal]) -> str:
+    """RF-69, regola 4: a persona se la cifra, letta come totale, non copre il totale del
+    prodotto compatibile più economico e letta a persona sì; altrimenti totale."""
+    if cheapest is not None and figure < cheapest <= figure * pax:
+        return "per_person"
+    return "total"
+
+
+def read_budget(criteria: Criteria, cheapest_total: Optional[CheapestTotal] = None) -> Criteria:
     """RF-69: in ingresso `budget` è la cifra detta e `budget_scope` la lettura detta (campo o
     parole) o None; in uscita `budget` è il tetto sul totale usato dal chooser e `budget_scope`
-    la lettura. Senza lettura detta è `total` (regola 5)."""
+    la lettura. Senza lettura detta: regola 4 con più persone e `cheapest_total`, che legge il
+    catalogo solo qui; altrimenti `total` (regola 5)."""
     if criteria.budget is None:
         return replace(criteria, budget_scope=None)
-    scope = criteria.budget_scope or "total"
+    scope = criteria.budget_scope
+    if scope is None and criteria.pax and criteria.pax > 1 and cheapest_total is not None:
+        scope = scope_of_figure(criteria.budget, criteria.pax, cheapest_total(criteria))
+    scope = scope or "total"
     budget = criteria.budget * criteria.pax if scope == "per_person" and criteria.pax else criteria.budget
     return replace(criteria, budget=budget, budget_scope=scope)
 
@@ -566,7 +581,9 @@ def _with_fallback(criteria: Criteria, text: str, today: date,
 def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
                  today: Optional[date] = None,
                  extractor: Optional[IntentExtractor] = None,
-                 fields: Optional[StructuredFields] = None) -> ParseResult:
+                 fields: Optional[StructuredFields] = None,
+                 cheapest_total: Optional[CheapestTotal] = None) -> ParseResult:
+    """`cheapest_total`: la regola 4 di RF-69, chiamata solo se serve e senza domande aperte."""
     today = today or date.today()
     profile = profile or TravelerProfile()
     given, discarded = validate_fields(fields.as_dict(), today) if fields else ({}, ())
@@ -594,5 +611,6 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
-    return ParseResult(read_budget(criteria), question, discarded,
+    criteria = read_budget(criteria, cheapest_total if question is None else None)
+    return ParseResult(criteria, question, discarded,
                        conflicts_between(vars(parsed), given))
