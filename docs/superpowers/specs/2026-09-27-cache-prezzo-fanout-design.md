@@ -45,7 +45,7 @@ Postgres compresi.
 - Cache per la sync del catalogo.
 - Redis o cache in memoria del processo (scartati: servizio nuovo, niente transazione unica con
   gli ordini; per processo non condivisa tra istanze).
-- Scenario di load test dedicato (task separata, se serve misurare).
+- Rifare i giri di `loadtest/RESULTS.md` per misurare il risparmio (task separata, se serve).
 
 ## Design
 
@@ -163,6 +163,16 @@ Una frase nuova in `vela/domain/say.py`, italiano e inglese: prezzo cambiato dop
 con il nuovo totale e la domanda di conferma. Gli altri casi usano le frasi di oggi
 (`awaiting_confirmation`, `queued`).
 
+### Load test
+
+In modalità `loadtest` l'accettazione non aspetta (`accept_wait_seconds = 0`): oggi risponde
+sempre `202 order_queued`, e `loadtest/journey.py` chiude come fallito ogni altro status. Con
+la cache un hit risponde subito `200` con `awaiting_confirmation`; lo scenario usa quattro frasi
+con due persone, quindi quasi tutti i viaggiatori dopo i primi sarebbero hit. `journey.py`
+accetta anche `200` con `awaiting_confirmation` e prosegue nel ciclo di polling, che conferma
+già alla prima lettura di quello stato. Gli agganciati rispondono `202` come oggi; il report
+esclude già dagli scarti chi non ha `wait_seconds`.
+
 ## Gestione degli errori
 
 - 429 sul leader: il leader aspetta la finestra successiva senza contare il tentativo (RF-38);
@@ -189,6 +199,8 @@ Repository in memoria (sempre) e Postgres (con `DATABASE_URL`):
   `enqueued_at`;
 - leader non più `queued` senza ripiego: `claim` e `_await_progress` sbloccano gli agganciati;
 - posizione in coda di un agganciato = quella del leader;
+- load test: `journey` con accettazione `200 awaiting_confirmation` arriva a conferma e
+  pagamento (`tests/test_loadtest_journey.py`);
 - Postgres: `claim` concorrente da più thread, un solo leader; migrazione `0012` su e giù.
 
 ## Task
@@ -197,4 +209,4 @@ Repository in memoria (sempre) e Postgres (con `DATABASE_URL`):
 2. `accept_proposal`: hit, leader, agganciato; posizione in coda.
 3. Job d'acquisto: `publish`, conferma senza carrello, prezzo cambiato, `release_quote` nelle
    uscite e rete di sicurezza.
-4. Frase nuova, spec (RF nuovo in §4.10 e aggiornamenti), `decisions.md`, roadmap.
+4. Frase nuova, `loadtest/journey.py` per gli hit, spec (RF nuovo in §4.10 e aggiornamenti), `decisions.md`, roadmap.
