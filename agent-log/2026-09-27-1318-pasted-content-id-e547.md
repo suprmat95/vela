@@ -358,3 +358,13 @@ Suite green (1306 tests) and lint clean. A quick review of the chooser diff befo
 The diff reads right. Committing commit 3.
 
 - 🔧 Bash: Commit the RF-60 ordering and motivation
+
+- 🔧 Bash: Check the fixture record test imports and the reject signature
+
+- 🔧 Bash: Add the add_trap and staging trap tests and confirm they fail
+
+- 🔧 Bash: Implement the archive_template option, fix the test, update the rest_flow comment, run the tests, suite and lint
+
+The 78 costs 250 a head (500 total), not 1000; my test data was wrong. Fixing the expectation, then rerunning, and committing only if the suite and lint are green.
+
+- 🔧 Bash: Fix the trap test totals, rerun the staging tests, the suite and lint, then commit commit 4

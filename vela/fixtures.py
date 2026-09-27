@@ -42,13 +42,16 @@ def write_catalog(catalog: dict, out_path: str) -> None:
         fh.write("\n")
 
 
-def add_trap(catalog: dict, template_id) -> str:
+def add_trap(catalog: dict, template_id, archive_template: bool = False) -> str:
     """Aggiunge a `catalog` il prodotto trappola del criterio 4 di spec §10 (decisione M7).
 
     Clone del prodotto non archiviato `template_id` (lista e dettaglio) con id 900000 + id,
-    inesistente su HofJ, prezzo più basso di 1 e `vela_trap: true`: il chooser lo propone prima
-    del modello e il carrello fallisce con un vero errore di prodotto. ValueError se il modello
-    manca o è archiviato, o se l'id è già usato. Restituisce l'id della trappola."""
+    inesistente su HofJ, prezzo più basso di 1 e `vela_trap: true`: il carrello fallisce con un
+    vero errore di prodotto. Da M21-B (RF-61) modello e trappola sono equivalenti e il chooser
+    tiene l'id più basso: la trappola arriva solo dopo un rifiuto del modello. Per la prova di
+    §10.4 `archive_template=True` archivia il modello (item `archived`, dettaglio tolto), così la
+    trappola è la prima proposta. ValueError se il modello manca o è archiviato, o se l'id è già
+    usato. Restituisce l'id della trappola."""
     template_id = str(template_id)
     listed = [p for p in catalog["products"] if str(p["id"]) == template_id]
     if not listed or template_id not in catalog["details"]:
@@ -64,6 +67,9 @@ def add_trap(catalog: dict, template_id) -> str:
     item["vela_trap"] = detail["catalog"]["vela_trap"] = True
     catalog["products"].append(item)
     catalog["details"][trap_id] = detail
+    if archive_template:
+        listed[0]["archived"] = True
+        del catalog["details"][template_id]
     return trap_id
 
 

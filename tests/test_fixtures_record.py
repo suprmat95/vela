@@ -137,6 +137,19 @@ class AddTrapTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             add_trap(self.catalog, "118")
 
+    def test_archive_template_archives_the_original(self):
+        """M21-B: con RF-61 la trappola vince solo se il modello esce dai filtri duri, quindi la
+        prova di §10.4 archivia il modello (item `archived`, dettaglio tolto)."""
+        self.assertEqual(add_trap(self.catalog, "118", archive_template=True), "900118")
+        template = [p for p in self.catalog["products"] if p["id"] == "118"]
+        self.assertEqual([p["archived"] for p in template], [True])
+        self.assertNotIn("118", self.catalog["details"])
+        self.assertIn("900118", self.catalog["details"])
+        path = os.path.join(tempfile.mkdtemp(), "catalog.json")
+        write_catalog(self.catalog, path)
+        loaded = {p.id: p.archived for p in load_fixture(path)}
+        self.assertEqual((loaded["118"], loaded["900118"]), (True, False))
+
     def test_trap_loads_as_the_cheapest_active_product(self):
         add_trap(self.catalog, "118")
         path = os.path.join(tempfile.mkdtemp(), "catalog.json")
