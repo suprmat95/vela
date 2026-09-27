@@ -28,7 +28,7 @@ def proposal(pid="p1", iid="i1", product_id="1", created_at=NOW):
 
 def order(oid="o1", pid="p1"):
     return Order(oid, pid, "i1", "1", OrderStatus.AWAITING_PAYMENT, 2, Decimal("500"),
-                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1")
+                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1", rooms=2)   # rooms: 0011
 
 
 def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):

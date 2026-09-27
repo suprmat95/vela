@@ -13,8 +13,8 @@ from decimal import Decimal
 from typing import Callable, Optional, Tuple, Union
 
 from vela.domain import geo, phone, say
-from vela.domain.chooser import Choice, cheapest_total, choose
-from vela.domain.intent import parse_intent
+from vela.domain.chooser import Choice, cheapest_total, choose, rooms_needed
+from vela.domain.intent import parse_intent, question_rooms, validate_fields
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
@@ -168,20 +168,22 @@ class Vela:
         rejected_proposals = self.repos.rejections.proposal_ids_for_intent(intent.id)
         open_proposals = [p for p in self.repos.proposals.list_for_intent(intent.id)
                           if p.id not in rejected_proposals]
+        rooms = intent.criteria.rooms or 1   # None solo negli intenti salvati prima di M21-D
         if open_proposals:
-            return self._made(open_proposals[-1], lang=lang)
+            return self._made(open_proposals[-1], lang=lang, rooms=rooms)
         rejected_products = self.repos.rejections.product_ids_for_intent(intent.id)
         now = self.now()
         result = choose((products or self.repos.products.list_all)(), intent.criteria, rejected_products,
                         today=now.date(), now=now, max_total=self._price_ceiling(intent.id))
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
-                           say.say_no_match(result.failed_criterion, intent.criteria))
+                           say.say_no_match(result.failed_criterion, intent.criteria,
+                                            result.rooms_needed, result.max_pax_per_room))
         proposal = Proposal(self.new_id(), intent.id, result.product.id, result.start_date,
                             result.end_date, intent.criteria.pax or 1, result.product.price,
                             result.product.currency, result.reason, self.now())
         self.repos.proposals.add(proposal)
-        return self._made(proposal, result.product, lang)
+        return self._made(proposal, result.product, lang, rooms)
 
     def _price_ceiling(self, intent_id: str) -> Optional[Decimal]:
         """Decisione M7 (§10.1): dopo un rifiuto per prezzo si propone solo qualcosa che costa
@@ -198,19 +200,24 @@ class Vela:
         return order.total if order is not None and order.total is not None else proposal.total_from
 
     def _made(self, proposal: Proposal, product: Optional[Product] = None,
-              lang: str = "it") -> ProposalMade:
+              lang: str = "it", rooms: int = 1) -> ProposalMade:
         product = product or self.repos.products.get(proposal.product_id)
         summary = summary_of(product)
-        return ProposalMade(proposal, summary, say.say_proposal(summary, proposal, lang))
+        return ProposalMade(proposal, summary, say.say_proposal(summary, proposal, lang, rooms),
+                            rooms=rooms)
 
     # --- RF-12, RF-13, RF-17, RF-19, RF-45, RNF-03 ------------------------------
 
-    def accept_proposal(self, proposal_id: str, traveler: Optional[TravelerProfile] = None
-                        ) -> Union[OrderQueued, OrderStatusResponse, MissingTravelerData]:
+    def accept_proposal(self, proposal_id: str, traveler: Optional[TravelerProfile] = None,
+                        rooms: Optional[int] = None
+                        ) -> Union[OrderQueued, OrderStatusResponse, MissingTravelerData, IntentQuestion]:
         """RF-45: mette l'ordine in coda, senza chiamare HofJ né il pagamento: il carrello e il
         link li prepara il job d'acquisto (RF-46). Decisione 2026-09-26: il job si ferma al
         prezzo effettivo (`awaiting_confirmation`); una nuova chiamata sulla stessa proposta è
-        la conferma e accoda il link. In entrambi i casi aspetta l'esito fino al tetto."""
+        la conferma e accoda il link. In entrambi i casi aspetta l'esito fino al tetto.
+        `rooms` (M21-D, RF-65): correzione facoltativa delle camere, entro 1..pax (altrimenti
+        scartata e detta) e non sotto il minimo del prodotto (RF-66: domanda, nessun ordine);
+        aggiorna anche i criteri dell'intento (decisione M21-D, 3). Ignorata sulla conferma."""
         proposal = self.repos.proposals.get(proposal_id)
         if proposal is None:
             raise NotFound("proposal", proposal_id)
@@ -227,18 +234,39 @@ class Vela:
         missing = profile.missing_fields(proposal.pax)
         if missing:
             return MissingTravelerData(proposal_id, tuple(missing), say.say_missing(missing, lang))
+        corrected, discarded = self._rooms_correction(proposal, rooms)
+        chosen = corrected if corrected is not None else (intent.criteria.rooms or 1)
+        product = self.repos.products.get(proposal.product_id)
+        needed = rooms_needed(product, proposal.pax) if product else 1
+        prefix = say.say_discarded(discarded, lang)
+        if chosen < needed:
+            return IntentQuestion(question_rooms(lang), say.prefixed(prefix, say.say_rooms_below_minimum(
+                product.max_pax_per_room, proposal.pax, needed, lang)))
+        if corrected is not None and corrected != intent.criteria.rooms:
+            self.repos.intents.update_criteria(intent.id, replace(intent.criteria, rooms=corrected))
         now = self.now()
         enqueued_at = replaced.enqueued_at if replaced and replaced.enqueued_at else now   # RF-17
         order = Order(self.new_id(), proposal.id, intent.id, proposal.product_id, OrderStatus.QUEUED,
                       proposal.pax, proposal.price_from, None, proposal.currency, profile, now, now,
-                      enqueued_at=enqueued_at)
+                      enqueued_at=enqueued_at, rooms=chosen)
         try:
             self.repos.orders.add(order)
         except DuplicateOrder:
             return self.get_order_status(self.repos.orders.get_by_proposal(proposal_id).id)
         self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
                                     enqueued_at, now))
-        return self._await_progress(order.id)
+        result = self._await_progress(order.id)
+        return replace(result, say=say.prefixed(prefix, result.say)) if prefix else result
+
+    def _rooms_correction(self, proposal: Proposal, rooms: Optional[int]) -> Tuple[Optional[int], tuple]:
+        """RF-53 per `rooms` su `accept_proposal`: intero in 1..pax, altrimenti scartato."""
+        if rooms is None:
+            return None, ()
+        valid, discarded = validate_fields({"rooms": rooms}, self.now().date())
+        value = valid.get("rooms")
+        if value is not None and value > proposal.pax:
+            return None, (("rooms", rooms),)
+        return value, discarded
 
     def _confirm(self, order: Order) -> Union[OrderQueued, OrderStatusResponse]:
         """Il sì al prezzo effettivo: l'ordine torna in coda e il job riparte dal link."""
@@ -300,9 +328,11 @@ class Vela:
                                                                         minutes=minutes, phone_tail=tail),
                                        position=position, wait_seconds=wait)
         if status == OrderStatus.REPLACED and order.replacement_proposal_id:
-            proposal = self._made(self.repos.proposals.get(order.replacement_proposal_id), lang=lang)
+            rooms = (intent.criteria.rooms or 1) if intent is not None else order.rooms
+            proposal = self._made(self.repos.proposals.get(order.replacement_proposal_id), lang=lang,
+                                  rooms=rooms)
             return OrderStatusResponse(order.id, status,
-                                       say.say_replaced(proposal.product, proposal.proposal, lang),
+                                       say.say_replaced(proposal.product, proposal.proposal, lang, rooms),
                                        proposal=proposal)
         estimate = order.price_from * order.pax
         payable = status == OrderStatus.AWAITING_PAYMENT

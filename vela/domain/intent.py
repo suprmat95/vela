@@ -33,6 +33,10 @@ _QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX, QUESTION_ROOMS),
               "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN, QUESTION_ROOMS_EN)}
 ROOMS_DEFAULT_MAX_PAX = 2   # RF-65: fino a 2 persone una camera senza chiedere
 
+
+def question_rooms(lang: str) -> str:
+    return _QUESTIONS.get(lang, _QUESTIONS["it"])[2]
+
 MONTHS = {
     "gennaio": 1, "january": 1, "febbraio": 2, "february": 2, "marzo": 3, "march": 3,
     "aprile": 4, "april": 4, "maggio": 5, "may": 5, "giugno": 6, "june": 6, "luglio": 7,

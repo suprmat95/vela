@@ -276,6 +276,7 @@ class Order:
     enqueued_at: Optional[datetime] = None            # posizione FIFO (RF-48); ereditata in RF-17
     replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
     orphan_itineraries: int = 0                       # M18: timeout su POST /v1/itineraries
+    rooms: int = 1                                    # M21-D (RF-67): camere mandate a HofJ
 
 
 class JobKind(str, Enum):
@@ -375,12 +376,13 @@ class ProposalMade:
     product: ProductSummary
     say: str
     replaced: bool = False
+    rooms: int = 1   # M21-D (RF-06): dalle criteria dell'intento, nessuna colonna su `proposals`
 
     def to_dict(self) -> dict:
         p = self.proposal
         return {"proposal_id": p.id, "intent_id": p.intent_id, "product": self.product.to_dict(),
                 "start_date": p.start_date.isoformat(), "end_date": p.end_date.isoformat(),
-                "nights": p.nights, "pax": p.pax, "price_from": money_str(p.price_from),
+                "nights": p.nights, "pax": p.pax, "rooms": self.rooms, "price_from": money_str(p.price_from),
                 "total_from": money_str(p.total_from), "currency": p.currency,
                 "reason": p.reason, "replaced": self.replaced, "say": self.say}
 

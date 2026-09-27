@@ -211,8 +211,13 @@ def say_untranslatable(lang: str = "it") -> str:
     return "Non so scegliere in base a questo: ho escluso solo la proposta di prima."
 
 
-def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
+def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it",
+                 rooms: Optional[int] = None) -> str:
+    """`rooms` (M21-D, RF-06): "per 5 persone in 3 camere", con la regola di `rooms_said`."""
     hotel = ", hotel %s" % product.hotel if product.hotel else ""
+    people = _people(p.pax, lang)
+    if rooms_said(p.pax, rooms):
+        people += " in " + fmt_rooms(rooms, lang)
     if lang == "en":
         where = " in %s" % product.destination if product.destination else ""
         if p.start_date == p.end_date:
@@ -222,8 +227,7 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
         return ("I suggest %s%s%s, %s for %s, starting at %s per person: that's the minimum "
                 "price, the actual total depends on dates and availability and I'll tell you "
                 "before the payment link. %s Shall I go ahead?"
-                % (product.title, where, hotel, when, _people(p.pax, lang),
-                   fmt_money(p.price_from, lang), p.reason))
+                % (product.title, where, hotel, when, people, fmt_money(p.price_from, lang), p.reason))
     where = " a %s" % product.destination if product.destination else ""
     if p.start_date == p.end_date:
         when = on_date(p.start_date)
@@ -232,7 +236,20 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
     return ("Ti propongo %s%s%s, %s per %s, a partire da %s a persona: è il prezzo minimo, il "
             "totale effettivo dipende da date e disponibilità e te lo dico prima del link di "
             "pagamento. %s Ti va?"
-            % (product.title, where, hotel, when, _people(p.pax), fmt_money(p.price_from), p.reason))
+            % (product.title, where, hotel, when, people, fmt_money(p.price_from), p.reason))
+
+
+def say_rooms_below_minimum(max_pax_per_room: int, pax: int, needed: int, lang: str = "it") -> str:
+    """RF-65 su `accept_proposal`: la correzione delle camere è sotto il minimo del prodotto
+    (RF-66); nessun ordine, la domanda di RF-04."""
+    from vela.domain.intent import question_rooms   # evita l'import circolare (intent importa say? no: models)
+    if lang == "en":
+        head = ("The rooms of this trip hold at most %s: %s need at least %s."
+                % (_people(max_pax_per_room, lang), _people(pax, lang), fmt_rooms(needed, lang)))
+    else:
+        head = ("Le camere di questo viaggio ospitano al massimo %s: per %d servono almeno %s."
+                % (_people(max_pax_per_room), pax, fmt_rooms(needed)))
+    return head + " " + question_rooms(lang)
 
 
 _NO_MATCH = {
@@ -480,9 +497,10 @@ _REPLACED_INTRO = {
 }
 
 
-def say_replaced(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
+def say_replaced(product: ProductSummary, p: Proposal, lang: str = "it",
+                 rooms: Optional[int] = None) -> str:
     """RF-17: la proposta sostitutiva, senza nominare l'errore del fornitore."""
-    return _REPLACED_INTRO.get(lang, _REPLACED_INTRO["it"]) + say_proposal(product, p, lang)
+    return _REPLACED_INTRO.get(lang, _REPLACED_INTRO["it"]) + say_proposal(product, p, lang, rooms)
 
 
 def say_cancelled_then(next_sentence: str, lang: str = "it") -> str:

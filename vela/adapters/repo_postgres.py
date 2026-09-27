@@ -193,7 +193,7 @@ def _order_row(o: Order) -> dict:
         "booking_code": o.booking_code, "failure_reason": o.failure_reason,
         "created_at": o.created_at, "updated_at": o.updated_at, "paid_at": o.paid_at,
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
-        "orphan_itineraries": o.orphan_itineraries,
+        "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
     }
 
 
@@ -205,7 +205,7 @@ def _order(m) -> Order:
                  payment_ref=m["payment_ref"], booking_code=m["booking_code"],
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
                  enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
-                 orphan_itineraries=m["orphan_itineraries"])
+                 orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"])
 
 
 class PostgresOrders:

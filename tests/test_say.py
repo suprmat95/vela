@@ -36,6 +36,24 @@ class SayTest(unittest.TestCase):
         self.assertNotIn("http", s)
         self.assertNotIn("*", s)
 
+    def test_proposal_says_the_rooms_for_a_group(self):
+        """M21-D (RF-06): "per 5 persone in 3 camere"; con 1 o 2 persone in 1 camera niente."""
+        five = replace(PROPOSAL, pax=5)
+        self.assertIn("per 5 persone in 3 camere", say.say_proposal(PRODUCT, five, rooms=3))
+        self.assertIn("for 5 people in 3 rooms", say.say_proposal(PRODUCT, five, "en", rooms=3))
+        self.assertIn("per 2 persone in 2 camere", say.say_proposal(PRODUCT, PROPOSAL, rooms=2))
+        self.assertNotIn("camer", say.say_proposal(PRODUCT, PROPOSAL, rooms=1))
+        self.assertNotIn("camer", say.say_proposal(PRODUCT, PROPOSAL))
+
+    def test_rooms_below_minimum(self):
+        """M21-D (RF-65): la domanda di `accept_proposal` con il minimo del prodotto."""
+        self.assertEqual(say.say_rooms_below_minimum(2, 5, 3),
+                         "Le camere di questo viaggio ospitano al massimo 2 persone: per 5 servono "
+                         "almeno 3 camere. In quante camere?")
+        self.assertEqual(say.say_rooms_below_minimum(2, 5, 3, "en"),
+                         "The rooms of this trip hold at most 2 people: 5 people need at least 3 "
+                         "rooms. How many rooms?")
+
     def test_proposal_without_hotel_and_single_day(self):
         p = ProductSummary("1", "Titolo", None, None)
         s = say.say_proposal(p, Proposal("p", "i", "1", date(2026, 10, 1), date(2026, 10, 1), 1,
