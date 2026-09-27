@@ -43,8 +43,8 @@ I giri di `RESULTS.md` (colonne "prima", M13a, e "dopo", M13b) sono cinque, tutt
 `--duration 8 --arrival-minutes 5 --tail-minutes 3` e un `docker compose down -v` tra l'uno e
 l'altro: A-500, B-1000, C-2500 (`--travelers` 500, 1000, 2500), D-1000-guasti (sotto) ed
 E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Il giro con la cache del prezzo (RF-84, 2026-09-27) è C-2500 con gli stessi parametri e
-`--label 2500-cache`. I due giri di M19 (2026-09-27) sono C-2500 con gli stessi parametri, `--pay
-0.02 --label 2500-m19-pay2` e `--pay 0.60 --label 2500-m19-pay60`. Dopo una modifica a `vela/` serve
+`--label 2500-cache`. Il giro di M19 (2026-09-27) è C-2500 con gli stessi parametri e `--pay
+0.02 --label 2500-m19-pay2`. Dopo una modifica a `vela/` serve
 `docker compose --profile loadtest build`. Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
 
 ## Scenario (modello aperto)

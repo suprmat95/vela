@@ -873,3 +873,86 @@ Ora `rest.md` e le descrizioni MCP: cerco dove parlano di `expired`, delle chiam
 Il giro al 2% è partito (9 minuti di Locust). Intanto faccio il commit di spec, `rest.md` e descrizione MCP.
 
 - 🔧 Bash: uv run ruff check . >/dev/null && git add docs/spec.md docs/rest.md vela/surface…
+
+Mentre aspetto il giro, raccolgo per `decisions.md` l'elenco dei test cambiati.
+
+- 🔧 Bash: git diff --stat 58538ba HEAD -- tests | cat
+
+- 🔧 ToolSearch
+
+Il giro C-2500 al 2% di paganti è in corso nel compose `m19` e dura ancora qualche minuto. Quando finisce lancio il giro al 60%.
+
+Finora, tutto sul branch `task/m19` e non mergiato:
+
+| Commit | Cosa |
+|---|---|
+| `0c70db2` | Acquisto a 2 chiamate e booking a 3 (cliente, pax con `pax-1..N`, booking; `get_pax` solo se HofJ risponde 4xx). Quota: soglia a 3 gettoni e riserva calcolata da `expected_pay_share`. |
+| `f7c14fb` | Ordini silenziosi e migrazione 0016 (`last_seen_at`). |
+| `ad1ca76` | Il finto HofJ rifiuta il booking di un carrello senza cliente o passeggeri. |
+| `ddd470c` | Opzione `--pay` nel banco; il report conta le chiamate per link e per ordine pagato. |
+| `e63e523` | Spec, `rest.md` e descrizione MCP aggiornate. |
+
+Suite e ruff verdi, anche su un Postgres locale usa e getta: 1598 test, migrazione compresa.
+
+Due cose che non mi aspettavo:
+- **Scritture di `last_seen_at`.** Il salvataggio degli ordini riscrive tutta la riga. Aggiornare `last_seen_at` con quel salvataggio avrebbe potuto cancellare un cambio di stato fatto nello stesso istante dal worker. Per questo `last_seen_at` ha una scrittura sua, e i salvataggi normali non lo toccano mai.
+- **Replay dopo un riavvio.** Senza un cambio, un ordine pagato in modalità replay non si sarebbe potuto prenotare dopo un riavvio del servizio. Il replay ora accetta cliente e passeggeri sui propri carrelli anche dopo un riavvio, come fa già per il booking.
+
+Dopo i due giri scrivo `RESULTS.md`, rifaccio la proiezione a 50.000 e completo `decisions.md` e la roadmap. Poi mi fermo prima del merge.
+
+## Utente 18:04
+
+│ ad1ca76 │ Il finto HofJ rifiuta il booking di un carrello senza cliente o passeggeri.                                        │lo hai fixato?
+
+## Agente 18:04
+
+No, perché non è un bug: è una regola che ho aggiunto apposta al finto HofJ del load test. Vela non viene toccata.
+
+Con M19 cliente e passeggeri non si mandano più prima del link, ma nel job di prenotazione, subito prima di `POST /v1/bookings`. Se un domani quel job saltasse quei due passi, il finto di prima avrebbe accettato comunque il booking e il load test sarebbe passato senza accorgersene. Ora il finto risponde 400: una regressione del genere compare nel banco come prenotazioni fallite.
+
+Nel flusso normale di Vela non scatta mai, perché il job di prenotazione fa sempre cliente → passeggeri → booking, e i nomi di tutti i passeggeri sono obbligatori già all'accettazione. L'unico test che l'ha fatta scattare era un test di contratto che mandava il secondo passeggero senza nome, e l'ho corretto.
+
+C'è un limite, scritto anche nel codice del finto: che HofJ vero rifiuti un booking senza cliente o passeggeri non l'abbiamo verificato. Le sonde di oggi hanno sempre mandato entrambi prima del booking. È un modello prudente del finto, non un comportamento misurato di HofJ.
+
+Se preferisci che il finto resti permissivo come prima, la tolgo. Serve solo a far emergere un errore nel banco.
+
+## Utente 18:05
+
+ok adesso che load test stai facendo?
+
+## Agente 18:05
+
+- 🔧 Bash: tail -4 /tmp/claude-501/m19-pay2.log; ls /Users/matteodospina/orca/workspaces/ve…
+
+Adesso sta girando il **giro C-2500 con il 2% di paganti**, cioè lo scenario che hai scelto. È partito circa 3 minuti fa e ne mancano circa 6.
+
+**Parametri:** gli stessi dei giri in `RESULTS.md`, così i numeri restano confrontabili.
+- 2500 viaggiatori, 5 minuti di arrivi e 3 di coda, seme 13.
+- Finto HofJ con finestra ancorata e latenza standard.
+- L'unica differenza è `--pay 0.02`: paga il link il 2% di chi lo riceve. Le due sentinelle, Marco e Anna, pagano sempre.
+
+**Dove gira:** tutto in locale nel compose `m19`, costruito sul commit `ddd470c`. Nessuna chiamata a HofJ o a Stripe. Lo stack `master-*` di un'altra sessione resta acceso e non lo tocco; il mio compose non espone porte, quindi non ci sono conflitti.
+
+**Cosa guardo:**
+- link al minuto a regime: oggi sono 17,8, la mia stima con il 2% è intorno a 48;
+- chiamate per link (atteso 2) e per ordine prenotato (atteso 3);
+- nessun 429 e massimo 108 chiamate in 60 s;
+- la coda alla fine;
+- quando viene confermato Marco.
+
+**Poi:**
+1. **Giro al 60%:** stessi parametri con `--pay 0.60`, per il confronto con i giri precedenti e per vedere quanto costano i pagamenti con il booking a 3 chiamate.
+2. **Risultati e proiezione:** nuova sezione in `RESULTS.md` e proiezione a 50.000 rifatta con il ritmo misurato.
+3. **Documenti:** `decisions.md` (con l'elenco dei test cambiati) e roadmap M19.
+
+Poi mi fermo prima del merge.
+
+## Utente 18:06
+
+Non fare il giro Giro al 60%
+
+## Agente 18:06
+
+Ok, niente giro al 60%. Tolgo il riferimento dal README del banco e registro la scelta in `decisions.md`.
+
+- 🔧 Bash: python3 - <<'EOF' p='loadtest/README.md' s=open(p).read() o='''I due giri di M19…
