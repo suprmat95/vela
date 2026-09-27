@@ -32,6 +32,7 @@ ap.add_argument("--selectable-date", default="2026-10-08")
 ap.add_argument("--fixed", default="28")                  # Nueva Alcantara, hotelSelection=false
 ap.add_argument("--fixed-date", default="2026-10-15")
 ap.add_argument("--gap", type=float, default=12.0)
+ap.add_argument("--parts", default="QABC")               # Q quota, A 1 camera, B hotel fisso, C 2 camere
 args = ap.parse_args()
 base = os.environ.get("HOFJ_BASE_URL", "https://staging.api.hofj.com").rstrip("/")
 key = os.environ["HOFJ_API_KEY"]
@@ -116,31 +117,33 @@ def itinerary(product, start, rooms):
 
 findings = {}
 print("host:", base.split("//")[-1], "brand:", args.brand, flush=True)
-_, q = call("quota", "GET", "/v1/quota", cart=False)
-findings["quota_before"] = data(q)
+if "Q" in args.parts:
+    _, q = call("quota", "GET", "/v1/quota", cart=False)
+    findings["quota_before"] = data(q)
 
 # A: 2 persone, 1 camera, prodotto con hotelSelection
-s, p = call("A-create", "POST", "/v1/itineraries", itinerary(args.selectable, args.selectable_date, 1))
-if s != 200:
+s, p = (200, None) if "A" not in args.parts else call("A-create", "POST", "/v1/itineraries", itinerary(args.selectable, args.selectable_date, 1))
+if "A" in args.parts and s != 200:
     raise SystemExit("A: creazione fallita, mi fermo")
-a_id = data(p)["itineraryId"]
-_, p = call("A-itin", "GET", "/v1/itineraries/%s" % a_id)
-findings["A_before"] = hotel(data(p))
-_, p = call("A-list", "GET", "/v1/itineraries/%s/accommodations" % a_id,
-            query={"startDate": args.selectable_date, "sortByValue": "recommended"})
-elements = (data(p) or {}).get("elements")
-findings["A_list"] = {"summary": summary(elements), "pagination": (data(p) or {}).get("pagination"),
-                      "aggregate": (data(p) or {}).get("aggregate")}
-acc, room_ids = pick(elements, findings["A_before"]["id"])
-if acc:
-    s, p = call("A-patch", "PATCH", "/v1/itineraries/%s/accommodations/%s" % (a_id, acc["id"]),
-                {"roomIds": room_ids})
-    findings["A_patch"] = {"accommodation": acc.get("id"), "roomIds": room_ids, "status": s, "response": p}
-    _, p = call("A-reread", "GET", "/v1/itineraries/%s" % a_id)
-    findings["A_after"] = hotel(data(p))
+if "A" in args.parts:
+    a_id = data(p)["itineraryId"]
+    _, p = call("A-itin", "GET", "/v1/itineraries/%s" % a_id)
+    findings["A_before"] = hotel(data(p))
+    _, p = call("A-list", "GET", "/v1/itineraries/%s/accommodations" % a_id,
+                query={"startDate": args.selectable_date, "sortByValue": "recommended"})
+    elements = (data(p) or {}).get("elements")
+    findings["A_list"] = {"summary": summary(elements), "pagination": (data(p) or {}).get("pagination"),
+                          "aggregate": (data(p) or {}).get("aggregate")}
+    acc, room_ids = pick(elements, findings["A_before"]["id"])
+    if acc:
+        s, p = call("A-patch", "PATCH", "/v1/itineraries/%s/accommodations/%s" % (a_id, acc["id"]),
+                    {"roomIds": room_ids})
+        findings["A_patch"] = {"accommodation": acc.get("id"), "roomIds": room_ids, "status": s, "response": p}
+        _, p = call("A-reread", "GET", "/v1/itineraries/%s" % a_id)
+        findings["A_after"] = hotel(data(p))
 
 # B: prodotto con hotel fisso
-s, p = call("B-create", "POST", "/v1/itineraries", itinerary(args.fixed, args.fixed_date, 1))
+s, p = (0, None) if "B" not in args.parts else call("B-create", "POST", "/v1/itineraries", itinerary(args.fixed, args.fixed_date, 1))
 if s == 200:
     b_id = data(p)["itineraryId"]
     s, p = call("B-list", "GET", "/v1/itineraries/%s/accommodations" % b_id,
@@ -149,7 +152,7 @@ if s == 200:
                           "response_if_error": p if s != 200 else None}
 
 # C: 2 persone, 2 camere, stesso prodotto di A, lista per distanza
-s, p = call("C-create", "POST", "/v1/itineraries", itinerary(args.selectable, args.selectable_date, 2))
+s, p = (0, None) if "C" not in args.parts else call("C-create", "POST", "/v1/itineraries", itinerary(args.selectable, args.selectable_date, 2))
 if s == 200:
     c_id = data(p)["itineraryId"]
     _, p = call("C-list", "GET", "/v1/itineraries/%s/accommodations" % c_id,
