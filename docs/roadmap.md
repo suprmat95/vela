@@ -895,6 +895,11 @@ M14.
 
 ## M20 — Accettazione con attesa breve quando la coda è vuota
 
+**Stato (2026-09-27).** Assorbita dalla conferma del prezzo ("Prezzo effettivo prima del link",
+2026-09-26): `accept_proposal` aspetta già il job fino a 100 s per ogni posizione. Da M20 restano
+solo test e la correzione di RNF-04 (`docs/decisions.md`, "M20 assorbita dalla conferma del
+prezzo"). Il resto della sezione è il piano originale.
+
 **Risultato.** Chi accetta una proposta senza nessuno davanti in coda riceve il link di
 pagamento nella stessa risposta, quando HofJ è abbastanza veloce, invece di sentirsi dire "ti
 ho messo in coda" e dover chiedere lo stato. Sotto picco non cambia nulla. Il percorso resta

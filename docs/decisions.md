@@ -923,3 +923,15 @@ domande aperte (tabella, "un weekend", `nights`) con un "sì" alle raccomandazio
 | `Criteria` | I due campi sono dopo `language`, così i costruttori posizionali esistenti restano validi. Salvati nel JSON di `intents.criteria`: nessuna migrazione, gli intenti già salvati li leggono vuoti | Vincolo della task |
 | Test esistenti cambiati | Solo `test_models.CriteriaRoundTripTest.test_empty_round_trip`: il dizionario dei criteri ha due chiavi in più. Nessun test di ordinamento cambiato | — |
 | `say` della proposta | Invariato: dice le date di inizio e fine, le notti compaiono solo nella frase di RF-59 | Le date sono già dette; `nights` è nella risposta per l'agente |
+
+
+## 2026-09-27 — M20 assorbita dalla conferma del prezzo
+
+Origine: rebase di `task/m20` su `master` dopo "Prezzo effettivo prima del link" (2026-09-26).
+Quella decisione ha già messo un'attesa in `accept_proposal` (ogni posizione, tetto 100 s,
+rilettura ogni secondo), più ampia di M20 (solo posizione 1, 10 s, 0,5 s).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Codice di M20 | Non si mergia; `task/m20` resta come archivio | Riportare le regole di M20 romperebbe la conferma del prezzo: chi non è primo in coda non sentirebbe il prezzo nella stessa chiamata. Vale la decisione più recente |
+| Cosa si tiene | I test su sostituzione, fallimento e doppio accept durante l'attesa (`tests/test_usecases.py`, `PriceConfirmationTest`), il test REST del 200 `order_status` con il link, RNF-04 corretto | Coprono esiti dell'attesa che `master` gestiva senza test; RNF-04 diceva ancora che nessun caso d'uso aspetta |

@@ -453,6 +453,51 @@ class PriceConfirmationTest(unittest.TestCase):
         self.assertIn("prezzo effettivo", r.say)
         self.assertNotIn("SMS", r.say)
 
+    def test_replacement_during_the_wait_returns_the_new_proposal(self):
+        """M20: il job sostituisce il prodotto mentre accept aspetta; nessuna attesa oltre."""
+        from vela.ports.hofj import ProductError
+        vela, pid, slept = self.waiting_vela(hofj=FakeHofJ(fail_at={"create_itinerary": [ProductError("404")]}))
+        r = vela.accept_proposal(pid, FULL)
+        self.assertEqual(r.status, OrderStatus.REPLACED)
+        self.assertNotEqual(r.proposal.proposal.id, pid)
+        self.assertEqual(slept, [1])
+        assert_single_product(self, r.to_dict())
+
+    def test_failure_during_the_wait_returns_the_reason(self):
+        """M20: un ordine che esce da `queued` come `failed` chiude subito l'attesa."""
+        from dataclasses import replace
+        vela, pid, slept = self.waiting_vela()
+
+        def fail(seconds):
+            slept.append(seconds)
+            order = next(iter(vela.repos.orders._items.values()))
+            vela.repos.orders.save(replace(order, status=OrderStatus.FAILED, failure_reason="fornitore giù"))
+
+        vela.sleep = fail
+        r = vela.accept_proposal(pid, FULL)
+        self.assertEqual((r.status, r.failure_reason), (OrderStatus.FAILED, "fornitore giù"))
+        self.assertEqual(slept, [1])
+
+    def test_second_accept_during_the_wait_reuses_the_order(self):
+        """M20: un doppio accept mentre il primo aspetta non crea un secondo ordine né un job."""
+        vela, pid, _ = self.waiting_vela()
+        worker = inline_worker(vela)
+        seen = []
+
+        def sleep(seconds):
+            if not seen:
+                seen.append(vela.accept_proposal(pid))   # l'ordine è ancora in coda
+            else:
+                worker.drain()
+
+        vela.sleep = sleep
+        r = vela.accept_proposal(pid, FULL)
+        self.assertEqual(r.status, OrderStatus.AWAITING_CONFIRMATION)
+        self.assertEqual((seen[0].order_id, seen[0].status), (r.order_id, OrderStatus.QUEUED))
+        self.assertEqual(len(vela.repos.orders._items), 1)
+        purchases = [j for j in vela.repos.jobs._jobs.values() if j.kind == JobKind.PURCHASE]
+        self.assertEqual(len(purchases), 1)
+
     def test_status_while_awaiting_confirmation_repeats_the_question(self):
         vela, pid, _ = self.waiting_vela()
         oid = vela.accept_proposal(pid, FULL).order_id
