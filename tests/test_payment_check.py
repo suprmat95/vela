@@ -8,7 +8,6 @@ from support import NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
-from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, QuotaClass,
@@ -139,11 +138,11 @@ class PaymentCheckJobTest(unittest.TestCase):
 
     def test_check_runs_with_no_hofj_budget_left(self):
         w = World(ScriptedPayments(LinkStatus("open", None, None, None)))
-        w.repos.quota.sync_from_snapshot(QuotaSnapshot(120, 108, NOW, NOW + timedelta(seconds=60)))
+        w.repos.quota.sync_from_snapshot(QuotaSnapshot(120, 108, NOW, NOW + timedelta(seconds=60)), NOW)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.payments.checked, ["cs_1"])
         self.assertEqual(w.hofj.calls, [])
-        self.assertEqual(w.repos.quota.snapshot(NOW)["used"], 108)
+        self.assertEqual(w.repos.quota.snapshot(NOW)["tokens"], -100)   # bloccato fino a fine finestra
 
 class PurchaseEnqueuesCheckTest(unittest.TestCase):
     def test_link_step_enqueues_a_payment_check(self):
@@ -156,9 +155,10 @@ class PurchaseEnqueuesCheckTest(unittest.TestCase):
                                "EUR", TravelerProfile(), NOW, NOW, itinerary_id="it-1"))
         job = Job("j1", JobKind.PURCHASE, "o1", JobStatus.RUNNING, NOW, NOW, step=4, locked_at=NOW)
         repos.jobs.enqueue(job)
+        ids = iter(["chk1", "sms1"])   # id distinto per il job di verifica e per l'SMS accodati insieme
         purchase = PurchaseJob(repos, SingleClientRouter(FakeHofJ()), StubPayments(), lambda i: NoMatch("i1", "x", "x"),
-                               DEFAULT_TRAVELER, now=lambda: NOW, max_attempts=3,
-                               new_id=lambda: "chk1", poll_seconds=60)
+                               now=lambda: NOW, max_attempts=3,
+                               new_id=lambda: next(ids), poll_seconds=60)
         purchase.run(job, NOW + timedelta(seconds=60))
         check = repos.jobs.active_for_order("o1", JobKind.PAYMENT_CHECK)
         self.assertEqual((check.id, check.run_after), ("chk1", NOW + timedelta(seconds=60)))

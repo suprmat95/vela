@@ -1,18 +1,37 @@
-"""Regole pure della quota HofJ (RF-47, RF-48): limite effettivo, riserva, tetti, attesa stimata.
+"""Regole pure della quota HofJ (RF-47, RF-48): token bucket a ritmo costante, attesa stimata.
 
-Limite effettivo = `limitPerMinute` meno un margine (chiave condivisa con altri client); la
-classe `booking` ha una riserva garantita, `purchase` e `sync` si fermano prima di intaccarla.
+Limite effettivo = `limitPerMinute` meno un margine (chiave condivisa con altri client). Le
+chiamate escono da un token bucket di capienza B e ritmo r con B + 60·r = limite effettivo:
+in qualsiasi intervallo di 60 s passano al massimo B + 60·r chiamate, qualunque sia la regola
+della finestra di HofJ (ancorata come misurato, a griglia o scorrevole). Decisione M18.
+
+Riserva `booking` come soglia (decisione M18): `purchase` e `sync` prendono gettoni solo se nel
+bucket ne restano almeno `floor`, `booking` può arrivare a zero. Le prenotazioni degli ordini
+pagati passano quindi sempre per prime. L'attesa stimata (RF-48) conta per gli acquisti solo
+la quota `1 − reserve` del ritmo.
+
+M19: un acquisto costa 2 chiamate (itinerario, totale) e una prenotazione 3 (cliente,
+passeggeri, booking). La riserva non è più una percentuale fissa: è la parte del ritmo che
+va ai booking se paga una quota `p` di chi riceve il link, 3p / (2 + 3p). La soglia è un
+booking intero.
+
 Le percentuali passano da Decimal perché il floor su float sbaglia (100 × 0,29 = 28,999…).
 """
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
-from typing import Optional, Tuple
+from typing import Optional
 
 from vela.domain.models import QuotaClass
 
-CALLS_PER_PURCHASE = 5   # RF-46: itinerario, customer, lettura pax, scrittura pax, totale
+CALLS_PER_PURCHASE = 2   # RF-46, M19: itinerario, totale
+CALLS_PER_BOOKING = 3    # RF-51, M19: customer, pax, booking
+DEFAULT_BURST = 8        # B: con 108 effettive, r = 100/60 ≈ 1,67 chiamate/s
+DEFAULT_FLOOR = 3        # gettoni che `purchase` e `sync` lasciano alle prenotazioni: un booking
+DEFAULT_PAY_SHARE = 0.05  # M19: quota attesa di chi paga il link (scenario del 2%, con margine)
+WINDOW = timedelta(seconds=60)
+_EPSILON = 1e-9          # tolleranza dei float del refill
 
 
 def _floor_share(value: int, share: float) -> int:
@@ -23,25 +42,55 @@ def effective_limit(limit_per_minute: int, margin: float) -> int:
     return _floor_share(limit_per_minute, 1 - Decimal(str(margin)))
 
 
-def booking_reserve(effective: int, reserve: float) -> int:
-    return _floor_share(effective, reserve)
+def booking_reserve(pay_share: float) -> float:
+    """M19, RF-48: parte del ritmo delle prenotazioni se paga `pay_share` di chi riceve il link.
+    Ogni link costa CALLS_PER_PURCHASE, ogni link pagato CALLS_PER_BOOKING in più."""
+    p = Decimal(str(pay_share))
+    if not 0 <= p <= 1:
+        raise ValueError("quota di chi paga fuori da 0..1: %s" % pay_share)
+    booking = CALLS_PER_BOOKING * p
+    return float(booking / (CALLS_PER_PURCHASE + booking))
 
 
-def cap_for(cls: QuotaClass, effective: int, reserve: int) -> int:
-    """Chiamate che una classe può usare nella finestra: solo `booking` arriva al limite."""
-    return effective if cls == QuotaClass.BOOKING else effective - reserve
+DEFAULT_RESERVE = booking_reserve(DEFAULT_PAY_SHARE)
 
 
-def purchases_per_window(effective: int, reserve: int, calls_per_purchase: int = CALLS_PER_PURCHASE) -> float:
-    budget = effective - reserve
-    if budget <= 0:
-        raise ValueError("nessun budget per gli acquisti: limite %d, riserva %d" % (effective, reserve))
-    return budget / calls_per_purchase
+@dataclass(frozen=True)
+class BucketRules:
+    margin: float = 0.10     # limite effettivo = limitPerMinute × 0,9
+    reserve: float = DEFAULT_RESERVE   # quota del ritmo che l'attesa stimata (RF-48) lascia alle prenotazioni
+    burst: int = DEFAULT_BURST
+    floor: int = DEFAULT_FLOOR
+
+    def __post_init__(self):
+        if self.floor + CALLS_PER_PURCHASE > self.burst:
+            raise ValueError("capienza %d: non contiene un acquisto (%d) più la soglia %d"
+                             % (self.burst, CALLS_PER_PURCHASE, self.floor))
+        if CALLS_PER_BOOKING > self.burst:
+            raise ValueError("capienza %d: non contiene una prenotazione (%d)" % (self.burst, CALLS_PER_BOOKING))
+
+    def rate(self, limit_per_minute: int) -> float:
+        """Gettoni al secondo: (limite effettivo − B) / 60, così B + 60·r = limite effettivo."""
+        spare = effective_limit(limit_per_minute, self.margin) - self.burst
+        if spare <= 0:
+            raise ValueError("limite %d/min: niente ritmo oltre la capienza %d" % (limit_per_minute, self.burst))
+        return spare / 60
+
+    def floor_for(self, cls: QuotaClass) -> int:
+        return 0 if cls == QuotaClass.BOOKING else self.floor
 
 
-def estimated_wait_seconds(position: int, per_window: float) -> int:
-    """RF-48: posizione × 60 s ÷ acquisti per finestra, per eccesso. Nessun tetto."""
-    return math.ceil(position * 60 / per_window)
+def purchases_per_minute(rate: float, reserve: float, calls_per_purchase: int = CALLS_PER_PURCHASE) -> float:
+    """RF-48: acquisti al minuto su cui si stima l'attesa (80% del ritmo, prudente)."""
+    per_minute = Decimal(str(rate)) * 60 * (1 - Decimal(str(reserve)))
+    if per_minute <= 0:
+        raise ValueError("nessun ritmo per gli acquisti")
+    return float(per_minute / calls_per_purchase)
+
+
+def estimated_wait_seconds(position: int, per_minute: float) -> int:
+    """RF-48: posizione × 60 s ÷ acquisti al minuto, per eccesso. Nessun tetto."""
+    return math.ceil(position * 60 / per_minute)
 
 
 def wait_minutes(seconds: int) -> int:
@@ -49,67 +98,95 @@ def wait_minutes(seconds: int) -> int:
     return max(1, math.ceil(seconds / 60))
 
 
-# --- Finestra di quota (RF-36..38, RF-47): stato puro, salvato dagli adapter -----------------
-
-WINDOW = timedelta(seconds=60)
-
+# --- Stato del bucket (RF-36..38, RF-47): puro, salvato dagli adapter -----------------------
 
 @dataclass(frozen=True)
-class QuotaWindow:
-    window_start: datetime
-    window_end: datetime
+class QuotaBucket:
+    tokens: float                # può essere negativo: bucket bloccato fino alla fine della finestra HofJ
+    refilled_at: datetime
     limit_per_minute: int
-    used: int
     needs_refresh: bool
+    window_start: datetime       # ultima finestra nota di HofJ (snapshot), solo informativa
+    window_end: datetime
 
 
-def fresh_window(now: datetime, limit_per_minute: int) -> QuotaWindow:
-    """Finestra prima di ogni `GET /v1/quota`: parte dalla prima richiesta, da sincronizzare."""
-    return QuotaWindow(now, now + WINDOW, limit_per_minute, 0, True)
+def fresh_bucket(now: datetime, limit_per_minute: int, rules: BucketRules) -> QuotaBucket:
+    """Stato prima di ogni `GET /v1/quota`: bucket pieno, limite dichiarato, da sincronizzare."""
+    return QuotaBucket(float(rules.burst), now, limit_per_minute, True, now, now + WINDOW)
 
 
-def rolled(w: QuotaWindow, now: datetime) -> QuotaWindow:
-    """Fa avanzare la finestra sulla griglia di 60 s ancorata da HofJ; `used` riparte da zero."""
-    if now < w.window_end:
-        return w
-    skipped = int((now - w.window_end) // WINDOW)
-    start = w.window_end + skipped * WINDOW
-    return replace(w, window_start=start, window_end=start + WINDOW, used=0)
+def refill(b: QuotaBucket, now: datetime, rules: BucketRules) -> QuotaBucket:
+    """Gettoni maturati da `refilled_at`, fino a B. Un orologio indietro non toglie né aggiunge."""
+    if now <= b.refilled_at:
+        return b
+    gained = (now - b.refilled_at).total_seconds() * rules.rate(b.limit_per_minute)
+    return replace(b, tokens=min(float(rules.burst), b.tokens + gained), refilled_at=now)
 
 
-def caps(w: QuotaWindow, margin: float, reserve: float) -> Tuple[int, int]:
-    effective = effective_limit(w.limit_per_minute, margin)
-    return effective, booking_reserve(effective, reserve)
-
-
-def try_acquire(w: QuotaWindow, cls: QuotaClass, n: int, now: datetime, margin: float,
-                reserve: float, purchase_waiting: bool) -> Optional[QuotaWindow]:
-    """Nuovo stato con `n` chiamate prenotate, o None: tutto il blocco o niente (RF-47)."""
-    w = rolled(w, now)
+def try_take(b: QuotaBucket, cls: QuotaClass, n: int, now: datetime, rules: BucketRules,
+             purchase_waiting: bool = False) -> Optional[QuotaBucket]:
+    """Nuovo stato con `n` gettoni presi, o None: tutto il blocco o niente (RF-47)."""
     if cls == QuotaClass.SYNC and purchase_waiting:
         return None
-    effective, res = caps(w, margin, reserve)
-    if w.used + n > cap_for(cls, effective, res):
+    b = refill(b, now, rules)
+    if b.tokens - n < rules.floor_for(cls) - _EPSILON:
         return None
-    return replace(w, used=w.used + n)
+    return replace(b, tokens=b.tokens - n)
 
 
-def after_429(w: QuotaWindow, now: datetime, margin: float, reserve: float) -> QuotaWindow:
-    """RF-38: un 429 azzera il budget residuo della finestra e chiede una nuova lettura."""
-    w = rolled(w, now)
-    effective, _ = caps(w, margin, reserve)
-    return replace(w, used=max(w.used, effective), needs_refresh=True)
+def claim_refresh(b: QuotaBucket, now: datetime, rules: BucketRules) -> Optional[QuotaBucket]:
+    """Una sola rilettura di `/v1/quota` per il cluster: 1 gettone `booking` e `needs_refresh`
+    spento nello stesso passo. None se non serve o se manca il gettone."""
+    if not b.needs_refresh:
+        return None
+    taken = try_take(b, QuotaClass.BOOKING, 1, now, rules)
+    return None if taken is None else replace(taken, needs_refresh=False)
 
 
-def from_snapshot(limit_per_minute: int, used_in_window: int, started: datetime, ends: datetime) -> QuotaWindow:
-    return QuotaWindow(started, ends, limit_per_minute, used_in_window, False)
+def after_429(b: QuotaBucket, now: datetime, rules: BucketRules, hold_seconds: float = 0.0) -> QuotaBucket:
+    """RF-38: un 429 svuota il bucket e chiede una rilettura. `hold_seconds` lo tiene fermo più
+    a lungo (429 sulla rilettura stessa: senza informazioni si aspetta una finestra intera)."""
+    b = refill(b, now, rules)
+    blocked = -hold_seconds * rules.rate(b.limit_per_minute)
+    return replace(b, tokens=min(b.tokens, 0.0, blocked), needs_refresh=True)
 
 
-def describe(w: QuotaWindow, now: datetime, margin: float, reserve: float) -> dict:
-    """Vista per `/health` e per i test: la finestra corrente, senza modificarla."""
-    w = rolled(w, now)
-    effective, res = caps(w, margin, reserve)
-    return {"limit_per_minute": w.limit_per_minute, "effective_limit": effective, "reserve": res,
-            "used": w.used, "remaining": max(0, effective - w.used),
-            "window_start": w.window_start, "window_end": w.window_end,
-            "needs_refresh": w.needs_refresh}
+def from_snapshot(b: QuotaBucket, limit_per_minute: int, used_in_window: int, started: datetime,
+                  ends: datetime, now: datetime, rules: BucketRules) -> QuotaBucket:
+    """Allinea al `GET /v1/quota`: nuovo limite; mai più gettoni di quanti HofJ ne lasci nella
+    finestra; finestra esaurita → bucket negativo, torna a zero quando la finestra HofJ scade."""
+    b = replace(refill(b, now, rules), limit_per_minute=limit_per_minute, needs_refresh=False,
+                window_start=started, window_end=ends)
+    left = effective_limit(limit_per_minute, rules.margin) - used_in_window
+    if left > 0:
+        cap = float(left)
+    else:
+        cap = -max(0.0, (ends - now).total_seconds()) * rules.rate(limit_per_minute)
+    return replace(b, tokens=min(b.tokens, cap, float(rules.burst)))
+
+
+def seconds_until(b: QuotaBucket, cls: QuotaClass, n: int, now: datetime, rules: BucketRules) -> float:
+    """Secondi prima che il bucket possa dare `n` gettoni a `cls` (0 se può già)."""
+    b = refill(b, now, rules)
+    missing = n + rules.floor_for(cls) - b.tokens
+    return max(0.0, missing / rules.rate(b.limit_per_minute))
+
+
+def available_at(b: QuotaBucket, now: datetime, rules: BucketRules, cls: QuotaClass = QuotaClass.PURCHASE,
+                 n: int = CALLS_PER_PURCHASE) -> datetime:
+    """Istante in cui `cls` potrà prendere `n` gettoni: il `run_after` di chi resta senza budget.
+    Di default un acquisto intero."""
+    return now + timedelta(seconds=seconds_until(b, cls, n, now, rules))
+
+
+def describe(b: QuotaBucket, now: datetime, rules: BucketRules) -> dict:
+    """Vista per `/health`, per l'attesa stimata e per i test, senza modificare lo stato."""
+    b = refill(b, now, rules)
+    rate = rules.rate(b.limit_per_minute)
+    return {"limit_per_minute": b.limit_per_minute,
+            "effective_limit": effective_limit(b.limit_per_minute, rules.margin),
+            "burst": rules.burst, "rate_per_minute": round(rate * 60, 3),
+            "purchase_floor": rules.floor, "tokens": round(b.tokens, 3),
+            "purchases_per_minute": purchases_per_minute(rate, rules.reserve),
+            "needs_refresh": b.needs_refresh,
+            "hofj_window_start": b.window_start, "hofj_window_end": b.window_end}

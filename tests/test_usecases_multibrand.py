@@ -7,9 +7,8 @@ MB7 è di M17 ed è testata lì.
 import os
 import unittest
 from datetime import date
-from decimal import Decimal
 
-from support import NOW, TODAY, FakeHofJ, StubPayments, make_product
+from support import NOW, TODAY, FakeHofJ, StubPayments, drain_to_link, make_product
 from test_usecases import Clock
 from vela.adapters.hofj_router import BrandRouter
 from vela.adapters.repo_memory import MemoryRepositories
@@ -21,6 +20,7 @@ from vela.domain.models import (Criteria, IntentCreated, NoMatch, OrderStatus, P
 from vela.domain.usecases import Vela
 
 BRANDS = {"padel": "weebora.com", "tennis": "terrarossa.com"}
+OTHER = StructuredFields(reject_kind="other")   # M21-F: "Un altro" non dice cosa non va (RF-75)
 TRAVELER = TravelerProfile("Anna", "Rossi", "anna@x.it", "+390000", participants=(Participant("Bo", "Bi"),))
 MAY = (("2027-05-14", "2027-05-17"),)
 JUNE = (("2027-06-11", "2027-06-14"),)
@@ -64,8 +64,9 @@ class MultiBrand:
         return self.vela.get_proposal(created.intent_id)
 
     def buy(self, proposal):
+        """Accettazione, prezzo effettivo, conferma e link."""
         order_id = self.vela.accept_proposal(proposal.proposal.id).order_id
-        self.worker.drain()
+        drain_to_link(self.vela, self.worker, proposal.proposal.id)
         return self.vela.get_order_status(order_id)
 
     def product(self, proposal):
@@ -84,7 +85,7 @@ class MB1TennisTest(unittest.TestCase):
         self.assertEqual((mb.product(proposal).id, mb.product(proposal).brand), ("11", "terrarossa.com"))
         self.assertEqual(mb.buy(proposal).status, OrderStatus.AWAITING_PAYMENT)
         self.assertEqual(mb.cart_calls("terrarossa.com"),
-                         ["create_itinerary", "set_customer", "get_pax", "set_pax", "get_itinerary"])
+                         ["create_itinerary", "get_itinerary"])   # M19
         self.assertEqual(mb.cart_calls("weebora.com"), [])
 
 
@@ -144,7 +145,7 @@ class MB5AnySportTest(unittest.TestCase):
         brands = []
         while isinstance(result, ProposalMade):
             brands.append(mb.product(result).brand)
-            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro", OTHER)
         self.assertEqual(sorted(brands), ["terrarossa.com", "weebora.com"])
 
     def test_the_brand_of_the_chosen_product_decides_the_cart(self):
@@ -191,7 +192,7 @@ class MB9SpectatorPackagesTest(unittest.TestCase):
             product = mb.product(result)
             seen.append(product.id)
             self.assertEqual((product.sport, product.brand), ("tennis", "terrarossa.com"))
-            result = mb.vela.reject_proposal(result.proposal.id, "Un altro")
+            result = mb.vela.reject_proposal(result.proposal.id, "Un altro", OTHER)
         self.assertTrue(seen)                        # si propone un viaggio da giocare
         self.assertFalse(events & set(seen))
         self.assertIsInstance(result, NoMatch)

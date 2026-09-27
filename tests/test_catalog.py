@@ -53,6 +53,41 @@ class ProductFromEntryTest(unittest.TestCase):
         self.assertEqual(p.raw, {"k": 1})
         self.assertTrue(p.bookable)
         self.assertFalse(p.archived)
+        self.assertEqual((p.featured, p.special_offer), (False, False))   # assenti nell'entry
+
+    def test_featured_and_special_offer_are_read_from_the_entry(self):
+        """M21-B (RF-60): `featured` e `isSpecialOffer` dell'API, falsi se assenti o nulli."""
+        p = product_from_entry(dict(ENTRY, featured=True, isSpecialOffer=True), archived=False,
+                               raw={}, fetched_at=NOW)
+        self.assertEqual((p.featured, p.special_offer), (True, True))
+        p = product_from_entry(dict(ENTRY, featured=None, isSpecialOffer=False), archived=False,
+                               raw={}, fetched_at=NOW)
+        self.assertEqual((p.featured, p.special_offer), (False, False))
+
+    def test_max_pax_per_room_is_read_from_the_entry(self):
+        """M21-D (RF-66): `maxPaxPerRoom` dell'API; assente, nullo o zero = nessun limite."""
+        p = product_from_entry(dict(ENTRY, maxPaxPerRoom=2), archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual(p.max_pax_per_room, 2)
+        for value in (None, 0, "2", True):
+            with self.subTest(value=value):
+                p = product_from_entry(dict(ENTRY, maxPaxPerRoom=value), archived=False, raw={},
+                                       fetched_at=NOW)
+                self.assertIsNone(p.max_pax_per_room)
+        self.assertIsNone(product_from_entry(ENTRY, archived=False, raw={}, fetched_at=NOW).max_pax_per_room)
+
+    def test_level_labels_are_read_from_the_entry(self):
+        """M21-C (RF-63): le etichette calcolate dalla proiezione; assenti (item di lista di un
+        archiviato) = livello sconosciuto, nessuna esclusività, nessuna lezione."""
+        p = product_from_entry(dict(ENTRY, vela_levels=["intermediate", "advanced"],
+                                    vela_levels_exclusive=False, vela_coaching=True),
+                               archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching),
+                         (frozenset({"intermediate", "advanced"}), False, True))
+        p = product_from_entry(ENTRY, archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching), (frozenset(), False, False))
+        p = product_from_entry(dict(ENTRY, vela_levels=["expert", "all", 3], vela_levels_exclusive=None),
+                               archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive), (frozenset({"all"}), False))   # solo valori noti
 
     def test_missing_destination_venue_hotel(self):
         entry = dict(ENTRY, destination=None, venue=None, hotels={"data": []}, minPax=2, maxPax=0)
@@ -83,6 +118,17 @@ class LoadFixtureTest(unittest.TestCase):
         self.assertTrue(all(p.fetched_at == NOW for p in products))
         by_id = {p.id: p for p in products}
         self.assertEqual(by_id["181"].hotel, "THB Lanzarote Beach")
+
+    def test_featured_flags_come_from_the_fixture(self):
+        """M21-B: 11 prodotti attivi `featured` e nessuna offerta speciale (contati il 2026-09-27),
+        letti dalla proiezione `catalog` dei dettagli e dagli item di lista per gli archiviati."""
+        products = load_fixture(FIXTURE, fetched_at=NOW)
+        by_id = {p.id: p for p in products}
+        self.assertTrue(by_id["181"].featured)
+        self.assertFalse(by_id["1023"].featured)
+        self.assertEqual(sum(1 for p in products if p.featured and not p.archived), 11)
+        self.assertEqual(sum(1 for p in products if p.featured), 18)   # anche gli archiviati
+        self.assertFalse(any(p.special_offer for p in products))
 
 
 class IsTripTest(unittest.TestCase):

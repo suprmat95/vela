@@ -1,13 +1,15 @@
-"""Superficie REST (RF-40, RF-43): i cinque casi d'uso di RF-39 sotto ``/v1``.
+"""Superficie REST (RF-40, RF-43): i casi d'uso di RF-39 e RF-83 sotto ``/v1``.
 
 Bearer statico ``VELA_API_TOKEN``; senza token configurato ogni endpoint risponde 503. Ogni
 risposta di successo è ``{"outcome": ..., **to_dict()}``: gli esiti previsti (domanda, niente di
-compatibile, dati mancanti) sono 200, non errori. L'accettazione è asincrona (RF-45): 202
+compatibile, dati mancanti, camere sotto il minimo, motivo di rifiuto da chiarire) sono 200, non
+errori. L'accettazione è asincrona (RF-45): 202
 ``order_queued`` con ``Location`` verso lo stato dell'ordine; un doppio accept risponde 200 con lo
 stato attuale. Gli errori sono RFC 7807
 (``vela/surfaces/problems.py``). Ordine dei controlli: token, validazione, dominio.
 """
 import hmac
+from dataclasses import replace
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -16,16 +18,17 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, StringConstraints
 
 from vela.domain.models import (IntentCreated, IntentQuestion, MissingTravelerData, NoMatch,
-                                OrderQueued, OrderStatusResponse, ProposalMade, StructuredFields,
-                                TravelerProfile, profile_from_dict)
+                                OrderQueued, OrderStatusResponse, ProposalDetails, ProposalMade,
+                                StructuredFields, TravelerProfile, profile_from_dict)
 from vela.domain.usecases import Vela
 from vela.surfaces.problems import domain_unavailable, rest_not_configured, unauthorized
 
 bearer = HTTPBearer(auto_error=False)
 
 OUTCOMES = {IntentCreated: "intent_created", IntentQuestion: "question",
-            ProposalMade: "proposal", NoMatch: "no_match", OrderQueued: "order_queued",
-            MissingTravelerData: "missing_traveler_data", OrderStatusResponse: "order_status"}
+            ProposalMade: "proposal", ProposalDetails: "proposal_details", NoMatch: "no_match",
+            OrderQueued: "order_queued", MissingTravelerData: "missing_traveler_data",
+            OrderStatusResponse: "order_status"}
 
 
 def require_token(request: Request,
@@ -81,10 +84,18 @@ class FieldsIn(BaseModel):
     period_end: Optional[str] = None
     pax: Optional[int] = None
     budget: Optional[float] = None
+    duration_min_nights: Optional[int] = None
+    duration_max_nights: Optional[int] = None
+    budget_scope: Optional[str] = None
+    rooms: Optional[int] = None
+    level: Optional[str] = None             # M21-C (RF-62): beginner | intermediate | advanced
+    wants_coaching: Optional[bool] = None   # M21-C (RF-62)
 
     def fields(self, direction: Optional[str] = None) -> StructuredFields:
         return StructuredFields(self.sport, self.area, self.period_start, self.period_end,
-                                self.pax, self.budget, direction)
+                                self.pax, self.budget, direction, self.duration_min_nights,
+                                self.duration_max_nights, self.budget_scope, self.rooms,
+                                self.level, self.wants_coaching)
 
 
 class IntentIn(FieldsIn):
@@ -95,10 +106,17 @@ class IntentIn(FieldsIn):
 class RejectIn(FieldsIn):
     reason: Optional[str] = None
     direction: Optional[str] = None
+    reject_kind: Optional[str] = None     # M21-F (RF-71): price | place | hotel | dates | … | other
+    keep_product: Optional[bool] = None   # M21-F (RF-74): stesso viaggio, altre date
+
+    def reject_fields(self) -> StructuredFields:
+        return replace(self.fields(self.direction), reject_kind=self.reject_kind,
+                       keep_product=self.keep_product)
 
 
 class AcceptIn(BaseModel):
     traveler: Optional[ProfileIn] = None
+    rooms: Optional[int] = None   # M21-D (RF-65): correzione facoltativa delle camere
 
 
 router = APIRouter(prefix="/v1", tags=["v1"], dependencies=[Depends(require_token)])
@@ -114,11 +132,16 @@ def get_proposal(intent_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse
     return reply(vela.get_proposal(intent_id))
 
 
+@router.get("/proposals/{proposal_id}/details")
+def get_proposal_details(proposal_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse:
+    return reply(vela.get_proposal_details(proposal_id))
+
+
 @router.post("/proposals/{proposal_id}/reject")
 def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
                     vela: Vela = Depends(get_vela)) -> JSONResponse:
     reason = body.reason if body is not None else None
-    fields = body.fields(body.direction) if body is not None else None
+    fields = body.reject_fields() if body is not None else None
     return reply(vela.reject_proposal(proposal_id, reason or "", fields))
 
 
@@ -126,7 +149,8 @@ def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
 def accept_proposal(proposal_id: str, body: Optional[AcceptIn] = None,
                     vela: Vela = Depends(get_vela)) -> JSONResponse:
     traveler = to_profile(body.traveler) if body is not None else None
-    return reply(vela.accept_proposal(proposal_id, traveler))
+    rooms = body.rooms if body is not None else None
+    return reply(vela.accept_proposal(proposal_id, traveler, rooms))
 
 
 @router.get("/orders/{order_id}")

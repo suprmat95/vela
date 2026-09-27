@@ -1,6 +1,6 @@
 # Superficie REST
 
-La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni endpoint richiede
+La superficie REST (RF-40) espone i casi d'uso di RF-39 e RF-83 sotto `/v1`. Ogni endpoint richiede
 `Authorization: Bearer <VELA_API_TOKEN>` (RF-43); senza la variabile impostata sul server ogni
 `/v1/*` risponde 503. Codice: `vela/surfaces/rest.py`, errori in `vela/surfaces/problems.py`.
 `GET /health`, `/docs` e `/openapi.json` sono pubblici.
@@ -11,8 +11,9 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 |---|---|---|
 | `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
-| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
-| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile}` | 202 `order_queued` (con `Location`), 200 `order_status` a un secondo accept, 200 `missing_traveler_data` |
+| `GET /v1/proposals/{proposal_id}/details` | — | 200 `proposal_details` (RF-83) |
+| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str, "reject_kind"?: str, "keep_product"?: bool}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`), 200 `question` (M21-F: con `proposal_id`, nessun rifiuto registrato) |
+| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile, "rooms"?: int}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data`, 200 `question` (M21-D: `rooms` sotto il minimo del prodotto, nessun ordine) |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
 
 `Profile` = `{"first_name"?, "last_name"?, "email"?, "phone"?, "pax"? (≥ 1), "participants"?: [{"first_name"?, "last_name"?}]}`.
@@ -20,7 +21,10 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 
 ### Campi strutturati (M17, RF-52..55)
 
-`Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?}`, gli stessi
+`Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?,
+"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?, "rooms"?, "level"?,
+"wants_coaching"?}` (la durata da M21-A, la lettura del budget da M21-E, le camere da M21-D,
+livello e lezioni da M21-C), gli stessi
 nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
 già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
 viaggiatore. Un client che manda solo testo funziona come prima.
@@ -31,8 +35,15 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `area` | nome di un luogo (paese, regione, città) | sconosciuto a `geo` |
 | `period_start`, `period_end` | date `YYYY-MM-DD`, servono entrambe | una sola, non ISO, inizio dopo la fine, fine passata |
 | `pax` | intero | fuori da 1..20 |
-| `budget` | numero, totale massimo in euro per il gruppo | non positivo |
+| `budget` | numero, budget massimo in euro: la cifra così come l'ha detta il viaggiatore, mai moltiplicata o divisa per il numero di persone | non positivo |
+| `budget_scope` | `per_person` (il viaggiatore ha detto "a testa", "each"), `total` ("in tutto", "in total"). Solo se il viaggiatore l'ha detto in modo esplicito | altro valore |
+| `duration_min_nights`, `duration_max_nights` | interi, notti del viaggio (M21-A, RF-58): weekend 1..3, ponte o weekend lungo 2..4, una settimana 6..8, N giorni = N−1 notti. Basta uno dei due; uno solo sostituisce tutta la durata letta nel testo | fuori da 1..30, minimo maggiore del massimo, non interi |
+| `rooms` | intero, camere dell'hotel (M21-D, RF-65): da 1 al numero di persone. Su `accept` è una correzione dell'ultimo momento | fuori da 1..pax (le persone dopo la precedenza campo > testo > profilo), non intero |
+| `level` | `beginner` ("principianti", "mai giocato", "beginners"), `intermediate`, `advanced` ("agonisti", "esperti", "competitive") (M21-C, RF-62) | altro valore |
+| `wants_coaching` | booleano: `true` se il viaggiatore vuole lezioni, un maestro o un coach; `false` se ha detto niente lezioni (M21-C, RF-62) | tipo JSON non booleano: 422 |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
+| `reject_kind` (solo rifiuto) | tipo del rifiuto (M21-F, RF-71): `price`, `place`, `hotel`, `dates`, `duration`, `sport`, `pax`, `level`, `direction`, `other` (solo se il viaggiatore non sa dire cosa non va) | fuori elenco |
+| `keep_product` (solo rifiuto) | booleano (M21-F, RF-74): `true` se il viaggio piace e cambiano solo le date; `false` per cercare un altro viaggio dopo "nessuna altra partenza" | tipo JSON non booleano: 422 |
 
 - **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
   creazione). Se testo e campo non coincidono vince il campo e il conflitto va nei log (logger
@@ -40,14 +51,91 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   `/v1/intents` `pax` al primo livello vince su `profile.pax`, che resta il default.
 - **Campo invalido**: scartato senza bloccare la richiesta e dichiarato all'inizio del `say`
   (nessun 422). Un tipo JSON sbagliato (es. `"pax": "tre"`) resta un 422.
+- **Durata** (RF-58, RF-59): criterio morbido, non esclude mai. Ordina subito dopo il budget;
+  se il viaggio proposto non la rispetta, motivazione e `say` lo dicono con la durata vera
+  ("Non ho weekend compatibili: questo dura 5 notti, dal 9 al 14 ottobre."). Nel rifiuto
+  "troppo lungo"/"too long" chiede al massimo una notte in meno della proposta, "troppo
+  corto"/"too short" almeno una in più. "Un weekend" è solo durata; "questo/prossimo weekend"
+  è anche un periodo.
+- **Budget a testa o totale** (RF-69, RF-70, M21-E): la lettura segue quest'ordine: campo
+  `budget_scope`; nel testo "a testa", "a persona", "each", "per person" → a persona; "in
+  tutto", "totale", "in total", "altogether" → totale; con più persone e nessuna lettura detta,
+  a persona se la cifra come totale non copre il viaggio compatibile più economico (filtri duri,
+  senza budget) e a persona sì, altrimenti totale; con una persona totale. Nei criteri `budget` è
+  il tetto sul totale (600 a testa in 3 → `"1800.00"`) e `budget_scope` la lettura; il `say` la
+  dichiara sempre ("con un budget di 600 euro a persona, 1800 in tutto"). Nel rifiuto una cifra
+  nuova segue le stesse regole; `budget_scope` da solo, o un numero di persone cambiato con la
+  lettura a persona, rilegge la cifra già detta; "troppo caro" abbassa il tetto e lo legge in
+  totale. `budget_scope` senza nessun budget non ha effetto.
+- **Ordinamento** (RF-60, RF-61, M21-B): dopo i filtri duri la proposta è il primo prodotto per
+  area, totale entro budget, durata compatibile, partenza più vicina all'inizio del periodo (o a
+  oggi senza periodo), `featured` o offerta speciale di HofJ, prezzo crescente, id numerico;
+  da M21-C livello e lezioni compatibili vengono subito dopo la durata. Senza budget il prezzo non decide prima della partenza: un viaggio
+  che parte il 2 novembre batte uno che parte il 25 anche se costa di più. Prodotti equivalenti
+  (stesso hotel, stesso titolo, stessa destinazione, prezzo entro il 5%) contano come uno: resta
+  quello con l'id più basso. La `reason` della `proposal` dice il livello che ha deciso ("la
+  prima partenza nel periodo che hai chiesto", "è tra i viaggi in evidenza del catalogo") e "la
+  più economica" solo quando è vero. Nessun campo nuovo.
 - **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
-  è `question` "Padel o tennis?" e nessun intento viene salvato.
+  è `question` "Padel o tennis?" e nessun intento viene salvato. Le domande, una alla volta, in
+  quest'ordine: sport, persone, camere.
+- **Persone e camere** (RF-65..68, M21-D): con più di 2 persone e nessuna camera nel campo
+  `rooms` né nel testo ("tre camere", "two rooms", "due coppie", "una matrimoniale e una
+  doppia") la risposta è `question` "In quante camere?" / "How many rooms?" e nulla viene
+  salvato; con 1 o 2 persone la camera è una, senza domanda e senza dirlo nel `say`. Un prodotto
+  con `maxPaxPerRoom` vuole almeno ceil(persone / massimo) camere: con meno è escluso (filtro
+  duro dopo le persone), e se non resta nulla `no_match` ha `failed_criterion` `rooms` con il
+  minimo nel `say` ("camere da massimo 2 persone: per 5 persone servono almeno 3 camere"). La
+  `reason` della proposta dice il limite quando obbliga a più di una camera. Con una persona sola
+  e soli viaggi da 2 in su, `failed_criterion` è `pax` e il `say` lo spiega. Nel rifiuto le
+  camere si cambiano da testo o campo, sempre entro le persone; se le persone cambiano e superano
+  2 senza camere dette la risposta è `question` "In quante camere?" con `proposal_id` e nessun
+  rifiuto (M21-F); per un intento salvato prima di M21-D le camere restano non dette. Su
+  `accept` il campo `rooms` corregge le camere: sotto il minimo del prodotto la risposta è
+  `question` con `proposal_id` e nessun ordine nasce; valido, aggiorna ordine e criteri dell'intento; ignorato
+  sulla conferma del prezzo. Il job d'acquisto manda le camere dell'ordine a HofJ (RF-67).
+- **Livello e lezioni** (RF-62..64, M21-C): dal campo o dal testo ("siamo principianti,
+  vorremmo lezioni", "advanced players, no coaching needed"); con più livelli nel testo vale il
+  più basso, una frase negata ("niente corsi per principianti") non conta. Il sync etichetta ogni
+  prodotto dalle descrizioni: livelli (`beginner`, `intermediate`, `advanced`, `all`), riserva
+  esplicita ("solo per avanzati", "advanced players only") e lezioni. Criteri morbidi: dopo la
+  durata vince un prodotto con il livello compatibile (livello sconosciuto, "tutti i livelli" o il
+  livello chiesto), poi, con `wants_coaching` `true`, uno con le lezioni; `false` non penalizza
+  nessuno. Unico filtro duro: un prodotto riservato esplicitamente ad altri livelli è escluso, e se
+  non resta nulla `no_match` ha `failed_criterion` `level` ("I viaggi compatibili sono riservati a
+  giocatori avanzati. Vuoi cambiare qualcosa?"). La `reason` della proposta dice se livello e
+  lezioni chiesti sono rispettati ("Il programma è pensato anche per principianti e include
+  lezioni o allenamenti." oppure "Non ho trovato viaggi per principianti con lezioni: questo è
+  pensato per giocatori intermedi e avanzati…"). Nel rifiuto "troppo difficile"/"too hard"
+  abbassa il livello di uno, "troppo facile"/"too easy" lo alza (dal livello dell'intento o, se
+  non detto, dai livelli del viaggio rifiutato); `level` e `wants_coaching` si cambiano anche
+  come campi. I criteri di `intent_created` hanno `level` e `wants_coaching` (`null` se non detti).
+- **Tipo del rifiuto** (RF-71..75, M21-F): ogni rifiuto ha un tipo, dal campo `reject_kind`,
+  altrimenti dal motivo (regole it/en), altrimenti dai campi; con più tipi ("troppo caro e troppo
+  lontano") cambiano tutti i criteri e si registra il primo nell'ordine della tabella. Effetti:
+  `hotel` esclude tutti i viaggi con lo stesso hotel (senza hotel: lo stesso viaggio, anche a
+  un altro prezzo), `failed_criterion` `hotel` se non resta nulla; `place` con un luogo negato
+  ("Estepona no, ma la Spagna va bene", "not Estepona", "anywhere but Estepona") lo aggiunge a
+  `excluded_areas` nei criteri e tiene l'area, senza luogo esclude quello del viaggio rifiutato,
+  con `area` cambia luogo come prima; `failed_criterion` `place` se non resta nulla; `dates` con
+  `keep_product` (campo, o "mi piace ma", "stesso viaggio", "when else", "same trip") propone lo
+  stesso viaggio con la prima partenza diversa, e senza altre partenze `no_match` `dates` con
+  `rejected_proposal_id` ("Questo viaggio non ha altre partenze… Vuoi che cerchi un altro
+  viaggio?"): un nuovo `reject` su quella proposta con `keep_product` `false` aggiorna lo stesso
+  rifiuto e cerca un altro viaggio. Un motivo senza tipo e senza `reject_kind` (anche un corpo
+  vuoto) è `question` "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?" con
+  `proposal_id`: nessun rifiuto, criteri invariati, un ordine in coda resta in coda. Si richiama
+  `reject` sulla stessa proposta con la risposta e il tipo; `reject_kind` `other` esclude solo
+  quel viaggio, come prima di M21-F. "Troppo caro" è `price`: il tetto di prezzo resta.
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
-  capiti ("Ho capito: …"); un motivo di rifiuto che non cambia nessun criterio viene dichiarato.
+  capiti ("Ho capito: …", da M21-F con i luoghi esclusi: "…in Spagna, esclusi i viaggi a
+  Estepona, …"); con `reject_kind` `other` un motivo che non cambia nessun criterio viene
+  dichiarato; un rifiuto `hotel` dice quale hotel è escluso.
 - **Dopo una proposta** (RF-55) ogni cambiamento passa da `reject`, mai da un nuovo
   `POST /v1/intents`. Un `no_match` restituito da `reject` porta `rejected_proposal_id`: un
   nuovo `reject` su quella proposta con i campi cambiati aggiorna i criteri e propone di nuovo,
-  senza registrare un secondo rifiuto.
+  senza registrare un secondo rifiuto (da M21-F ne aggiorna tipo e `keep_product`; un motivo
+  senza tipo lì non produce la domanda, la proposta è già rifiutata).
 
 ## Risposte
 
@@ -57,11 +145,12 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 
 | `outcome` | HTTP | Significato |
 |---|---|---|
-| `intent_created` | 201 | intento salvato con i criteri estratti |
-| `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
-| `proposal` | 200 | una proposta |
-| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
-| `order_queued` | 202 | ordine in coda (M5, RF-45): `order_id`, `status` `queued`, `position`, `wait_seconds`. Nessun link: arriva con lo stato. Header `Location: /v1/orders/{order_id}` |
+| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`; da M21-C `level` e `wants_coaching`; da M21-F `excluded_areas`, lista di aree `{kind, name, country_code}`, vuota alla creazione) |
+| `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto, oppure (M21-F, su `reject`) il motivo va chiarito o servono le camere: leggere `say`, nulla è stato salvato. Su `accept` e `reject` porta `proposal_id`: la proposta resta aperta |
+| `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A); `rooms` = camere dell'intento (M21-D) |
+| `proposal_details` | 200 | dettagli del prodotto proposto (RF-83): `proposal_id`, `product`, `description`, `why_this_trip`, `program` (`{description, sections: [{title, days: [{title, description, events: [{time, text}]}]}]}` o `null`), `hotel` (`{name, stars, description, address}` o `null`), `venue` (`{name, description}` o `null`), `playing_hours`, `style`, `goal`, `best_for_level`, `accepts_companions`. Testi nella lingua del catalogo; nessun cambio di stato |
+| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché (da M21-D anche `rooms`, da M21-C `level`, da M21-F `place` e `hotel`); `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
+| `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
 | `order_status` | 200 | stato dell'ordine con campi fissi, `null` quando non pertinenti (tabella sotto) |
 
@@ -72,13 +161,14 @@ Campi di `order_status` (RF-25, RF-39): `order_id`, `status`, `position`, `wait_
 | `status` | Campi valorizzati |
 |---|---|
 | `queued` | `position` e `wait_seconds` (ricalcolati a ogni richiesta, RF-48); `null` se il job è già in lavorazione |
+| `awaiting_confirmation` | `total` (prezzo effettivo, `openAmount` di HofJ), `currency`, `price_from_total`, `total_differs` (RF-16); `payment_url` `null`. Un nuovo `POST .../accept` sulla stessa proposta conferma il prezzo, `POST .../reject` annulla l'ordine |
 | `awaiting_payment` | `total` (importo reale, `openAmount` di HofJ), `currency`, `price_from_total`, `total_differs` (RF-16), `payment_url` |
 | `paid_pending_booking` | `total`, `currency` |
 | `confirmed` | `total`, `currency`, `booking_code` |
 | `replaced` | `proposal_changed: true`, `proposal` = la nuova proposta (stessa forma di `proposal`, RF-17) |
 | `cancelled` | — (rinuncia, RF-49) |
 | `failed`, `booking_failed` | `failure_reason` leggibile |
-| `expired` | `total`, `currency` |
+| `expired` | `total`, `currency` se è scaduto il link (RF-21); nessun campo se l'ordine è stato chiuso in coda dopo 15 minuti senza segni di vita e senza SMS annunciato (M19, RF-45): lo dice il `say`. Accettazione, conferma e `GET /v1/orders/{id}` contano come segni di vita |
 
 ## Errori (RFC 7807)
 
@@ -103,11 +193,12 @@ Lo script esegue il flusso e cronometra ogni passo (latenza per M13). Il token s
 `VELA_API_TOKEN` e non viene stampato.
 
 ```bash
-# criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, link,
-# pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
+# criterio 3: intento, "troppo caro" (la seconda proposta deve costare meno), accept, prezzo
+# effettivo, secondo accept (la conferma), link, pagamento a mano con 4242 4242 4242 4242, confirmed con il codice
 uv run python scripts/rest_flow.py https://vela-n506.onrender.com
-# criterio 4: la prima proposta di INTENT_TRAP è la trappola della fixture di staging; dopo
-# l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
+# criterio 4: con una fixture di prova che contiene la trappola e il 78 archiviato
+# (`add_trap(catalog, "78", archive_template=True)`, M21-B) la prima proposta di INTENT_TRAP è la
+# trappola; dopo l'accept l'ordine diventa replaced con una proposta diversa, senza errori nel `say`
 uv run python scripts/rest_flow.py https://vela-n506.onrender.com --trap
 ```
 
@@ -141,13 +232,13 @@ P2=$(curl -s -X POST "$VELA_URL/v1/proposals/$(echo "$P1" | jq -r .proposal_id)/
   -H 'content-type: application/json' -d '{"reason":"troppo caro"}')
 echo "$P2" | jq '{outcome, proposal_id, product, total_from, say}'
 
-ORDER=$(curl -s -X POST "$VELA_URL/v1/proposals/$(echo "$P2" | jq -r .proposal_id)/accept" -H "$H")
-echo "$ORDER" | jq '{outcome, order_id, position, wait_seconds, say}'   # 202 order_queued
+ACCEPT="$VELA_URL/v1/proposals/$(echo "$P2" | jq -r .proposal_id)/accept"
+ORDER=$(curl -s -X POST "$ACCEPT" -H "$H")               # aspetta il prezzo effettivo (max 100 s)
+echo "$ORDER" | jq '{outcome, status, total, price_from_total, say}'   # awaiting_confirmation
 OID=$(echo "$ORDER" | jq -r .order_id)
 
-sleep "$(echo "$ORDER" | jq -r .wait_seconds)"
-STATUS=$(curl -s "$VELA_URL/v1/orders/$OID" -H "$H")     # atteso: awaiting_payment con payment_url
-echo "$STATUS" | jq '{status, total, total_differs, payment_url, say}'
+STATUS=$(curl -s -X POST "$ACCEPT" -H "$H")              # la conferma: aspetta il link
+echo "$STATUS" | jq '{status, total, total_differs, payment_url, say}'  # awaiting_payment
 
 curl -s "$(echo "$STATUS" | jq -r .payment_url)" | jq     # replay: simula il pagamento
 # con STRIPE_SECRET_KEY: aprire payment_url nel browser e pagare con 4242 4242 4242 4242 (docs/stripe.md)

@@ -15,6 +15,9 @@ ALL_VARS = {
     "VELA_UPSTREAM_MODE": "live",
     "ANTHROPIC_API_KEY": "ak",
     "VELA_PUBLIC_URL": "https://vela.example.test",
+    "TWILIO_ACCOUNT_SID": "AC1",
+    "TWILIO_AUTH_TOKEN": "tt",
+    "TWILIO_FROM": "+15550001111",
 }
 
 
@@ -31,6 +34,9 @@ class SettingsFromEnvTest(unittest.TestCase):
         self.assertIsNone(s.vela_api_token)
         self.assertIsNone(s.anthropic_api_key)
         self.assertIsNone(s.vela_public_url)
+        self.assertIsNone(s.twilio_account_sid)
+        self.assertIsNone(s.twilio_auth_token)
+        self.assertIsNone(s.twilio_from)
         self.assertEqual(s.vela_upstream_mode, "replay")
 
     def test_all_variables_are_read(self):
@@ -44,6 +50,8 @@ class SettingsFromEnvTest(unittest.TestCase):
         self.assertEqual(s.vela_upstream_mode, "live")
         self.assertEqual(s.anthropic_api_key, "ak")
         self.assertEqual(s.vela_public_url, "https://vela.example.test")
+        self.assertEqual((s.twilio_account_sid, s.twilio_auth_token, s.twilio_from),
+                         ("AC1", "tt", "+15550001111"))
 
     def test_database_url_is_normalized(self):
         s = Settings.from_env(ALL_VARS)
@@ -64,21 +72,25 @@ class SettingsDefaultsTest(unittest.TestCase):
 
     def test_m5_defaults(self):
         s = Settings.from_env({})
-        self.assertEqual(s.worker_concurrency, 4)
+        self.assertEqual(s.worker_concurrency, 10)          # M18
         self.assertEqual(s.quota_margin, 0.10)
-        self.assertEqual(s.booking_reserve, 0.20)
+        self.assertEqual(s.expected_pay_share, 0.05)          # M19
+        self.assertEqual(s.silent_order_minutes, 15)          # M19
+        self.assertAlmostEqual(s.booking_reserve, 0.15 / 2.15)   # M19: 3p / (2 + 3p)
         self.assertEqual(s.purchase_max_attempts, 3)
         self.assertEqual(s.booking_max_attempts, 5)
         self.assertEqual(s.booking_backoff, (5, 10, 20, 40))
-        self.assertEqual(s.job_lease_seconds, 120)
+        self.assertEqual(s.job_lease_seconds, 180)          # M18: 3 × 20 s (booking, M19) più margine
+        self.assertEqual((s.quota_burst, s.quota_floor), (8, 3))   # M19: soglia = un booking
         self.assertEqual(s.payment_poll_seconds, 60)
+        self.assertEqual((s.accept_wait_seconds, s.accept_poll_seconds), (100, 1.0))   # 2026-09-26
         self.assertEqual(s.replay_latency, (0.0, 0.0))
         self.assertIsNone(s.replay_limit)
 
     def test_m5_parameters_are_not_read_from_environment(self):
         s = Settings.from_env({"VELA_WORKER_CONCURRENCY": "9", "WORKER_CONCURRENCY": "9",
                                "VELA_REPLAY_LIMIT": "120"})
-        self.assertEqual(s.worker_concurrency, 4)
+        self.assertEqual(s.worker_concurrency, 10)
         self.assertIsNone(s.replay_limit)
 
     def test_m5_parameters_can_be_set_in_code(self):

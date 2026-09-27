@@ -1,10 +1,13 @@
 """Parser deterministico degli intenti, italiano e inglese (RF-02, RF-04), con fallback LLM
 opzionale (RF-03).
 
-Estrae sport, area (dizionario `geo`), periodo, numero di persone, budget e lingua. I campi
-strutturati passati dall'agente (RF-52) vincono sul parser, che vince sul fallback (RF-53). Se
-manca lo sport, oppure il numero di persone (e il profilo non lo dà), produce una sola domanda
-per l'agente, prima lo sport (RF-04). `today` è iniettato per rendere i periodi deterministici.
+Estrae sport, area (dizionario `geo`), periodo, durata in notti (M21, RF-58), numero di
+persone, numero di camere (M21-D, RF-65), budget con la sua lettura a persona o totale (M21-E,
+RF-69), livello di gioco e desiderio di lezioni (M21-C, RF-62) e lingua. I campi strutturati passati dall'agente (RF-52) vincono sul parser, che vince
+sul fallback (RF-53). Se manca lo sport, oppure il numero di persone (e il profilo non lo dà),
+oppure le camere con più di `ROOMS_DEFAULT_MAX_PAX` persone, produce una sola domanda per
+l'agente, in quest'ordine (RF-04); con 1 o 2 persone la camera è una. `today` è iniettato per
+rendere i periodi deterministici.
 """
 import calendar
 import logging
@@ -12,9 +15,10 @@ import re
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from vela.domain import geo
+from vela.domain.labels import LEVELS
 from vela.domain.models import Criteria, Period, StructuredFields, TravelerProfile
 from vela.ports.llm import IntentExtractor
 
@@ -22,10 +26,17 @@ log = logging.getLogger(__name__)
 
 QUESTION_SPORT = "Padel o tennis?"
 QUESTION_PAX = "In quante persone siete?"
+QUESTION_ROOMS = "In quante camere?"
 QUESTION_SPORT_EN = "Padel or tennis?"
 QUESTION_PAX_EN = "How many people are travelling?"
-_QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX),
-              "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN)}
+QUESTION_ROOMS_EN = "How many rooms?"
+_QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX, QUESTION_ROOMS),
+              "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN, QUESTION_ROOMS_EN)}
+ROOMS_DEFAULT_MAX_PAX = 2   # RF-65: fino a 2 persone una camera senza chiedere
+
+
+def question_rooms(lang: str) -> str:
+    return _QUESTIONS.get(lang, _QUESTIONS["it"])[2]
 
 MONTHS = {
     "gennaio": 1, "january": 1, "febbraio": 2, "february": 2, "marzo": 3, "march": 3,
@@ -52,7 +63,9 @@ NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 MAX_PAX = 20
+MAX_NIGHTS = 30
 SPORTS = ("padel", "tennis", "any")
+BUDGET_SCOPES = ("per_person", "total")
 LLM_PERIOD_LABEL = "llm"
 FIELD_PERIOD_LABEL = "agent"
 
@@ -68,6 +81,11 @@ EN_MARKERS = {"the", "of", "for", "we", "are", "with", "max", "want", "would", "
               "each", "just", "early", "late", "mid", "family", "group", "alone", "players",
               "adults", "wife", "husband", "friends", "below"}
 
+# "per 4 notti", "in 5 giorni": una durata (M21-A); "in 2 camere": camere (M21-D), non persone
+_ROOM_WORDS = r"(?:camere|camera|stanze|stanza|rooms?|bedrooms?)"
+_NOT_PEOPLE_AFTER = (r"(?!\s*(?:notti|notte|nights?|giorni|giorno|days?|settimane|weeks?|%s)\b)"
+                     % _ROOM_WORDS)
+
 # (pattern, moltiplicatore): il numero catturato × moltiplicatore; i numeri espliciti vincono
 _PAX_PATTERNS = [
     (re.compile(r"\b(\w+)\s+(?:coppie|couples)\b"), 2),
@@ -77,9 +95,12 @@ _PAX_PATTERNS = [
     (re.compile(r"\b(\w+)\s+(?:persone|adulti|giocatori|amici|people|adults|players|friends|pax)\b"), 1),
     (re.compile(r"\b(\w+)\s+of us\b"), 1),
     (re.compile(r"\b(?:famiglia|gruppo|family|group)\s+(?:di|of)\s+(\w+)"), 1),
-    (re.compile(r"\b(?:per|for)\s+(\w+)\b"), 1),
+    (re.compile(r"\b(?:per|for)\s+(\w+)\b" + _NOT_PEOPLE_AFTER), 1),
     (re.compile(r"\bx\s?(\d+)\b"), 1),
-    (re.compile(r"\bin\s+(\d+)\b"), 1),
+    (re.compile(r"\bin\s+(\d+)\b" + _NOT_PEOPLE_AFTER), 1),
+    # "…a ottobre, in due" (UC-C, M21-C): numeri in lettere da 2, mai "in una settimana"
+    (re.compile(r"\bin\s+(due|tre|quattro|cinque|sei|sette|otto|nove|dieci|two|three|four|five|"
+                r"six|seven|eight|nine|ten)\b" + _NOT_PEOPLE_AFTER), 1),
 ]
 _PAX_PHRASES = [
     (re.compile(r"\b(?:in coppia|una coppia|as a couple|a couple\b(?! of)|"
@@ -88,16 +109,26 @@ _PAX_PHRASES = [
     (re.compile(r"\b(?:da sol[oa]|solo io|io solo|just me|only me|on my own|by myself|alone)\b"), 1),
 ]
 _NOT_MONEY_AFTER = (r"(?!\s*(?:persone|persona|adulti|giocatori|amici|people|persons|adults|"
-                    r"players|friends|pax|notti|nights|giorni|days|stelle|stars))")
+                    r"players|friends|pax|notti|nights|giorni|days|stelle|stars|"
+                    r"camere|camera|stanze|stanza|rooms?|bedrooms?))")
+_PER_PERSON_WORDS = r"(?:a testa|a persona|per persona|each|per person|per head|pp)"
+_TOTAL_WORDS = r"(?:in tutto|in totale|totale|complessiv[oaie]|in total|total|altogether)"
 _BUDGET_PATTERNS = [
-    re.compile(r"(?:al massimo|massimo|max|budget|under|up to|fino a|entro|non più di|non oltre|"
+    re.compile(r"(?:al massimo|massimo|max|budget(?: totale| complessivo)?|in totale|in tutto|"
+               r"in total|under|up to|fino a|entro|non più di|non oltre|"
                r"no more than|not more than|less than|meno di|sotto(?: i| ai| a)?|below|at most|"
                r"tetto(?: di)?)\s*(?:di\s+)?(?:€|eur|euro|euros)?\s*(\d[\d.,]*+)" + _NOT_MONEY_AFTER),
     re.compile(r"(\d[\d.,]*+)\s*(?:€|euros?\b|eur\b)"),
     re.compile(r"€\s*(\d[\d.,]*+)"),
+    # cifra senza valuta seguita dalla lettura ("1,800 in total", "600 each", M21-E): sopra
+    # MAX_PAX, perché "siamo 4 in tutto" parla delle persone
+    re.compile(r"(\d[\d.,]*+)\s+(?:%s|%s)\b" % (_PER_PERSON_WORDS, _TOTAL_WORDS)),
 ]
 _THOUSANDS_K = re.compile(r"(\d+(?:[.,]\d+)?)\s*k\b")
-_PER_PERSON = re.compile(r"\b(?:a testa|a persona|per persona|each|per person|per head|pp)\b")
+_PER_PERSON = re.compile(r"\b%s\b" % _PER_PERSON_WORDS)
+_TOTAL = re.compile(r"\b%s\b" % _TOTAL_WORDS)
+# "siamo 4 in tutto", "three of us in total", "3 persone in tutto": persone, non budget
+_PEOPLE_BEFORE = re.compile(r"\b(\w+)\s+(?:persone\s+|people\s+|of us\s+)?$")
 
 
 @dataclass(frozen=True)
@@ -147,6 +178,9 @@ _TO = r"\s*(?:-|–|al|to|till|until)\s*"
 _PEOPLE_AFTER = (r"(?!\s*(?:persone|adulti|giocatori|amici|people|persons|adults|players|"
                  r"friends|pax|of us))")
 _WEEKEND_RE = re.compile(r"\bweek-?end\b|\bfine settimana\b")
+_THIS_WEEKEND = re.compile(r"\b(?:questo|prossimo|this|next|coming)\s+(?:\w+\s+)?"
+                           r"(?:week-?end|fine settimana)\b")
+_A_WEEKEND = re.compile(r"\b(?:un|a|an)\s+(?:\w+\s+)?(?:week-?end|fine settimana)\b")
 _RANGE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})%s(\d{4})-(\d{2})-(\d{2})\b" % _TO)
 _RANGE_SLASH = re.compile(r"\b(\d{1,2})/(\d{1,2})%s(\d{1,2})/(\d{1,2})\b" % _TO)
 _RANGE_DAY_FIRST = re.compile(
@@ -287,8 +321,10 @@ def _season(low, today):
 
 
 def _weekend(low, today):
+    """"Questo/prossimo weekend" e "weekend" da solo sono un periodo; "un weekend" è solo una
+    durata (decisione "Un weekend", M21)."""
     m = _WEEKEND_RE.search(low)
-    if m:
+    if m and (_THIS_WEEKEND.search(low) or not _A_WEEKEND.search(low)):
         start = today + timedelta(days=(5 - today.weekday()) % 7)
         return Period(start, start + timedelta(days=1), m.group(0))
 
@@ -327,6 +363,125 @@ def parse_pax(text: str) -> Optional[int]:
     return None
 
 
+_NUM = r"(\d+|%s)" % "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+# camere (M21-D, RF-65): "tre camere", "in 2 camere", "two double rooms", "a room"
+_ROOM_NUM = r"(\d+|%s|a|an)" % "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+_ROOMS_COUNT = re.compile(r"\b%s\s+(?:\w+\s+)?%s\b" % (_ROOM_NUM, _ROOM_WORDS))
+# tipi di camera sommati: "una matrimoniale e una doppia" = 2, "camera doppia" = 1, "due doppie" = 2
+_ROOM_TYPES = re.compile(r"\b(?:%s\s+)?(?:camer[ae]\s+)?(?:matrimonial[ei]|doppi[ae]|singol[ae]|"
+                         r"tripl[ae]|quadrupl[ae]|(?:double|twin|single|triple)\s+rooms?)\b" % _ROOM_NUM)
+_ROOMS_COUPLES = re.compile(r"\b%s\s+(?:coppie|couples)\b" % _ROOM_NUM)
+_NIGHTS = r"(?:notti|notte|nights?)\b"
+_DURATION_RANGE = re.compile(r"\b(?:da\s+)?%s\s*(?:-|–|o|a|or|to)\s*%s\s+%s" % (_NUM, _NUM, _NIGHTS))
+_DURATION_AT_LEAST = re.compile(r"\b(?:almeno|at least)\s+%s\s+%s" % (_NUM, _NIGHTS))
+_DURATION_NIGHTS = re.compile(r"\b%s\s+%s" % (_NUM, _NIGHTS))
+_DURATION_DAYS = re.compile(r"\b%s\s+(?:giorni|giorno|days?)\b" % _NUM)
+# tabella di UC-A: (pattern, (min, max)), dal più specifico al più generico
+_DURATION_WORDS = [
+    (re.compile(r"\b(?:due|2|two)\s+(?:settimane|weeks)\b"), (13, 15)),
+    (re.compile(r"\b(?:una|1)\s+settimana\b|\b(?:a|one|1)\s+week\b"), (6, 8)),
+    (re.compile(r"\bponte\b|\blungo\s+(?:week-?end|fine settimana)\b|\bweek-?end\s+lungo\b|"
+                r"\blong\s+week-?end\b"), (2, 4)),
+    (_WEEKEND_RE, (1, 3)),
+]
+
+
+def _nights_ok(*values) -> bool:
+    return all(v is None or 1 <= v <= MAX_NIGHTS for v in values)
+
+
+def _room_number(token: Optional[str]) -> int:
+    """"a", "an" e nessun numero valgono 1."""
+    return 1 if token in (None, "a", "an") else (_to_int(token) or 0)
+
+
+def parse_rooms(text: str) -> Optional[int]:
+    """RF-65: numero di camere dal testo. Il conteggio esplicito ("tre camere") e la somma dei
+    tipi ("una matrimoniale e una doppia") si combinano col massimo, così "3 camere, una doppia"
+    resta 3; senza nessuno dei due, "due coppie" sono 2 camere. Fuori da 1..MAX_PAX non è un
+    numero di camere."""
+    low = text.lower()
+    count = max((_room_number(m.group(1)) for m in _ROOMS_COUNT.finditer(low)), default=0)
+    types = sum(_room_number(m.group(1)) for m in _ROOM_TYPES.finditer(low))
+    rooms = max(count, types)
+    if rooms == 0:
+        m = _ROOMS_COUPLES.search(low)
+        rooms = _room_number(m.group(1)) if m else 0
+    return rooms if 1 <= rooms <= MAX_PAX else None
+
+
+def parse_duration(text: str) -> Optional[Tuple[int, Optional[int]]]:
+    """RF-58: (min, max) notti dal testo, `max` None per "almeno N notti". Le notti di N giorni
+    sono N − 1; fuori da 1..30 non è una durata."""
+    low = text.lower()
+    m = _DURATION_RANGE.search(low)
+    if m:
+        low_n, high_n = _to_int(m.group(1)), _to_int(m.group(2))
+        if _nights_ok(low_n, high_n) and low_n <= high_n:
+            return low_n, high_n
+    m = _DURATION_AT_LEAST.search(low)
+    if m and _nights_ok(_to_int(m.group(1))):
+        return _to_int(m.group(1)), None
+    m = _DURATION_NIGHTS.search(low)
+    if m and _nights_ok(_to_int(m.group(1))):
+        return _to_int(m.group(1)), _to_int(m.group(1))
+    m = _DURATION_DAYS.search(low)
+    if m and _nights_ok(_to_int(m.group(1)) - 1):
+        return _to_int(m.group(1)) - 1, _to_int(m.group(1)) - 1
+    for pattern, nights in _DURATION_WORDS:
+        if pattern.search(low):
+            return nights
+    return None
+
+
+# M21-C (UC-C, RF-62): livello e lezioni detti dal viaggiatore. Parole di UC-C più poche forme
+# vicine; una frase negata ("niente corsi per principianti", "non siamo esperti") non conta.
+_LEVEL_WORDS = (
+    ("beginner", r"principiant\w*|alle prime armi|mai giocato|beginners?|never played|novices?|"
+                 r"first[- ]timers?|neofit\w*"),
+    ("intermediate", r"intermedi\w*|intermediate|livello medio|medio livello|medium level|mid[- ]level"),
+    ("advanced", r"avanzat\w*|agonist\w*|espert[oiae]|advanced|competitive|experienced"),
+)
+_LEVEL_RE = re.compile(r"\b(?:%s)\b" % "|".join(w for _, w in _LEVEL_WORDS))
+_LEVEL_NEGATED = re.compile(
+    r"\b(?:non|not|no|niente|nessun[oa]?|senza|without|n't)\s+"
+    r"(?:(?:siamo|sono|è|are|am|is|really|very|molto|più|per|for|dei|degli|delle|corsi|corso|"
+    r"lezioni|lessons|courses?|classes|camp|viaggi|trips?|a|an|the)\s+){0,3}(?:%s)\b"
+    % "|".join(w for _, w in _LEVEL_WORDS))
+_COACH_NOUNS = re.compile(r"(?:maestr\w*|coach\w*|istruttor\w*|allenator\w*|guid[ae])\s+$")
+_COACHING_WORDS = (r"lezion\w*|maestr[oiae]|coach\w*|clinic\w*|cors[oi]|allenarci|allenarmi|"
+                   r"allenarsi|allenament\w*|istruttor\w*|allenator\w*|lessons?|coaching|training|"
+                   r"instructors?")
+_COACHING_RE = re.compile(r"\b(?:%s)\b" % _COACHING_WORDS)
+_COACHING_NEGATED = re.compile(
+    r"\b(?:niente|nessun[oa]?|senza|no|non|without|don't|dont|do not|not|troppe|troppi|meno|"
+    r"too many|fewer|less)\s+(?:[\w']+\s+){0,3}?"
+    r"(?:%s)\b" % _COACHING_WORDS)
+_DURING = re.compile(r"\b(?:nel|durante il)\s+corso\b")   # "nel corso di ottobre": un periodo
+
+
+def parse_level(text: str) -> Optional[str]:
+    """RF-62: `beginner`, `intermediate` o `advanced` dal testo; con più livelli il più basso,
+    così un viaggio va bene a tutti. "Esperto" detto di un maestro o di un coach non è un livello."""
+    low = _LEVEL_NEGATED.sub(" ", text.lower())
+    found = set()
+    for m in _LEVEL_RE.finditer(low):
+        word = m.group(0)
+        if word.startswith("espert") and _COACH_NOUNS.search(low[:m.start()]):
+            continue
+        found.update(level for level, pattern in _LEVEL_WORDS if re.fullmatch(pattern, word))
+    return next((level for level in LEVELS if level in found), None)
+
+
+def parse_wants_coaching(text: str) -> Optional[bool]:
+    """RF-62: False con una negazione ("niente corsi", "senza lezioni", "no coaching"), True con
+    una parola di lezioni o coach, altrimenti None (non detto)."""
+    low = _DURING.sub(" ", text.lower())
+    if _COACHING_NEGATED.search(low):
+        return False
+    return True if _COACHING_RE.search(low) else None
+
+
 def _to_money(token: str) -> Optional[Decimal]:
     token = re.sub(r"[.,](?=\d{3}\b)", "", token)   # separatori delle migliaia
     token = token.replace(",", ".").rstrip(".")
@@ -346,16 +501,63 @@ def _expand_thousands(low: str) -> str:
 def parse_budget(text: str) -> Optional[Decimal]:
     low = _expand_thousands(text.lower())
     for pattern in _BUDGET_PATTERNS:
-        m = pattern.search(low)
-        if m:
+        for m in pattern.finditer(low):
             value = _to_money(m.group(1))
-            if value is not None and value > 0:
-                return value
+            if value is None or value <= 0:
+                continue
+            if pattern is _BUDGET_PATTERNS[-1] and value <= MAX_PAX:
+                continue
+            return value
     return None
 
 
 def is_per_person(text: str) -> bool:
     return _PER_PERSON.search(text.lower()) is not None
+
+
+def _about_people(low: str, start: int) -> bool:
+    m = _PEOPLE_BEFORE.search(low[:start])
+    if m is None:
+        return False
+    value = _to_int(m.group(1))
+    return value is not None and value <= MAX_PAX
+
+
+def parse_budget_scope(text: str) -> Optional[str]:
+    """RF-69, regole 2-3: "a testa", "each"… → `per_person`; "in tutto", "in total"… → `total`
+    (non dopo un numero di persone); nessuna parola → None."""
+    low = text.lower()
+    if _PER_PERSON.search(low):
+        return "per_person"
+    if any(not _about_people(low, m.start()) for m in _TOTAL.finditer(low)):
+        return "total"
+    return None
+
+
+CheapestTotal = Callable[[Criteria], Optional[Decimal]]
+
+
+def scope_of_figure(figure: Decimal, pax: int, cheapest: Optional[Decimal]) -> str:
+    """RF-69, regola 4: a persona se la cifra, letta come totale, non copre il totale del
+    prodotto compatibile più economico e letta a persona sì; altrimenti totale."""
+    if cheapest is not None and figure < cheapest <= figure * pax:
+        return "per_person"
+    return "total"
+
+
+def read_budget(criteria: Criteria, cheapest_total: Optional[CheapestTotal] = None) -> Criteria:
+    """RF-69: in ingresso `budget` è la cifra detta e `budget_scope` la lettura detta (campo o
+    parole) o None; in uscita `budget` è il tetto sul totale usato dal chooser e `budget_scope`
+    la lettura. Senza lettura detta: regola 4 con più persone e `cheapest_total`, che legge il
+    catalogo solo qui; altrimenti `total` (regola 5)."""
+    if criteria.budget is None:
+        return replace(criteria, budget_scope=None)
+    scope = criteria.budget_scope
+    if scope is None and criteria.pax and criteria.pax > 1 and cheapest_total is not None:
+        scope = scope_of_figure(criteria.budget, criteria.pax, cheapest_total(criteria))
+    scope = scope or "total"
+    budget = criteria.budget * criteria.pax if scope == "per_person" and criteria.pax else criteria.budget
+    return replace(criteria, budget=budget, budget_scope=scope)
 
 
 def _valid_period(start_raw, end_raw, today: date, label: str) -> Optional[Period]:
@@ -413,7 +615,60 @@ def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> 
             valid["budget"] = value
         else:
             discarded.append(("budget", budget))
+    low_n, high_n = raw.get("duration_min_nights"), raw.get("duration_max_nights")
+    if low_n is not None or high_n is not None:
+        ints = all(v is None or (isinstance(v, int) and not isinstance(v, bool))
+                   for v in (low_n, high_n))
+        if ints and _nights_ok(low_n, high_n) and (low_n is None or high_n is None
+                                                   or low_n <= high_n):
+            # uno solo dei due sostituisce tutta la durata letta nel testo
+            valid["duration_min_nights"], valid["duration_max_nights"] = low_n, high_n
+        else:
+            discarded.append(("duration", (low_n, high_n)))
+    scope = raw.get("budget_scope")
+    if scope is not None:
+        if isinstance(scope, str) and scope.strip().lower() in BUDGET_SCOPES:
+            valid["budget_scope"] = scope.strip().lower()
+        else:
+            discarded.append(("budget_scope", scope))
+    level = raw.get("level")
+    if level is not None:
+        if isinstance(level, str) and level.strip().lower() in LEVELS:
+            valid["level"] = level.strip().lower()
+        else:
+            discarded.append(("level", level))
+    coaching = raw.get("wants_coaching")
+    if coaching is not None:
+        if isinstance(coaching, bool):
+            valid["wants_coaching"] = coaching
+        else:
+            discarded.append(("wants_coaching", coaching))
+    rooms = raw.get("rooms")
+    if rooms is not None:   # il tetto `pax` si conosce solo dopo la precedenza: `resolve_rooms`
+        if isinstance(rooms, int) and not isinstance(rooms, bool) and rooms >= 1:
+            valid["rooms"] = rooms
+        else:
+            discarded.append(("rooms", rooms))
     return valid, tuple(discarded)
+
+
+def resolve_rooms(criteria: Criteria, given: dict, parsed_rooms: Optional[int],
+                  discarded: tuple) -> Tuple[Criteria, dict, tuple]:
+    """RF-53, RF-65: le camere valgono 1..pax. Un campo oltre le persone è scartato e detto, e
+    al suo posto valgono le camere del testo se stanno nel tetto; un testo oltre le persone è
+    ignorato. Senza camere, con 1 o 2 persone la camera è una; con più persone resta None (la
+    domanda). `given` è restituito senza il campo scartato, così non conta come conflitto."""
+    pax, rooms = criteria.pax, criteria.rooms
+    if rooms is not None and pax is not None and rooms > pax:
+        if "rooms" in given:
+            given = dict(given)
+            discarded += (("rooms", given.pop("rooms")),)
+            rooms = parsed_rooms if parsed_rooms is not None and parsed_rooms <= pax else None
+        else:
+            rooms = None
+    if rooms is None and pax is not None and pax <= ROOMS_DEFAULT_MAX_PAX:
+        rooms = 1
+    return replace(criteria, rooms=rooms), given, discarded
 
 
 def _plain(value):
@@ -454,32 +709,42 @@ def _with_fallback(criteria: Criteria, text: str, today: date,
 def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
                  today: Optional[date] = None,
                  extractor: Optional[IntentExtractor] = None,
-                 fields: Optional[StructuredFields] = None) -> ParseResult:
+                 fields: Optional[StructuredFields] = None,
+                 cheapest_total: Optional[CheapestTotal] = None) -> ParseResult:
+    """`cheapest_total`: la regola 4 di RF-69, chiamata solo se serve e senza domande aperte."""
     today = today or date.today()
     profile = profile or TravelerProfile()
     given, discarded = validate_fields(fields.as_dict(), today) if fields else ({}, ())
-    pax = parse_pax(text)
-    budget = parse_budget(text)
-    group = given.get("pax") or pax or profile.pax
-    if budget is not None and group and is_per_person(text):
-        budget = budget * group
+    nights = parse_duration(text) or (None, None)
+    # budget e lettura come detti: il tetto sul totale lo calcola `read_budget` (RF-69)
     parsed = Criteria(
         sport=parse_sport(text),
         area=geo.find_area(text),
         period=parse_period(text, today),
-        pax=pax,
-        budget=budget,
+        pax=parse_pax(text),
+        budget=parse_budget(text),
         language=detect_language(text),
+        duration_min_nights=nights[0],
+        duration_max_nights=nights[1],
+        budget_scope=parse_budget_scope(text),
+        rooms=parse_rooms(text),
+        level=parse_level(text),
+        wants_coaching=parse_wants_coaching(text),
     )
     criteria = replace(parsed, **given)
     if criteria.sport is None and extractor is not None:
         criteria = _with_fallback(criteria, text, today, extractor)
     if criteria.pax is None and profile.pax:
         criteria = replace(criteria, pax=profile.pax)
-    ask_sport, ask_pax = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
+    criteria, given, discarded = resolve_rooms(criteria, given, parsed.rooms, discarded)
+    ask_sport, ask_pax, ask_rooms = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
     question = None
     if criteria.sport is None:
         question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
-    return ParseResult(criteria, question, discarded, conflicts_between(vars(parsed), given))
+    elif criteria.rooms is None:
+        question = ask_rooms
+    criteria = read_budget(criteria, cheapest_total if question is None else None)
+    return ParseResult(criteria, question, discarded,
+                       conflicts_between(vars(parsed), given))

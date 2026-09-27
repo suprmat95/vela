@@ -1,12 +1,15 @@
 """Contratto dei repository: eseguito su MemoryRepositories (sempre) e PostgresRepositories (con DATABASE_URL)."""
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 
 from support import NOW, make_product
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
-                                OrderStatus, Participant, Period, Proposal, Rejection,
-                                TravelerProfile)
+                                OrderStatus, Participant, Period, Proposal, QuoteKey, QuoteStatus,
+                                Rejection, TravelerProfile)
+from vela.ports.jobs import DuplicateJob
 from vela.ports.repositories import DuplicateOrder, SyncState
 
 CRITERIA = Criteria(sport="padel", period=Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"),
@@ -25,7 +28,7 @@ def proposal(pid="p1", iid="i1", product_id="1", created_at=NOW):
 
 def order(oid="o1", pid="p1"):
     return Order(oid, pid, "i1", "1", OrderStatus.AWAITING_PAYMENT, 2, Decimal("500"),
-                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1")
+                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1", rooms=2)   # rooms: 0011
 
 
 def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):
@@ -33,6 +36,22 @@ def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):
 
 
 LEASE = 120
+THREADS = 8
+
+
+def all_at_once(fn, n=THREADS):
+    """Chiama `fn(i)` da `n` thread che partono insieme; restituisce i risultati o le eccezioni."""
+    barrier = threading.Barrier(n)
+
+    def run(i):
+        barrier.wait()
+        try:
+            return fn(i)
+        except Exception as exc:   # noqa: BLE001 - il test conta gli esiti
+            return exc
+
+    with ThreadPoolExecutor(n) as ex:
+        return list(ex.map(run, range(n)))
 
 
 class RepositoryContract:
@@ -56,10 +75,17 @@ class RepositoryContract:
         p = make_product(7, min_pax=2, max_pax=0, hotel=None, windows=(("2026-10-01", "2026-10-04"),
                                                                         ("2026-11-05", "2026-11-08")))
         p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW,
-                    brand="terrarossa.com")
+                    brand="terrarossa.com", featured=True, special_offer=True, max_pax_per_room=2,
+                    levels=frozenset({"intermediate", "advanced"}), levels_exclusive=True, coaching=True)
         self.repos.products.upsert_many([p])
         got = self.repos.products.get("7")
         self.assertEqual(got, p)
+        self.assertEqual((got.featured, got.special_offer), (True, True))   # M21-B, migrazione 0010
+        self.assertEqual(got.max_pax_per_room, 2)                            # M21-D, migrazione 0011
+        self.assertEqual(self.repos.products.list_all()[0].max_pax_per_room, 2)
+        self.assertEqual((got.levels, got.levels_exclusive, got.coaching),               # M21-C, 0012
+                         (frozenset({"intermediate", "advanced"}), True, True))
+        self.assertEqual(self.repos.products.list_all()[0].levels, frozenset({"intermediate", "advanced"}))
 
     def test_products_empty(self):
         self.assertEqual(self.repos.products.count(), 0)
@@ -209,6 +235,178 @@ class RepositoryContract:
         self.assertEqual(self.repos.orders.get_by_replacement("p9"), replaced)
         self.assertIsNone(self.repos.orders.get_by_replacement("p1"))
 
+    def test_save_if_status_applies_only_from_expected_status(self):
+        """Passaggio di stato atomico (task/booking-race): chi arriva secondo non sovrascrive."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        paid = replace(order(), status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi_1", paid_at=NOW)
+        self.assertTrue(self.repos.orders.save_if_status(paid, OrderStatus.AWAITING_PAYMENT))
+        expired = replace(order(), status=OrderStatus.EXPIRED)
+        self.assertFalse(self.repos.orders.save_if_status(expired, OrderStatus.AWAITING_PAYMENT))
+        self.assertEqual(self.repos.orders.get("o1"), paid)
+        self.assertFalse(self.repos.orders.save_if_status(replace(order("nope"), status=OrderStatus.EXPIRED),
+                                                          OrderStatus.AWAITING_PAYMENT))
+
+    def test_concurrent_save_if_status_has_one_winner(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        results = all_at_once(lambda i: self.repos.orders.save_if_status(
+            replace(order(), status=OrderStatus.PAID_PENDING_BOOKING, payment_ref="pi_%d" % i),
+            OrderStatus.AWAITING_PAYMENT))
+        self.assertEqual(results.count(True), 1, results)
+        self.assertEqual(results.count(False), THREADS - 1, results)
+        winner = "pi_%d" % results.index(True)
+        self.assertEqual(self.repos.orders.get("o1").payment_ref, winner)
+
+    # cache del prezzo (RF-84)
+    KEY = QuoteKey("1", date(2026, 10, 1), 2, 1, "EUR")
+
+    def quote_world(self, n, follows=True):
+        """`n` ordini `queued` sulla stessa chiave: prodotto 1, 1 ottobre, 2 adulti, 1 camera."""
+        self.seed()
+        for i in range(1, n + 1):
+            self.repos.proposals.add(proposal("p%d" % i))
+            self.repos.orders.add(replace(order("o%d" % i, "p%d" % i), status=OrderStatus.QUEUED,
+                                          total=None, itinerary_id=None, rooms=1,
+                                          enqueued_at=NOW + timedelta(seconds=i),
+                                          follows_quote=follows))
+
+    def test_order_roundtrip_with_quote_fields(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        o = replace(order(), follows_quote=True, confirmed_total=Decimal("700"))
+        self.repos.orders.add(o)
+        self.assertEqual(self.repos.orders.get("o1"), o)
+
+    def test_order_roundtrip_with_last_seen(self):
+        """M19: `last_seen_at` (0016) si scrive all'inserimento e con `touch`."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        o = replace(order(), last_seen_at=NOW)
+        self.repos.orders.add(o)
+        self.assertEqual(self.repos.orders.get("o1"), o)
+
+    def test_touch_is_throttled(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        gap = timedelta(seconds=60)
+        self.assertTrue(self.repos.orders.touch("o1", NOW, gap))                # nullo: scrive
+        self.assertFalse(self.repos.orders.touch("o1", NOW + timedelta(seconds=59), gap))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW)
+        self.assertTrue(self.repos.orders.touch("o1", NOW + timedelta(seconds=61), gap))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW + timedelta(seconds=61))
+        self.assertFalse(self.repos.orders.touch("nope", NOW, gap))
+
+    def test_save_never_moves_last_seen(self):
+        """Un `save` scrive l'ordine letto prima: non deve riportare indietro un `touch` arrivato
+        nel frattempo, né un `touch` deve riportare indietro lo stato."""
+        self.seed()
+        self.repos.proposals.add(proposal())
+        self.repos.orders.add(order())
+        stale = self.repos.orders.get("o1")
+        self.repos.orders.touch("o1", NOW + timedelta(minutes=5), timedelta(seconds=60))
+        self.repos.orders.save(replace(stale, status=OrderStatus.EXPIRED))
+        self.assertEqual(self.repos.orders.get("o1").last_seen_at, NOW + timedelta(minutes=5))
+        self.assertTrue(self.repos.orders.save_if_status(replace(stale, status=OrderStatus.PAID_PENDING_BOOKING,
+                                                                 last_seen_at=None), OrderStatus.EXPIRED))
+        current = self.repos.orders.get("o1")
+        self.assertEqual((current.status, current.last_seen_at),
+                         (OrderStatus.PAID_PENDING_BOOKING, NOW + timedelta(minutes=5)))
+
+    def test_quote_claim_first_wins_then_refused_while_leader_queued(self):
+        self.quote_world(2)
+        self.assertIsNone(self.repos.quotes.get(self.KEY))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o1", NOW, NOW - timedelta(minutes=15)))
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.leader_order_id, q.total), (QuoteStatus.PENDING, "o1", None))
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o1")
+
+    def test_quote_claim_takes_over_when_leader_not_queued(self):
+        self.quote_world(2)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), status=OrderStatus.FAILED))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o2")
+
+    def test_quote_claim_refuses_fresh_ready_and_takes_expired(self):
+        self.quote_world(2)
+        self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), NOW)
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW + timedelta(minutes=16),
+                                                NOW + timedelta(minutes=1)))
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.total, q.priced_at), (QuoteStatus.PENDING, None, None))
+
+    def test_quote_publish_fans_out_only_to_followers_of_the_key(self):
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), follows_quote=False))
+        other = replace(self.repos.orders.get("o3"), rooms=2)          # altra chiave
+        self.repos.orders.save(other)
+        later = NOW + timedelta(seconds=30)
+        ids = self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), later)
+        self.assertEqual(ids, ["o2"])
+        o2 = self.repos.orders.get("o2")
+        self.assertEqual((o2.status, o2.total, o2.follows_quote, o2.updated_at),
+                         (OrderStatus.AWAITING_CONFIRMATION, Decimal("700"), False, later))
+        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.QUEUED)   # il leader no
+        self.assertEqual(self.repos.orders.get("o3"), other)
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.total, q.priced_at), (QuoteStatus.READY, Decimal("700"), later))
+
+    def test_quote_release_only_by_pending_leader_and_frees_followers(self):
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), follows_quote=False))
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o2"), [])   # non è il leader
+        freed = self.repos.quotes.release(self.KEY, "o1")
+        self.assertEqual([o.id for o in freed], ["o2", "o3"])
+        self.assertTrue(all(not o.follows_quote for o in freed))
+        self.assertEqual(freed[0].enqueued_at, NOW + timedelta(seconds=2))
+        self.assertFalse(self.repos.orders.get("o2").follows_quote)
+        self.assertIsNone(self.repos.quotes.get(self.KEY))
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o1"), [])   # una volta sola
+
+    def test_quote_release_ignores_ready_rows(self):
+        self.quote_world(1)
+        self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), NOW)
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o1"), [])
+        self.assertEqual(self.repos.quotes.get(self.KEY).status, QuoteStatus.READY)
+
+    def test_quote_claim_takes_over_jobless_leader_older_than_fresh_after(self):
+        """Leader `queued` senza job d'acquisto (crash tra `claim` e accodamento): la riga si
+        libera solo dopo `fresh_after`; con un job attivo il leader resta."""
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW + timedelta(seconds=1)))
+        self.repos.jobs.enqueue(job("j2", "o2"))
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o3", NOW, NOW + timedelta(minutes=1)))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o2")
+
+    def test_quote_detach_only_while_queued_and_following(self):
+        self.quote_world(2)
+        o1 = self.repos.orders.get("o1")
+        self.assertTrue(self.repos.quotes.detach(replace(o1, follows_quote=False)))
+        self.assertFalse(self.repos.orders.get("o1").follows_quote)
+        self.assertFalse(self.repos.quotes.detach(replace(o1, follows_quote=False, total=Decimal("1"))))
+        self.assertIsNone(self.repos.orders.get("o1").total)                  # già sganciato
+        o2 = replace(self.repos.orders.get("o2"), status=OrderStatus.CANCELLED)
+        self.repos.orders.save(o2)
+        self.assertFalse(self.repos.quotes.detach(replace(o2, status=OrderStatus.QUEUED, follows_quote=False)))
+        self.assertEqual(self.repos.orders.get("o2").status, OrderStatus.CANCELLED)
+
+    def test_quote_concurrent_claim_has_one_winner(self):
+        self.quote_world(THREADS)
+        results = all_at_once(lambda i: self.repos.quotes.claim(self.KEY, "o%d" % (i + 1), NOW, NOW))
+        self.assertEqual(results.count(True), 1, results)
+        winner = "o%d" % (results.index(True) + 1)
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, winner)
+
     # job (RF-27, RF-50)
     def seed_orders(self, n):
         self.seed()
@@ -241,6 +439,15 @@ class RepositoryContract:
         order_of_claims = [self.repos.jobs.claim(NOW, LEASE).id for _ in range(3)]
         self.assertEqual(order_of_claims, ["j-b", "j-c", "j-p"])
         self.assertIsNone(self.repos.jobs.claim(NOW, LEASE))
+
+    def test_claim_puts_sms_after_payment_check_and_before_purchase(self):
+        self.seed_orders(4)
+        self.repos.jobs.enqueue(job("j-p", "o1", enqueued_at=NOW - timedelta(minutes=9)))
+        self.repos.jobs.enqueue(job("j-s", "o2", JobKind.SMS_LINK, enqueued_at=NOW - timedelta(minutes=1)))
+        self.repos.jobs.enqueue(job("j-c", "o3", JobKind.PAYMENT_CHECK))
+        self.repos.jobs.enqueue(job("j-k", "o4", JobKind.SMS_CONFIRMED))
+        self.assertEqual([self.repos.jobs.claim(NOW, LEASE).id for _ in range(4)],
+                         ["j-c", "j-s", "j-k", "j-p"])
 
     def test_claim_purchase_fifo_by_enqueued_at(self):
         self.seed_orders(3)
@@ -288,6 +495,45 @@ class RepositoryContract:
         self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.PURCHASE).id, "j1")
         self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.BOOKING))
 
+    def test_second_active_booking_job_for_an_order_is_refused(self):
+        self.seed_orders(2)
+        self.repos.jobs.enqueue(job("b1", "o1", JobKind.BOOKING))
+        with self.assertRaises(DuplicateJob):
+            self.repos.jobs.enqueue(job("b2", "o1", JobKind.BOOKING))
+        self.assertIsNone(self.repos.jobs.get("b2"))
+        self.repos.jobs.claim(NOW, LEASE)                      # running: ancora attivo
+        with self.assertRaises(DuplicateJob):
+            self.repos.jobs.enqueue(job("b3", "o1", JobKind.BOOKING))
+        self.repos.jobs.enqueue(job("b4", "o2", JobKind.BOOKING))   # altro ordine
+        self.repos.jobs.save(replace(self.repos.jobs.get("b1"), status=JobStatus.DONE))
+        self.repos.jobs.enqueue(job("b5", "o1", JobKind.BOOKING))   # il primo è finito
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.BOOKING).id, "b5")
+
+    def test_dead_booking_job_does_not_block_a_new_one(self):
+        self.seed_orders(1)
+        self.repos.jobs.enqueue(replace(job("b1", "o1", JobKind.BOOKING), status=JobStatus.DEAD))
+        self.repos.jobs.enqueue(job("b2", "o1", JobKind.BOOKING))
+        self.assertEqual(self.repos.jobs.active_for_order("o1", JobKind.BOOKING).id, "b2")
+
+    def test_concurrent_booking_enqueues_have_one_winner(self):
+        self.seed_orders(1)
+        results = all_at_once(lambda i: self.repos.jobs.enqueue(job("b%d" % i, "o1", JobKind.BOOKING)))
+        self.assertEqual(sum(r is None for r in results), 1, results)
+        self.assertEqual(sum(isinstance(r, DuplicateJob) for r in results), THREADS - 1, results)
+
+    def test_concurrent_mark_paid_enqueues_one_booking(self):
+        """Checkout e verifica del pagamento insieme (M13b): un solo job di prenotazione."""
+        from support import FakeHofJ
+        from vela.domain.orders import OrderService
+        self.seed_orders(1)
+        svc = OrderService(self.repos, FakeHofJ(), now=lambda: NOW)
+        results = all_at_once(lambda i: svc.mark_paid("o1", "pi_1"))
+        self.assertFalse([r for r in results if isinstance(r, Exception)], results)
+        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.PAID_PENDING_BOOKING)
+        first = self.repos.jobs.active_for_order("o1", JobKind.BOOKING)
+        self.repos.jobs.save(replace(first, status=JobStatus.DONE))
+        self.assertIsNone(self.repos.jobs.active_for_order("o1", JobKind.BOOKING))   # nessun secondo job
+
     def test_position_counts_only_pending_purchases_before(self):
         self.seed_orders(4)
         self.repos.jobs.enqueue(job("j1", "o1", enqueued_at=NOW - timedelta(seconds=40)))
@@ -329,3 +575,26 @@ class RepositoryContract:
         reasons = {r.proposal_id: r.reason for r in self.repos.rejections.list_for_intent("i1")}
         self.assertEqual(reasons, {"p1": "troppo caro", "p2": ""})   # il primo motivo resta
         self.assertEqual(self.repos.rejections.list_for_intent("other"), [])
+        kinds = {r.proposal_id: (r.kind, r.keep_product)
+                 for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual(kinds, {"p1": (None, False), "p2": (None, False)})   # senza tipo
+
+    def test_rejection_kind_keep_product_and_update(self):
+        """M21-F (RF-71, RF-74, RF-55): tipo e `keep_product` si salvano; `update` cambia solo tipo
+        e `keep_product` del rifiuto della stessa proposta, mai il motivo né la data."""
+        self.seed()
+        self.repos.proposals.add(proposal("p1", product_id="1"))
+        self.repos.proposals.add(proposal("p2", product_id="2"))
+        self.repos.rejections.add(Rejection("i1", "p1", "1", "stesse date no", NOW, "dates", True))
+        self.repos.rejections.add(Rejection("i1", "p2", "2", "l'hotel no", NOW, "hotel"))
+        got = {r.proposal_id: r for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual((got["p1"].kind, got["p1"].keep_product), ("dates", True))
+        self.assertEqual((got["p2"].kind, got["p2"].keep_product), ("hotel", False))
+        later = NOW + timedelta(minutes=5)
+        self.repos.rejections.update(Rejection("i1", "p1", "1", "un altro viaggio", later, "price", False))
+        got = {r.proposal_id: r for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual((got["p1"].kind, got["p1"].keep_product, got["p1"].reason, got["p1"].created_at),
+                         ("price", False, "stesse date no", NOW))
+        self.assertEqual(len(got), 2)
+        self.repos.rejections.update(Rejection("i1", "p9", "9", "", NOW, "other"))   # nessuna riga: no-op
+        self.assertEqual(len(self.repos.rejections.list_for_intent("i1")), 2)

@@ -2,14 +2,18 @@
 import threading
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
-                                Product, Proposal, QuotaClass, Rejection)
-from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
-                               rolled, try_acquire)
+                                PriceQuote, Product, Proposal, QuotaClass, QuoteKey, QuoteStatus,
+                                Rejection)
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
+                               claim_refresh, describe, fresh_bucket, from_snapshot,
+                               available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
+from vela.ports.jobs import DuplicateJob
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder, SyncState
 
@@ -114,7 +118,30 @@ class MemoryOrders:
 
     def save(self, order: Order) -> None:
         with self._lock:
-            self._items[order.id] = order
+            self._items[order.id] = self._keep_last_seen(order)
+
+    def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
+        with self._lock:
+            current = self._items.get(order.id)
+            if current is None or current.status != expected:
+                return False
+            self._items[order.id] = self._keep_last_seen(order)
+            return True
+
+    def _keep_last_seen(self, order: Order) -> Order:
+        current = self._items.get(order.id)
+        return order if current is None else replace(order, last_seen_at=current.last_seen_at)
+
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        with self._lock:
+            current = self._items.get(order_id)
+            if current is None or (current.last_seen_at is not None and current.last_seen_at > at - min_interval):
+                return False
+            self._items[order_id] = replace(current, last_seen_at=at)
+            return True
+
+    def orphan_itineraries_total(self) -> int:
+        return sum(o.orphan_itineraries for o in self._items.values())
 
     def ids_with_status(self, status: OrderStatus) -> List[str]:
         return sorted(o.id for o in self._items.values() if o.status == status)
@@ -127,6 +154,12 @@ class MemoryRejections:
     def add(self, rejection: Rejection) -> None:
         self._items.setdefault(rejection.proposal_id, rejection)
 
+    def update(self, rejection: Rejection) -> None:
+        current = self._items.get(rejection.proposal_id)
+        if current is not None:
+            self._items[rejection.proposal_id] = replace(current, kind=rejection.kind,
+                                                         keep_product=rejection.keep_product)
+
     def product_ids_for_intent(self, intent_id: str) -> Set[str]:
         return {r.product_id for r in self._items.values() if r.intent_id == intent_id}
 
@@ -138,7 +171,78 @@ class MemoryRejections:
 
 
 ACTIVE = (JobStatus.PENDING, JobStatus.RUNNING)
-CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.PURCHASE: 2}
+CLAIM_PRIORITY = {JobKind.BOOKING: 0, JobKind.PAYMENT_CHECK: 1, JobKind.SMS_LINK: 2,
+                  JobKind.SMS_CONFIRMED: 2, JobKind.PURCHASE: 3}
+
+
+class MemoryQuotes:
+    """RF-84. Legge ordini e proposte dei repository accanto, come il JOIN di Postgres; il lock
+    degli ordini tiene fanout e rilascio atomici rispetto alle altre scritture sugli ordini."""
+
+    def __init__(self, orders: MemoryOrders, proposals: MemoryProposals, jobs: "MemoryJobs"):
+        self._items: Dict[QuoteKey, PriceQuote] = {}
+        self._orders, self._proposals, self._jobs = orders, proposals, jobs
+        self._lock = threading.Lock()
+
+    def get(self, key: QuoteKey) -> Optional[PriceQuote]:
+        return self._items.get(key)
+
+    def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
+        with self._lock:
+            quote = self._items.get(key)
+            if quote is not None and not self._takeable(quote, fresh_after):
+                return False
+            self._items[key] = PriceQuote(key, QuoteStatus.PENDING, order_id, now)
+            return True
+
+    def _takeable(self, quote: PriceQuote, fresh_after: datetime) -> bool:
+        if quote.status == QuoteStatus.READY:
+            return quote.priced_at < fresh_after
+        leader = self._orders.get(quote.leader_order_id)
+        if leader is None or leader.status != OrderStatus.QUEUED:
+            return True
+        busy = self._jobs.active_for_order(leader.id, JobKind.PURCHASE) is not None
+        return not busy and quote.updated_at < fresh_after
+
+    def _followers(self, key: QuoteKey) -> List[Order]:
+        out = []
+        for o in self._orders._items.values():
+            if not o.follows_quote or o.status != OrderStatus.QUEUED:
+                continue
+            p = self._proposals.get(o.proposal_id)
+            if p is not None and QuoteKey(o.product_id, p.start_date, o.pax, o.rooms, o.currency) == key:
+                out.append(o)
+        return sorted(out, key=lambda o: o.id)
+
+    def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
+        with self._lock, self._orders._lock:
+            self._items[key] = PriceQuote(key, QuoteStatus.READY, leader_order_id, now, total, now)
+            ids = []
+            for o in self._followers(key):
+                self._orders._items[o.id] = replace(o, status=OrderStatus.AWAITING_CONFIRMATION,
+                                                    total=total, follows_quote=False, updated_at=now)
+                ids.append(o.id)
+            return ids
+
+    def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
+        with self._lock, self._orders._lock:
+            quote = self._items.get(key)
+            if (quote is None or quote.status != QuoteStatus.PENDING
+                    or quote.leader_order_id != leader_order_id):
+                return []
+            del self._items[key]
+            freed = [replace(o, follows_quote=False) for o in self._followers(key)]
+            for o in freed:
+                self._orders._items[o.id] = o
+            return freed
+
+    def detach(self, order: Order) -> bool:
+        with self._orders._lock:
+            current = self._orders._items.get(order.id)
+            if current is None or current.status != OrderStatus.QUEUED or not current.follows_quote:
+                return False
+            self._orders._items[order.id] = replace(order, last_seen_at=current.last_seen_at)   # M19
+            return True
 
 
 def claimable(j: Job, now: datetime, lease_seconds: int) -> bool:
@@ -155,6 +259,10 @@ class MemoryJobs:
 
     def enqueue(self, job: Job) -> None:
         with self._lock:
+            if job.kind == JobKind.BOOKING and job.status in ACTIVE and any(
+                    j.order_id == job.order_id and j.kind == JobKind.BOOKING and j.status in ACTIVE
+                    for j in self._jobs.values()):
+                raise DuplicateJob(job.order_id)
             self._jobs[job.id] = job
 
     def get(self, job_id: str) -> Optional[Job]:
@@ -188,10 +296,15 @@ class MemoryJobs:
     def purchase_waiting(self) -> bool:
         return any(j.kind == JobKind.PURCHASE and j.status in ACTIVE for j in self._jobs.values())
 
+    def oldest_purchase_enqueued_at(self) -> Optional[datetime]:
+        return min((j.enqueued_at for j in self._jobs.values()
+                    if j.kind == JobKind.PURCHASE and j.status in ACTIVE), default=None)
+
 
 class MemoryRepositories:
-    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20):
-        self.quota_margin, self.booking_reserve = quota_margin, booking_reserve
+    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
+                 quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
+        self.quota_rules = BucketRules(quota_margin, booking_reserve, quota_burst, quota_floor)
         self._catalog_lock = threading.Lock()
         self.clear()
 
@@ -211,45 +324,58 @@ class MemoryRepositories:
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
         self.jobs = MemoryJobs()
-        self.quota = MemoryQuota(self.quota_margin, self.booking_reserve)
+        self.quotes = MemoryQuotes(self.orders, self.proposals, self.jobs)
+        self.quota = MemoryQuota(rules=self.quota_rules)
 
 
 class MemoryQuota:
-    """Contatore di quota in memoria (test e replay): stesse regole di Postgres, lock di processo."""
+    """Token bucket in memoria (test e replay): stesse regole di Postgres, lock di processo."""
 
-    def __init__(self, margin: float = 0.10, reserve: float = 0.20):
-        self.margin, self.reserve = margin, reserve
+    def __init__(self, margin: float = 0.10, reserve: float = DEFAULT_RESERVE, rules: Optional[BucketRules] = None):
+        self.rules = rules or BucketRules(margin, reserve)
         self._lock = threading.Lock()
-        self._window: Optional[QuotaWindow] = None
+        self._bucket: Optional[QuotaBucket] = None
 
-    def _current(self, now: datetime) -> QuotaWindow:
-        return self._window or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
+    def _current(self, now: datetime) -> QuotaBucket:
+        return self._bucket or fresh_bucket(now, DEFAULT_LIMIT_PER_MINUTE, self.rules)
 
     def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
         with self._lock:
-            new = try_acquire(self._current(now), cls, n, now, self.margin, self.reserve, purchase_waiting)
+            new = try_take(self._current(now), cls, n, now, self.rules, purchase_waiting)
             if new is not None:
-                self._window = new
+                self._bucket = new
             return new is not None
 
-    def on_429(self, now: datetime) -> None:
+    def on_429(self, now: datetime, hold_seconds: float = 0.0) -> None:
         with self._lock:
-            self._window = after_429(self._current(now), now, self.margin, self.reserve)
+            self._bucket = after_429(self._current(now), now, self.rules, hold_seconds)
 
     def needs_refresh(self, now: datetime) -> bool:
         with self._lock:
-            return self._window is None or self._window.needs_refresh
+            return self._current(now).needs_refresh
 
-    def sync_from_snapshot(self, snapshot: QuotaSnapshot) -> None:
+    def claim_refresh(self, now: datetime) -> bool:
         with self._lock:
-            self._window = from_snapshot(snapshot.limit_per_minute, snapshot.used_in_window,
-                                         snapshot.window_started_at, snapshot.window_ends_at)
+            new = claim_refresh(self._current(now), now, self.rules)
+            if new is not None:
+                self._bucket = new
+            return new is not None
+
+    def mark_refresh_needed(self, now: datetime) -> None:
+        with self._lock:
+            self._bucket = replace(self._current(now), needs_refresh=True)
+
+    def sync_from_snapshot(self, snapshot: QuotaSnapshot, now: datetime) -> None:
+        with self._lock:
+            self._bucket = from_snapshot(self._current(now), snapshot.limit_per_minute,
+                                         snapshot.used_in_window, snapshot.window_started_at,
+                                         snapshot.window_ends_at, now, self.rules)
 
     def snapshot(self, now: datetime) -> dict:
         with self._lock:
-            return describe(self._current(now), now, self.margin, self.reserve)
+            return describe(self._current(now), now, self.rules)
 
-    def next_window_start(self, now: datetime) -> datetime:
+    def next_window_start(self, now: datetime, cls: QuotaClass = QuotaClass.PURCHASE,
+                          n: int = CALLS_PER_PURCHASE) -> datetime:
         with self._lock:
-            return rolled(self._current(now), now).window_end
-
+            return available_at(self._current(now), now, self.rules, cls, n)

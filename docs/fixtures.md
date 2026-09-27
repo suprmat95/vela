@@ -27,8 +27,8 @@ fixture dello stesso brand sullo stesso host fanno fallire la selezione (`select
 | `sport` | sport del brand secondo `HOFJ_BRANDS` al momento della registrazione: è lo sport di tutti i prodotti della fixture (decisione M10). Senza `sport` lo sport si ricava dal testo (`detect_sport`) |
 | `base_url` | host dell'API |
 | `products` | item della lista così come li restituisce l'API, nell'ordine delle pagine |
-| `details[id].catalog` | campi di RF-28 con i nomi dell'API: `id, title, slug, shortDescription, price, currency, minPax, maxPax, minDate, maxDate, availabilities, defaultDurationInDays, updatedAt, category, venue, destination, hotels` (`hotels` = `rawAttributes.hotels` senza media) |
-| `details[id].raw` | dettaglio esteso senza `gallery`, `image`, `images`, `cover`, `media`, `travelProgram` a qualsiasi profondità |
+| `details[id].catalog` | campi di RF-28 con i nomi dell'API: `id, title, slug, shortDescription, price, currency, minPax, maxPax, minDate, maxDate, availabilities, defaultDurationInDays, updatedAt, category, venue, destination, hotels` (`hotels` = `rawAttributes.hotels` senza media), più `featured` e `isSpecialOffer` (M21-B, RF-60; aggiunti il 2026-09-27 riproiettando `catalog` da `raw` con `project_detail`, senza chiamate), `maxPaxPerRoom` (M21-D, RF-66) e le tre etichette calcolate da Vela `vela_levels`, `vela_levels_exclusive`, `vela_coaching` (M21-C, RF-63: da `description` e `shortDescription` con `vela.domain.labels.labels_of`, non campi dell'API; aggiunte il 2026-09-27 allo stesso modo) |
+| `details[id].raw` | dettaglio esteso senza `gallery`, `image`, `images`, `cover`, `media` a qualsiasi profondità. Fino al 2026-09-27 veniva tolto anche `travelProgram`: le fixture registrate prima non hanno il programma (RF-83); una nuova registrazione lo conserva |
 
 La proiezione (`project_detail`, `strip_media`) sta in `vela/domain/catalog.py` ed è la stessa
 che il sync scrive in `products`.
@@ -60,6 +60,9 @@ estendere i campi scartati o alzare il limite, con una decisione in `docs/decisi
 
 Prodotto trappola del criterio 4 (M7): `vela.fixtures.add_trap(catalog, "78")` clona il prodotto
 78 con id `900078`, prezzo più basso di 1 e `vela_trap: true`; si scrive con `write_catalog`.
+Da M21-B (RF-61) modello e trappola sono equivalenti e il chooser propone il 78: per la prova di
+§10.4 `add_trap(catalog, "78", archive_template=True)` archivia il 78 nella fixture di prova, così
+la trappola è la prima proposta (`tests/test_staging_fixture.py`, `TrapFixtureTest`).
 
 ## Registrazioni
 

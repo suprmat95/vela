@@ -31,6 +31,7 @@ PLACES = [
     ("Lanzarote", "city", "ES"), ("Alicante", "city", "ES"), ("Bali", "region", "ID"),
     ("Barcellona", "city", "ES", "barcelona"), ("Buenos Aires", "city", "AR"),
     ("Dénia", "city", "ES", "denia"), ("Essaouira", "city", "MA"), ("Estepona", "city", "ES"),
+    ("Marbella", "city", "ES"),   # M21-F: "Marbella no" della richiesta (UC-F, F2)
     ("Firenze", "city", "IT", "florence"), ("Fuerteventura", "region", "ES"),
     ("Ibiza", "region", "ES"), ("Lloret de Mar", "city", "ES", "costa brava"),
     ("Lombok", "region", "ID"), ("Madrid", "city", "ES"),
@@ -64,6 +65,7 @@ PARENTS = {
     "Firenze": "Toscana", "Pietrasanta": "Toscana",
     # regioni di M9
     "Malaga": "Costa del Sol", "Estepona": "Costa del Sol", "Torre del Mar": "Costa del Sol",
+    "Marbella": "Costa del Sol",
     "Costa del Sol": "Andalusia", "Siviglia": "Andalusia",
     "Barcellona": "Catalogna", "Lloret de Mar": "Catalogna", "Tarragona": "Catalogna",
     "Valencia": "Comunità Valenciana", "Alicante": "Comunità Valenciana",
@@ -119,7 +121,8 @@ EN_NAMES = {
 
 _CANARIES = ("Canarie", "Lanzarote", "Fuerteventura", "Tenerife")
 _BALEARICS = ("Baleari", "Maiorca", "Palma de Mallorca", "Ibiza", "Minorca")
-_ANDALUSIA = ("Andalusia", "Costa del Sol", "Malaga", "Estepona", "Torre del Mar", "Siviglia")
+_ANDALUSIA = ("Andalusia", "Costa del Sol", "Malaga", "Estepona", "Marbella", "Torre del Mar",
+              "Siviglia")
 _TUSCANY = ("Toscana", "Firenze", "Pietrasanta")
 
 # nome canonico → aree più a sud, dalla più vicina; tupla vuota = niente più a sud nel catalogo
@@ -167,6 +170,47 @@ def find_area(text: Optional[str]) -> Optional[Area]:
         if pattern.search(low):
             return area
     return None
+
+
+# M21-F (RF-73): un luogo negato è un'esclusione, non la nuova area. Negazione prima ("non a X",
+# "tranne X", "not X", "anywhere but X") o subito dopo ("X no", "X non mi piace"); "no, a X" no.
+_ARTICLE = r"(?:(?:a|ad|in|al|alla|alle|ai|agli|allo|nel|nella|nelle|sulla|sulle|la|le|il|lo|i|gli|the|to)\s+)?"
+_NEGATED_BEFORE = re.compile(
+    r"(?:\b(?:non|no|niente|nemmeno|neanche|tranne|eccetto|fuorché|fuorche|salvo|not|except(?:\s+for)?|"
+    r"(?:anywhere|anything|everywhere|anyplace)\s+but|but\s+not)\s+%s)$" % _ARTICLE)
+_NEGATED_AFTER = re.compile(r"^\s*(?:no\b|non\s+(?:mi|ci|ti)\s+\w+|mai\b|is\s+not\b|isn't\b|"
+                            r"no\s+thanks\b)")
+
+
+def find_places(text: Optional[str]) -> list:
+    """Luoghi del testo nell'ordine in cui compaiono, (Area, negato); gli alias più lunghi
+    vincono e non si sovrappongono ("palma de mallorca" non dà anche "mallorca")."""
+    low = (text or "").lower()
+    taken, found = [], []
+    for pattern, area in _INDEX:
+        for m in pattern.finditer(low):
+            if any(m.start() < end and start < m.end() for start, end in taken):
+                continue
+            taken.append((m.start(), m.end()))
+            negated = bool(_NEGATED_BEFORE.search(low[:m.start()])
+                           or _NEGATED_AFTER.search(low[m.end():]))
+            found.append((m.start(), area, negated))
+    return [(area, negated) for _, area, negated in sorted(found, key=lambda f: f[0])]
+
+
+def negated_places(text: Optional[str]) -> list:
+    """Le aree negate nel testo, senza ripetizioni, in ordine."""
+    out = []
+    for area, negated in find_places(text):
+        if negated and area not in out:
+            out.append(area)
+    return out
+
+
+def find_area_not_negated(text: Optional[str]) -> Optional[Area]:
+    """Come `find_area`, saltando i luoghi negati: l'alias più lungo tra quelli non negati."""
+    places = {area for area, negated in find_places(text) if not negated}
+    return next((area for _, area in _INDEX if area in places), None)
 
 
 def area_of_destination(title: Optional[str], country_code: Optional[str]) -> Optional[Area]:

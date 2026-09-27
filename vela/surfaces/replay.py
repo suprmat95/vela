@@ -2,7 +2,7 @@
 
 Paga il link finto e applica subito l'esito come farebbe la verifica del pagamento (RF-20):
 l'ordine diventa pagato e il job di prenotazione entra in coda (RF-51). Montato solo con
-``VELA_UPSTREAM_MODE=replay``. Risposta JSON, nessuna pagina: la sola pagina web del
+``VELA_UPSTREAM_MODE=replay`` o ``loadtest`` (M13a). Risposta JSON, nessuna pagina: la sola pagina web del
 progetto è il Checkout di Stripe (spec §6).
 """
 from fastapi import APIRouter, HTTPException, Request

@@ -1,9 +1,10 @@
 """Repository del dominio (RNF-01): intenti, proposte, ordini, rifiuti e catalogo stanno fuori dal processo."""
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import ContextManager, Dict, Iterable, List, NamedTuple, Optional, Protocol, Set
 
-from vela.domain.models import (Criteria, Intent, Order, OrderStatus, Product, Proposal,
-                                Rejection)
+from vela.domain.models import (Criteria, Intent, Order, OrderStatus, PriceQuote, Product, Proposal,
+                                QuoteKey, Rejection)
 from vela.ports.jobs import JobRepository
 from vela.ports.quota import QuotaStore
 
@@ -49,14 +50,43 @@ class OrderRepository(Protocol):
     def get_by_proposal(self, proposal_id: str) -> Optional[Order]: ...
     def get_by_replacement(self, proposal_id: str) -> Optional[Order]: ...
     def save(self, order: Order) -> None: ...
+    def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
+        """Salva solo se l'ordine è ancora in `expected`, in modo atomico; dice se ha salvato."""
     def ids_with_status(self, status: OrderStatus) -> List[str]: ...
+    def orphan_itineraries_total(self) -> int: ...
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        """M19: `last_seen_at = at` se è nullo o più vecchio di `min_interval`; dice se ha scritto.
+        È l'unica scrittura di `last_seen_at` dopo l'inserimento: `save` e `save_if_status` non
+        lo toccano, così una scrittura con l'ordine letto prima non lo riporta indietro."""
 
 
 class RejectionRepository(Protocol):
-    def add(self, rejection: Rejection) -> None: ...
+    def add(self, rejection: Rejection) -> None:
+        """Un rifiuto per proposta: un secondo `add` sulla stessa proposta non cambia niente."""
+    def update(self, rejection: Rejection) -> None:
+        """RF-55 (M21-F): nuovo tipo e `keep_product` del rifiuto già registrato per la stessa
+        proposta; motivo e data restano. Nessuna riga: nessun effetto."""
     def product_ids_for_intent(self, intent_id: str) -> Set[str]: ...
     def proposal_ids_for_intent(self, intent_id: str) -> Set[str]: ...
     def list_for_intent(self, intent_id: str) -> List[Rejection]: ...
+
+
+class QuoteRepository(Protocol):
+    """RF-84: cache del prezzo per chiave, condivisa tra le istanze."""
+    def get(self, key: QuoteKey) -> Optional[PriceQuote]: ...
+    def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
+        """Atomica: `order_id` diventa leader (riga `pending`) se la riga manca, se è `ready` con
+        `priced_at < fresh_after`, o se è `pending` con un leader che non è più `queued` oppure
+        che non ha un job d'acquisto attivo e ha preso la riga prima di `fresh_after`."""
+    def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
+        """Riga `ready` con il totale e, nella stessa transazione, gli ordini `queued` agganciati
+        alla chiave passano a `awaiting_confirmation` con quel totale (fanout). Id sbloccati."""
+    def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
+        """Cancella la riga se è `pending` con quel leader e sgancia i suoi ordini
+        (`follows_quote` falso), restituiti in ordine di id; altrimenti []."""
+    def detach(self, order: Order) -> bool:
+        """Salva `order` solo se l'ordine salvato è ancora `queued` e agganciato, in modo atomico
+        rispetto a `release` e `publish`; dice se ha salvato."""
 
 
 class Repositories(Protocol):
@@ -67,6 +97,7 @@ class Repositories(Protocol):
     rejections: RejectionRepository
     jobs: JobRepository
     quota: QuotaStore
+    quotes: QuoteRepository
 
     def catalog_lock(self) -> ContextManager[bool]:
         """Un solo sync del catalogo alla volta fra tutte le istanze (RF-30): True se preso,

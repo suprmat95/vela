@@ -30,6 +30,13 @@ class ReplayHofJTest(unittest.TestCase):
         self.assertIsInstance(iid, str)
         self.assertTrue(iid.startswith(ITINERARY_PREFIX))
 
+    def test_create_itinerary_keeps_the_rooms(self):
+        """M21-D (RF-67): le camere arrivano al carrello replay; il totale resta prezzo × adulti
+        (nessun sovrapprezzo simulato)."""
+        iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 5, 3, "EUR")
+        self.assertEqual(self.hofj._get(iid)["rooms"], 3)
+        self.assertEqual(self.hofj.get_itinerary(iid).total, Decimal("2890"))
+
     def test_get_itinerary_returns_the_amount_to_pay(self):
         iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 2, 1, "EUR")
         it = self.hofj.get_itinerary(iid)
@@ -49,8 +56,17 @@ class ReplayHofJTest(unittest.TestCase):
     def test_unknown_itinerary_is_upstream_error(self):
         with self.assertRaises(UpstreamError):
             self.hofj.get_pax("it-replay-nope")
-        with self.assertRaises(UpstreamError):
-            self.hofj.set_customer("it-replay-nope", CUSTOMER)
+        for write in (lambda iid: self.hofj.set_customer(iid, CUSTOMER),
+                      lambda iid: self.hofj.set_pax(iid, [Pax("pax-1", "Anna", "Rossi")])):
+            with self.assertRaises(UpstreamError):
+                write("it-other")
+
+    def test_customer_and_pax_accepted_on_a_cart_of_a_previous_process(self):
+        """M19: cliente e pax arrivano dopo il pagamento, magari dopo un riavvio che ha svuotato
+        i carrelli in memoria; come `create_booking`, il replay accetta i suoi id."""
+        self.hofj.set_customer("it-replay-older", CUSTOMER)
+        self.hofj.set_pax("it-replay-older", [Pax("pax-1", "Anna", "Rossi")])
+        self.assertTrue(self.hofj.create_booking("it-replay-older", PaymentProof("pi", "succeeded")).startswith("R-"))
 
     def test_booking_code_format_and_idempotence(self):
         iid = self.hofj.create_itinerary(make_product(1), date(2026, 10, 1), 2, 1, "EUR")

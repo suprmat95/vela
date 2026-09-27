@@ -79,7 +79,7 @@ class RecordFixturesTest(unittest.TestCase):
         self.assertEqual(len(self.source.calls), 1 + 2 + 1)    # quota, due pagine, un dettaglio
 
     def test_respects_the_calls_already_used_in_the_window(self):
-        self.source.used = 86                                  # 87 = tetto del sync nella finestra
+        self.source.used = 104                                 # HofJ lascia 4 gettoni, 2 sopra la soglia
         self.record()
         self.assertTrue(self.clock.slept)
 
@@ -136,6 +136,19 @@ class AddTrapTest(unittest.TestCase):
         self.catalog["products"].append(item(900118))
         with self.assertRaises(ValueError):
             add_trap(self.catalog, "118")
+
+    def test_archive_template_archives_the_original(self):
+        """M21-B: con RF-61 la trappola vince solo se il modello esce dai filtri duri, quindi la
+        prova di §10.4 archivia il modello (item `archived`, dettaglio tolto)."""
+        self.assertEqual(add_trap(self.catalog, "118", archive_template=True), "900118")
+        template = [p for p in self.catalog["products"] if p["id"] == "118"]
+        self.assertEqual([p["archived"] for p in template], [True])
+        self.assertNotIn("118", self.catalog["details"])
+        self.assertIn("900118", self.catalog["details"])
+        path = os.path.join(tempfile.mkdtemp(), "catalog.json")
+        write_catalog(self.catalog, path)
+        loaded = {p.id: p.archived for p in load_fixture(path)}
+        self.assertEqual((loaded["118"], loaded["900118"]), (True, False))
 
     def test_trap_loads_as_the_cheapest_active_product(self):
         add_trap(self.catalog, "118")

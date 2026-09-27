@@ -1,8 +1,10 @@
-"""Chooser v2 sul catalogo reale in fixture (M11): tabelle intento → prodotto atteso, rifiuti
-in sequenza, casi limite e proprietà verificate esaurendo i rifiuti.
+"""Chooser sul catalogo reale in fixture (M11): tabelle intento → prodotto atteso, rifiuti in
+sequenza, casi limite e proprietà verificate esaurendo i rifiuti.
 
 Gli id attesi dipendono da `fixtures/catalog.json` registrata il 2026-09-25: se la fixture
-viene rigenerata, le tabelle vanno riviste (le proprietà no).
+viene rigenerata, le tabelle vanno riviste (le proprietà no). Tabelle riviste in M21-B per
+l'ordinamento v3 di RF-60 (partenza più vicina all'inizio del periodo e `featured` prima del
+prezzo): le righe cambiate sono elencate in `docs/decisions.md`.
 """
 import os
 import re
@@ -32,15 +34,15 @@ INTENTS = {
     # nome: (criteri, [(id, inizio, fine, area_score, entro budget), ...] per le prime tre scelte)
     "demo §10.1": (Criteria("padel", A("Spagna"), OCT, 2, Decimal("800")), [
         ("1023", "2026-10-01", "2026-10-04", INSIDE, True),
-        ("1027", "2026-10-08", "2026-10-11", INSIDE, True),
-        ("1078", "2026-10-15", "2026-10-18", INSIDE, True)]),
+        ("257", "2026-10-02", "2026-10-02", INSIDE, True),            # parte il 2: prima del 1027 (8)
+        ("1027", "2026-10-08", "2026-10-11", INSIDE, True)]),
     "Lanzarote a novembre": (Criteria("padel", A("Lanzarote"), NOV, 2), [
+        ("186", "2026-11-01", "2026-11-07", INSIDE, True),           # finestra aperta, 7 giorni, parte il 1
         ("181", "2026-11-05", "2026-11-08", INSIDE, True),
-        ("186", "2026-11-01", "2026-11-07", INSIDE, True),           # finestra aperta, 7 giorni
         ("393", "2026-11-01", "2026-11-08", SAME_REGION, True)]),    # Fuerteventura
     "Canarie a dicembre": (Criteria("padel", A("Canarie"), DEC, 1), [
-        ("181", "2026-12-03", "2026-12-06", INSIDE, True),
         ("186", "2026-12-01", "2026-12-07", INSIDE, True),
+        ("181", "2026-12-03", "2026-12-06", INSIDE, True),
         ("443", "2026-12-06", "2026-12-11", INSIDE, True)]),         # Tenerife
     "Maiorca a ottobre, 1500 euro": (Criteria("padel", A("Maiorca"), OCT, 2, Decimal("1500")), [
         ("239", "2026-10-01", "2026-10-02", INSIDE, True),
@@ -49,11 +51,11 @@ INTENTS = {
     "Palma a novembre": (Criteria("padel", A("Palma de Mallorca"), NOV, 2), [
         ("910", "2026-11-12", "2026-11-15", INSIDE, True),
         ("239", "2026-11-01", "2026-11-02", SAME_REGION, True),
-        ("1023", "2026-11-05", "2026-11-08", SAME_COUNTRY, True)]),
+        ("186", "2026-11-01", "2026-11-07", SAME_COUNTRY, True)]),   # Lanzarote, parte il 1, featured
     "Italia a novembre in 4": (Criteria("padel", A("Italia"), NOV, 4, Decimal("2000")), [
         ("688", "2026-11-01", "2026-11-02", INSIDE, True),
         ("766", "2026-11-01", "2026-11-01", INSIDE, True),
-        ("210", "2026-11-07", "2026-11-07", INSIDE, True)]),
+        ("190", "2026-11-02", "2026-11-04", INSIDE, True)]),         # parte il 2: prima del 210 (7)
     "Firenze a ottobre": (Criteria("padel", A("Firenze"), OCT, 2), [
         ("229", "2026-10-03", "2026-10-03", INSIDE, True),
         ("688", "2026-10-01", "2026-10-02", SAME_REGION, True),      # Pietrasanta, Toscana
@@ -64,17 +66,17 @@ INTENTS = {
         ("239", "2026-10-10", "2026-10-11", SAME_COUNTRY, True)]),
     # casi limite: area senza prodotti, budget impossibile, nessuna area
     "Grecia a novembre": (Criteria("padel", A("Grecia"), NOV, 2), [
-        ("688", "2026-11-01", "2026-11-02", ELSEWHERE, True),
-        ("766", "2026-11-01", "2026-11-01", ELSEWHERE, True),
-        ("210", "2026-11-07", "2026-11-07", ELSEWHERE, True)]),
+        ("239", "2026-11-01", "2026-11-02", ELSEWHERE, True),        # featured del 1 novembre, per prezzo
+        ("330", "2026-11-01", "2026-11-04", ELSEWHERE, True),
+        ("186", "2026-11-01", "2026-11-07", ELSEWHERE, True)]),
     "Spagna a ottobre, 50 euro": (Criteria("padel", A("Spagna"), OCT, 2, Decimal("50")), [
-        ("1023", "2026-10-01", "2026-10-04", INSIDE, False),
-        ("1027", "2026-10-08", "2026-10-11", INSIDE, False),
-        ("1078", "2026-10-15", "2026-10-18", INSIDE, False)]),
+        ("239", "2026-10-01", "2026-10-02", INSIDE, False),          # tutti oltre: featured del 1 ottobre
+        ("181", "2026-10-01", "2026-10-04", INSIDE, False),
+        ("186", "2026-10-01", "2026-10-07", INSIDE, False)]),
     "ottobre ovunque": (Criteria("padel", None, OCT, 2), [
-        ("688", "2026-10-01", "2026-10-02", ELSEWHERE, True),
-        ("766", "2026-10-01", "2026-10-01", ELSEWHERE, True),
-        ("210", "2026-10-03", "2026-10-03", ELSEWHERE, True)]),      # 323 "Tornei", escluso (M10)
+        ("239", "2026-10-01", "2026-10-02", ELSEWHERE, True),        # featured del 1 ottobre, per prezzo
+        ("330", "2026-10-01", "2026-10-04", ELSEWHERE, True),
+        ("181", "2026-10-01", "2026-10-04", ELSEWHERE, True)]),      # 323 "Tornei", escluso (M10)
 }
 
 
@@ -110,7 +112,7 @@ class FixtureChooserTest(unittest.TestCase):
     def test_demo_reason(self):
         r = choose(self.products, INTENTS["demo §10.1"][0], set(), TODAY)
         self.assertEqual(r.reason, "È a Torre del Mar, in Spagna come hai chiesto. Parte il 1 ottobre "
-                                   "2026, nel periodo che hai chiesto, e costa 558 euro in totale, "
+                                   "2026, nel periodo che hai chiesto, con un totale a partire da 558 euro, "
                                    "dentro il tuo budget di 800 euro.")
 
     def test_compromises_are_declared(self):
@@ -159,7 +161,10 @@ class FixtureChooserTest(unittest.TestCase):
                     self.assertTrue(any(w.start <= r.start_date and r.end_date <= w.end
                                         for w in p.availabilities))
                     self.assertLessEqual(len(sentences(r.reason)), 2, r.reason)
-                    key = (-r.area_score, not r.within_budget, p.price, p.id)
+                    # RF-60 (M21-B): area, budget, durata, partenza, featured, prezzo, id numerico
+                    key = (-r.area_score, not r.within_budget, not r.duration_ok, r.start_date,
+                           not (p.featured or p.special_offer), p.price,
+                           (0, int(p.id)) if p.id.isdecimal() else (1, p.id))
                     if previous is not None:
                         self.assertLessEqual(previous, key)               # ordinamento non decrescente
                     previous = key

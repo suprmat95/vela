@@ -6,9 +6,16 @@ import json
 import os
 import unittest
 
+from vela.domain.catalog import LABEL_KEYS, project_detail
+
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "fixtures", "catalog.json")
 MEDIA_KEYS = ("gallery", "image", "images", "cover", "media", "travelProgram")
 MAX_BYTES = 1500000
+
+
+def label_keys(catalog):
+    """Le tre etichette di Vela (M21-C) di un `catalog` di fixture."""
+    return {k: catalog[k] for k in LABEL_KEYS}
 
 
 def has_key(value, key):
@@ -55,10 +62,16 @@ class CatalogFixtureTest(unittest.TestCase):
         for pid, detail in self.details.items():
             catalog, raw = detail["catalog"], detail["raw"]
             for key in ("category", "venue", "destination", "hotels", "price", "minDate",
-                        "maxDate", "availabilities", "defaultDurationInDays", "updatedAt"):
+                        "maxDate", "availabilities", "defaultDurationInDays", "updatedAt",
+                        "featured", "isSpecialOffer", "maxPaxPerRoom"):
                 self.assertIn(key, catalog, pid)
             self.assertIsInstance(catalog["category"], dict, pid)
             self.assertEqual(catalog["id"], pid)
+            # M21-B: la proiezione riporta le etichette del dettaglio così come sono
+            self.assertEqual((catalog["featured"], catalog["isSpecialOffer"]),
+                             (raw["featured"], raw["isSpecialOffer"]), pid)
+            self.assertEqual(catalog["maxPaxPerRoom"], raw["maxPaxPerRoom"], pid)   # M21-D
+            self.assertEqual(label_keys(catalog), label_keys(project_detail(raw)), pid)   # M21-C
             self.assertIn("hotels", raw.get("rawAttributes") or {}, pid)
             for key in MEDIA_KEYS:
                 self.assertFalse(has_key(raw, key), "%s contiene %s" % (pid, key))
@@ -99,6 +112,12 @@ class EveryFixtureTest(unittest.TestCase):
                     self.assertFalse(has_key(catalog["details"], key), key)
                 active = sorted(str(p["id"]) for p in catalog["products"] if not p.get("archived"))
                 self.assertEqual(active, sorted(catalog["details"]))
+                for pid, detail in catalog["details"].items():   # M21-B, M21-D: etichette in `catalog`
+                    self.assertEqual((detail["catalog"]["featured"], detail["catalog"]["isSpecialOffer"]),
+                                     (detail["raw"]["featured"], detail["raw"]["isSpecialOffer"]), pid)
+                    self.assertEqual(detail["catalog"]["maxPaxPerRoom"], detail["raw"]["maxPaxPerRoom"], pid)
+                    # M21-C: etichette di Vela calcolate dal dettaglio con le regole di oggi
+                    self.assertEqual(label_keys(detail["catalog"]), label_keys(project_detail(detail["raw"])), pid)
 
 
 if __name__ == "__main__":

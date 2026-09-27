@@ -3,8 +3,9 @@
 Uso: uv run python scripts/mcp_smoke.py https://vela-n506.onrender.com/mcp
 
 Solo per la modalità replay: il "pagamento" è la visita del link /replay/checkout/{order_id}.
-L'accettazione mette l'ordine in coda (M5): lo script interroga `get_order_status` finché il link
-è pronto, lo visita e aspetta la conferma.
+L'accettazione mette l'ordine in coda (M5): lo script interroga `get_order_status` finché c'è il
+prezzo effettivo, lo conferma con una seconda `accept_proposal` (decisione 2026-09-26), aspetta il
+link, lo visita e aspetta la conferma della prenotazione.
 Nessuna chiamata a HofJ né a Stripe; sul server restano un intento e un ordine di prova.
 Richiede Python 3.12 (`uv run`), non il python3 di sistema. Il rifiuto "troppo caro" produce una
 proposta diversa, non necessariamente più economica: l'interpretazione del motivo arriva con M9.
@@ -20,8 +21,8 @@ INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 eur
 TRAVELER = {"first_name": "Prova", "last_name": "Smoke", "email": "smoke@example.com",
             "phone": "+390000000000",
             "participants": [{"first_name": "Seconda", "last_name": "Smoke"}]}
-TOOL_NAMES = {"create_intent", "get_proposal", "reject_proposal", "accept_proposal",
-              "get_order_status"}
+TOOL_NAMES = {"create_intent", "get_proposal", "get_proposal_details", "reject_proposal",
+              "accept_proposal", "get_order_status"}
 
 
 class SmokeFailure(Exception):
@@ -60,6 +61,7 @@ async def run_flow(client, open_url: Callable[[str], None], expected_base: Optio
         raise SmokeFailure("tool attesi %s, trovati %s" % (sorted(TOOL_NAMES), sorted(names)))
     intent = await call(client, "create_intent", {"text": INTENT}, "intent_id")
     first = await call(client, "get_proposal", {"intent_id": intent["intent_id"]}, "proposal_id")
+    await call(client, "get_proposal_details", {"proposal_id": first["proposal_id"]}, "program")
     second = await call(client, "reject_proposal",
                         {"proposal_id": first["proposal_id"], "reason": "troppo caro"}, "proposal_id")
     if second["product"]["product_id"] == first["product"]["product_id"]:
@@ -67,6 +69,8 @@ async def run_flow(client, open_url: Callable[[str], None], expected_base: Optio
     accepted = await call(client, "accept_proposal",
                           dict(TRAVELER, proposal_id=second["proposal_id"]), "order_id")
     order_id = accepted["order_id"]
+    await wait_for(client, order_id, {"awaiting_confirmation"}, attempts, delay, tick)
+    await call(client, "accept_proposal", {"proposal_id": second["proposal_id"]}, "order_id")   # il sì
     ready = await wait_for(client, order_id, {"awaiting_payment"}, attempts, delay, tick)
     url = ready["payment_url"]
     if expected_base and not url.startswith(expected_base.rstrip("/") + "/"):

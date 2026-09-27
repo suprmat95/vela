@@ -90,3 +90,29 @@ Nate dalla rilettura del twist (`docs/plans/2026-09-26-twist-seconda-lettura.md`
     `PUT /v1/itineraries/{id}/pax` sono accettati anche dopo che il viaggiatore ha pagato (prima
     di `POST /v1/bookings`)? Il totale dell'itinerario può cambiare dopo l'inserimento dei
     passeggeri?
+
+    *Verificato in parte su staging il 2026-09-27 (`docs/api/customer-pax.md`, sonda M19):* il
+    totale non cambia dopo `PUT customer` e `PUT pax` (1156 € prima e dopo sul prodotto 124).
+    Anche la prima metà su staging: con un PaymentIntent di test `succeeded` legato da
+    `checkoutRefId`, `PUT customer` e `PUT pax` rispondono 200 e il booking successivo riesce
+    (`scripts/m19_paid_probe.py`, itinerario `ttlup3o1amxu`). Da chiedere a HofJ: vale anche in
+    produzione e con il PaymentIntent creato da una Checkout Session?
+
+## Domande aggiunte il 2026-09-27 (sonda di `/accommodations`, M22-a)
+
+Nate dalla sonda di M22-a (`docs/api/accommodations.md`, differenze #28-#35).
+
+11. **Lista degli hotel.** Su un itinerario con `hotelSelection: true` e
+    `allowAccommodationList: false` `GET /v1/itineraries/{id}/accommodations` restituisce una
+    lista vuota. La lista degli hotel alternativi esiste solo con `allowAccommodationList: true`?
+    Che cosa abilita `hotelSelection`?
+
+12. **Camere e `PATCH`.** L'unico hotel restituito su staging ha `roomsConfiguration: []`. Da
+    dove si prendono i `roomIds` di `PATCH /v1/itineraries/{id}/accommodations/{accommodationId}`
+    per 2 adulti in 1 camera e in 2 camere? Dopo il `PATCH` `checkout.openAmount` si aggiorna
+    subito o serve un'altra chiamata?
+
+13. **Itinerario senza hotel.** Sul prodotto 25 (`allowAccommodationList: true`) l'itinerario
+    appena creato ha `accommodation` con tutti i campi `null` e `removableAccommodation: true`,
+    ma un totale di 1798 €. Un booking su quell'itinerario comprende un hotel? Va scelto per
+    forza prima del pagamento?

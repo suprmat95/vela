@@ -9,17 +9,20 @@ import json
 import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
+from vela.domain.labels import LABEL_ORDER, labels_of, ordered
 from vela.domain.models import Availability, Product
 
 SPORTS = ("padel", "tennis")
-# chiavi scartate a ogni profondità del dettaglio: immagini e programma di viaggio
-MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media", "travelProgram"])
+# chiavi scartate a ogni profondità del dettaglio: le immagini. `travelProgram` resta (RF-83)
+MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media"])
 # campi di RF-28 presi pari pari dal dettaglio (category, venue, destination, hotels a parte)
 CATALOG_FIELDS = ("id", "title", "slug", "shortDescription", "price", "currency", "minPax",
                   "maxPax", "minDate", "maxDate", "availabilities", "defaultDurationInDays",
-                  "updatedAt")
+                  "updatedAt", "featured", "isSpecialOffer", "maxPaxPerRoom")
+# M21-C (RF-63): etichette calcolate da Vela, non campi dell'API (prefisso come `vela_trap`)
+LABEL_KEYS = ("vela_levels", "vela_levels_exclusive", "vela_coaching")
 
 
 def strip_media(value):
@@ -32,9 +35,15 @@ def strip_media(value):
 
 
 def project_detail(detail: dict) -> dict:
-    """Campi di RF-28 presi dal dettaglio esteso, con i nomi dell'API; None se mancanti.
+    """Campi di RF-28 presi dal dettaglio esteso, con i nomi dell'API; None se mancanti. In più
+    le etichette di livello e lezioni (M21-C, RF-63) calcolate da `description` e
+    `shortDescription` con `labels_of`, la stessa funzione del backfill della migrazione 0012.
     È il `catalog` delle fixture e l'ingresso di `product_from_entry` nel sync (M10)."""
     catalog = {k: detail.get(k) for k in CATALOG_FIELDS}
+    labels = labels_of(detail)
+    catalog["vela_levels"] = ordered(labels.levels)
+    catalog["vela_levels_exclusive"] = labels.levels_exclusive
+    catalog["vela_coaching"] = labels.coaching
     catalog["category"] = detail.get("category")
     catalog["venue"] = detail.get("venue")
     catalog["destination"] = detail.get("destination")
@@ -54,6 +63,20 @@ def detect_sport(*texts: Optional[str]) -> str:
 
 def _date(value: Optional[str]) -> Optional[date]:
     return date.fromisoformat(value[:10]) if value else None
+
+
+def _positive_int(value) -> Optional[int]:
+    """`maxPaxPerRoom` vale solo come intero positivo: assente, nullo, zero o altro = nessun limite."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def _levels(value) -> frozenset:
+    """`vela_levels` come insieme dei soli valori noti; assente o non lista = sconosciuto."""
+    if not isinstance(value, list):
+        return frozenset()
+    return frozenset(v for v in value if v in LABEL_ORDER)
 
 
 def _hotel_name(entry: dict) -> Optional[str]:
@@ -102,6 +125,12 @@ def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datet
         archived=archived,
         provider_id=entry.get("providerID"),
         brand=brand,
+        featured=bool(entry.get("featured")),            # M21-B (RF-60): assente o nullo = falso
+        special_offer=bool(entry.get("isSpecialOffer")),
+        max_pax_per_room=_positive_int(entry.get("maxPaxPerRoom")),   # M21-D (RF-66)
+        levels=_levels(entry.get("vela_levels")),                     # M21-C (RF-63)
+        levels_exclusive=entry.get("vela_levels_exclusive") is True,
+        coaching=entry.get("vela_coaching") is True,
     )
 
 

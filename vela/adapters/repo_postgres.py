@@ -1,22 +1,28 @@
 """Repository Postgres con SQLAlchemy Core (RNF-01): una transazione per metodo, nessuno stato in processo."""
 import threading
+from dataclasses import replace
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
 
-from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from vela.adapters.schema import (intents_t, jobs_t, orders_t, products_t, proposals_t,
-                                  quota_window_t, rejections_t)
+from vela.adapters.schema import (intents_t, jobs_t, orders_t, price_quotes_t, products_t,
+                                  proposals_t, quota_window_t, rejections_t)
+from vela.domain.labels import ordered
 from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, JobStatus, Order,
-                                OrderStatus, Product, Proposal, QuotaClass, Rejection, criteria_from_dict,
-                                criteria_to_dict, profile_from_dict, profile_to_dict)
-from vela.domain.quota import (QuotaWindow, after_429, describe, fresh_window, from_snapshot,
-                               rolled, try_acquire)
+                                OrderStatus, PriceQuote, Product, Proposal, QuotaClass, QuoteKey,
+                                QuoteStatus, Rejection, criteria_from_dict, criteria_to_dict,
+                                profile_from_dict, profile_to_dict)
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
+                               claim_refresh, describe, fresh_bucket, from_snapshot,
+                               available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
+from vela.ports.jobs import DuplicateJob
 from vela.ports.quota import DEFAULT_LIMIT_PER_MINUTE
 from vela.ports.repositories import DuplicateOrder, SyncState
 
@@ -34,6 +40,9 @@ def _product_row(p: Product) -> dict:
         "fetched_at": p.fetched_at, "bookable": p.bookable,
         "bookable_checked_at": p.bookable_checked_at, "archived": p.archived,
         "provider_id": p.provider_id, "brand": p.brand,
+        "featured": p.featured, "special_offer": p.special_offer,
+        "max_pax_per_room": p.max_pax_per_room,
+        "levels": ordered(p.levels), "levels_exclusive": p.levels_exclusive, "coaching": p.coaching,
     }
 
 
@@ -49,7 +58,11 @@ def _product(m, raw: Optional[dict]) -> Product:
         duration_days=m["duration_days"], hofj_updated_at=m["hofj_updated_at"],
         raw=raw if raw is not None else {}, fetched_at=m["fetched_at"], bookable=m["bookable"],
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
-        provider_id=m["provider_id"], brand=m["brand"])
+        provider_id=m["provider_id"], brand=m["brand"],
+        featured=bool(m["featured"]), special_offer=bool(m["special_offer"]),
+        max_pax_per_room=m["max_pax_per_room"],
+        levels=frozenset(m["levels"] or ()), levels_exclusive=bool(m["levels_exclusive"]),
+        coaching=bool(m["coaching"]))
 
 
 class PostgresProducts:
@@ -186,7 +199,15 @@ def _order_row(o: Order) -> dict:
         "booking_code": o.booking_code, "failure_reason": o.failure_reason,
         "created_at": o.created_at, "updated_at": o.updated_at, "paid_at": o.paid_at,
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
+        "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
+        "follows_quote": o.follows_quote, "confirmed_total": o.confirmed_total,
+        "last_seen_at": o.last_seen_at,
     }
+
+
+def _order_update(o: Order) -> dict:
+    """M19: i `save` non scrivono `last_seen_at`, che si muove solo con `touch`."""
+    return {k: v for k, v in _order_row(o).items() if k not in ("id", "last_seen_at")}
 
 
 def _order(m) -> Order:
@@ -196,7 +217,10 @@ def _order(m) -> Order:
                  itinerary_id=m["itinerary_id"], payment_url=m["payment_url"],
                  payment_ref=m["payment_ref"], booking_code=m["booking_code"],
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
-                 enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"])
+                 enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
+                 orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"],
+                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"],
+                 last_seen_at=m["last_seen_at"])
 
 
 class PostgresOrders:
@@ -228,15 +252,35 @@ class PostgresOrders:
         return None if m is None else _order(m)
 
     def save(self, order: Order) -> None:
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             conn.execute(update(orders_t).where(orders_t.c.id == order.id).values(**values))
+
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order_id,
+                or_(orders_t.c.last_seen_at.is_(None), orders_t.c.last_seen_at <= at - min_interval))
+                .values(last_seen_at=at))
+        return res.rowcount == 1
+
+    def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
+        """Un solo `UPDATE ... WHERE status = expected`: tra due scritture concorrenti vince una."""
+        values = _order_update(order)
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(orders_t.c.id == order.id,
+                                                      orders_t.c.status == expected.value).values(**values))
+        return res.rowcount == 1
 
     def ids_with_status(self, status: OrderStatus) -> List[str]:
         with self.engine.connect() as conn:
             rows = conn.execute(select(orders_t.c.id).where(orders_t.c.status == status.value)
                                 .order_by(orders_t.c.id)).all()
         return [r[0] for r in rows]
+
+    def orphan_itineraries_total(self) -> int:
+        with self.engine.connect() as conn:
+            return int(conn.execute(select(func.coalesce(func.sum(orders_t.c.orphan_itineraries), 0))).scalar())
 
 
 class PostgresRejections:
@@ -246,10 +290,16 @@ class PostgresRejections:
     def add(self, r: Rejection) -> None:
         stmt = pg_insert(rejections_t).values(
             intent_id=r.intent_id, proposal_id=r.proposal_id, product_id=r.product_id,
-            reason=r.reason, created_at=r.created_at).on_conflict_do_nothing(
+            reason=r.reason, created_at=r.created_at, kind=r.kind,
+            keep_product=r.keep_product).on_conflict_do_nothing(
             index_elements=[rejections_t.c.proposal_id])
         with self.engine.begin() as conn:
             conn.execute(stmt)
+
+    def update(self, r: Rejection) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(rejections_t.update().where(rejections_t.c.proposal_id == r.proposal_id)
+                         .values(kind=r.kind, keep_product=r.keep_product))
 
     def product_ids_for_intent(self, intent_id: str) -> Set[str]:
         with self.engine.connect() as conn:
@@ -268,7 +318,110 @@ class PostgresRejections:
             rows = conn.execute(select(rejections_t).where(rejections_t.c.intent_id == intent_id)
                                 .order_by(rejections_t.c.created_at)).mappings().all()
         return [Rejection(m["intent_id"], m["proposal_id"], m["product_id"], m["reason"],
-                          m["created_at"]) for m in rows]
+                          m["created_at"], m["kind"], m["keep_product"]) for m in rows]
+
+
+_QUOTE_FIELDS = ("status", "leader_order_id", "total", "priced_at", "updated_at")
+
+
+def _quote_where(key: QuoteKey):
+    t = price_quotes_t.c
+    return and_(t.product_id == key.product_id, t.start_date == key.start_date,
+                t.adults == key.adults, t.rooms == key.rooms, t.currency == key.currency)
+
+
+def _followers_where(key: QuoteKey):
+    """Ordini `queued` agganciati alla chiave; la data sta sulla proposta."""
+    o = orders_t.c
+    return and_(o.follows_quote.is_(True), o.status == OrderStatus.QUEUED.value,
+                o.product_id == key.product_id, o.pax == key.adults, o.rooms == key.rooms,
+                o.currency == key.currency,
+                o.proposal_id.in_(select(proposals_t.c.id).where(proposals_t.c.start_date == key.start_date)))
+
+
+def _quote(m) -> PriceQuote:
+    return PriceQuote(QuoteKey(m["product_id"], m["start_date"], m["adults"], m["rooms"], m["currency"]),
+                      QuoteStatus(m["status"]), m["leader_order_id"], m["updated_at"],
+                      m["total"], m["priced_at"])
+
+
+class PostgresQuotes:
+    """RF-84: una riga per chiave; elezione del leader con un solo `INSERT ... ON CONFLICT`."""
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def get(self, key: QuoteKey) -> Optional[PriceQuote]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(price_quotes_t).where(_quote_where(key))).mappings().first()
+        return None if m is None else _quote(m)
+
+    def _upsert(self, key: QuoteKey, **values):
+        stmt = pg_insert(price_quotes_t).values(**key._asdict(), **values)
+        return stmt, {f: stmt.excluded[f] for f in _QUOTE_FIELDS}
+
+    def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
+        """Due passi nella stessa transazione. `INSERT ... DO NOTHING` vince se la riga manca;
+        altrimenti `SELECT ... FOR UPDATE` mette in fila i concorrenti sulla riga e ognuno, con
+        statement nuovi (READ COMMITTED), vede il leader scritto da chi lo precede. Un solo
+        `ON CONFLICT DO UPDATE ... WHERE` non basta: la sottoquery sul leader userebbe la snapshot
+        di inizio statement e potrebbe non vedere un leader appena confermato."""
+        t = price_quotes_t.c
+        pending = dict(status=QuoteStatus.PENDING.value, leader_order_id=order_id, total=None,
+                       priced_at=None, updated_at=now)
+        with self.engine.begin() as conn:
+            inserted = conn.execute(pg_insert(price_quotes_t).values(**key._asdict(), **pending)
+                                    .on_conflict_do_nothing().returning(t.leader_order_id)).first()
+            if inserted is not None:
+                return True
+            row = conn.execute(select(price_quotes_t).where(_quote_where(key)).with_for_update()).mappings().first()
+            if row is None:   # cancellata tra i due statement: riprova l'inserimento
+                return conn.execute(pg_insert(price_quotes_t).values(**key._asdict(), **pending)
+                                    .on_conflict_do_nothing().returning(t.leader_order_id)).first() is not None
+            if row["status"] == QuoteStatus.READY.value:
+                takeable = row["priced_at"] < fresh_after
+            else:
+                leader_id = row["leader_order_id"]
+                leader = conn.execute(select(orders_t.c.status).where(orders_t.c.id == leader_id)).scalar()
+                busy = conn.execute(select(jobs_t.c.id).where(
+                    jobs_t.c.order_id == leader_id, jobs_t.c.kind == JobKind.PURCHASE.value,
+                    jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
+                takeable = (leader != OrderStatus.QUEUED.value
+                            or (not busy and row["updated_at"] < fresh_after))
+            if takeable:
+                conn.execute(update(price_quotes_t).where(_quote_where(key)).values(**pending))
+            return takeable
+
+    def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
+        stmt, excluded = self._upsert(key, status=QuoteStatus.READY.value, leader_order_id=leader_order_id,
+                                      total=total, priced_at=now, updated_at=now)
+        fanout = (update(orders_t).where(_followers_where(key))
+                  .values(status=OrderStatus.AWAITING_CONFIRMATION.value, total=total,
+                          follows_quote=False, updated_at=now)
+                  .returning(orders_t.c.id))
+        with self.engine.begin() as conn:
+            conn.execute(stmt.on_conflict_do_update(index_elements=list(QuoteKey._fields), set_=excluded))
+            return sorted(r[0] for r in conn.execute(fanout))
+
+    def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
+        t = price_quotes_t.c
+        with self.engine.begin() as conn:
+            gone = conn.execute(delete(price_quotes_t).where(
+                _quote_where(key), t.status == QuoteStatus.PENDING.value,
+                t.leader_order_id == leader_order_id)).rowcount
+            if gone != 1:
+                return []
+            rows = conn.execute(update(orders_t).where(_followers_where(key))
+                                .values(follows_quote=False).returning(*orders_t.c)).mappings().all()
+        return sorted((_order(m) for m in rows), key=lambda o: o.id)
+
+    def detach(self, order: Order) -> bool:
+        values = _order_update(order)
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order.id, orders_t.c.status == OrderStatus.QUEUED.value,
+                orders_t.c.follows_quote.is_(True)).values(**values))
+        return res.rowcount == 1
 
 
 def _job_row(j: Job) -> dict:
@@ -284,8 +437,9 @@ def _job(m) -> Job:
 
 
 ACTIVE = (JobStatus.PENDING.value, JobStatus.RUNNING.value)
-CLAIM_PRIORITY = case({JobKind.BOOKING.value: 0, JobKind.PAYMENT_CHECK.value: 1},
-                      value=jobs_t.c.kind, else_=2)
+CLAIM_PRIORITY = case({JobKind.BOOKING.value: 0, JobKind.PAYMENT_CHECK.value: 1,
+                       JobKind.SMS_LINK.value: 2, JobKind.SMS_CONFIRMED.value: 2},
+                      value=jobs_t.c.kind, else_=3)
 
 
 class PostgresJobs:
@@ -296,8 +450,13 @@ class PostgresJobs:
         self.engine = engine
 
     def enqueue(self, job: Job) -> None:
-        with self.engine.begin() as conn:
-            conn.execute(jobs_t.insert().values(**_job_row(job)))
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(jobs_t.insert().values(**_job_row(job)))
+        except IntegrityError as exc:
+            if "uq_jobs_active_booking" in str(exc.orig):
+                raise DuplicateJob(job.order_id) from exc
+            raise
 
     def get(self, job_id: str) -> Optional[Job]:
         with self.engine.connect() as conn:
@@ -350,75 +509,86 @@ class PostgresJobs:
             return conn.execute(select(jobs_t.c.id).where(jobs_t.c.kind == JobKind.PURCHASE.value,
                                                           jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
 
+    def oldest_purchase_enqueued_at(self) -> Optional[datetime]:
+        with self.engine.connect() as conn:
+            return conn.execute(select(func.min(jobs_t.c.enqueued_at)).where(
+                jobs_t.c.kind == JobKind.PURCHASE.value, jobs_t.c.status.in_(ACTIVE))).scalar()
+
 
 QUOTA_ROW = 1
 
 
-def _window_row(w: QuotaWindow) -> dict:
-    return {"window_start": w.window_start, "window_end": w.window_end,
-            "limit_per_minute": w.limit_per_minute, "used": w.used, "needs_refresh": w.needs_refresh}
+def _bucket_row(b: QuotaBucket) -> dict:
+    return {"window_start": b.window_start, "window_end": b.window_end,
+            "limit_per_minute": b.limit_per_minute, "needs_refresh": b.needs_refresh,
+            "tokens": b.tokens, "refilled_at": b.refilled_at}
 
 
-def _window(m) -> QuotaWindow:
-    return QuotaWindow(m["window_start"], m["window_end"], m["limit_per_minute"], m["used"],
-                       m["needs_refresh"])
+def _bucket(m) -> QuotaBucket:
+    return QuotaBucket(m["tokens"], m["refilled_at"], m["limit_per_minute"], m["needs_refresh"],
+                       m["window_start"], m["window_end"])
 
 
 class PostgresQuota:
-    """Contatore di quota condiviso tra istanze (RF-36, RF-47): una riga, bloccata con
-    `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prenotano sullo
-    stesso stato. Le regole sono quelle pure di `vela.domain.quota`."""
+    """Token bucket condiviso tra istanze (RF-36, RF-47, M18): una riga, bloccata con
+    `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prendono gli stessi
+    gettoni. Le regole sono quelle pure di `vela.domain.quota`."""
 
-    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20):
+    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = DEFAULT_RESERVE,
+                 rules: Optional[BucketRules] = None):
         self.engine = engine
-        self.margin, self.reserve = margin, reserve
+        self.rules = rules or BucketRules(margin, reserve)
 
-    def _locked(self, conn, now: datetime) -> QuotaWindow:
+    def _locked(self, conn, now: datetime) -> QuotaBucket:
         conn.execute(pg_insert(quota_window_t).values(
-            id=QUOTA_ROW, **_window_row(fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)))
+            id=QUOTA_ROW, **_bucket_row(fresh_bucket(now, DEFAULT_LIMIT_PER_MINUTE, self.rules)))
             .on_conflict_do_nothing(index_elements=[quota_window_t.c.id]))
         m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)
                          .with_for_update()).mappings().one()
-        return _window(m)
+        return _bucket(m)
 
-    def _read(self, now: datetime) -> Optional[QuotaWindow]:
+    def _read(self, now: datetime) -> QuotaBucket:
         with self.engine.connect() as conn:
             m = conn.execute(select(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW)).mappings().first()
-        return None if m is None else _window(m)
+        return fresh_bucket(now, DEFAULT_LIMIT_PER_MINUTE, self.rules) if m is None else _bucket(m)
 
-    def _save(self, conn, w: QuotaWindow) -> None:
-        conn.execute(update(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW).values(**_window_row(w)))
+    def _save(self, conn, b: QuotaBucket) -> None:
+        conn.execute(update(quota_window_t).where(quota_window_t.c.id == QUOTA_ROW).values(**_bucket_row(b)))
 
-    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+    def _change(self, now: datetime, rule) -> bool:
+        """Applica `rule` alla riga bloccata; None dalla regola = nessuna modifica."""
         with self.engine.begin() as conn:
-            new = try_acquire(self._locked(conn, now), cls, n, now, self.margin, self.reserve,
-                              purchase_waiting)
+            new = rule(self._locked(conn, now))
             if new is not None:
                 self._save(conn, new)
             return new is not None
 
-    def on_429(self, now: datetime) -> None:
-        with self.engine.begin() as conn:
-            self._save(conn, after_429(self._locked(conn, now), now, self.margin, self.reserve))
+    def acquire(self, cls: QuotaClass, n: int, now: datetime, purchase_waiting: bool = False) -> bool:
+        return self._change(now, lambda b: try_take(b, cls, n, now, self.rules, purchase_waiting))
+
+    def on_429(self, now: datetime, hold_seconds: float = 0.0) -> None:
+        self._change(now, lambda b: after_429(b, now, self.rules, hold_seconds))
 
     def needs_refresh(self, now: datetime) -> bool:
-        w = self._read(now)
-        return w is None or w.needs_refresh
+        return self._read(now).needs_refresh
 
-    def sync_from_snapshot(self, snapshot: QuotaSnapshot) -> None:
-        w = from_snapshot(snapshot.limit_per_minute, snapshot.used_in_window,
-                          snapshot.window_started_at, snapshot.window_ends_at)
-        with self.engine.begin() as conn:
-            conn.execute(pg_insert(quota_window_t).values(id=QUOTA_ROW, **_window_row(w))
-                         .on_conflict_do_update(index_elements=[quota_window_t.c.id], set_=_window_row(w)))
+    def claim_refresh(self, now: datetime) -> bool:
+        return self._change(now, lambda b: claim_refresh(b, now, self.rules))
+
+    def mark_refresh_needed(self, now: datetime) -> None:
+        self._change(now, lambda b: replace(b, needs_refresh=True))
+
+    def sync_from_snapshot(self, snapshot: QuotaSnapshot, now: datetime) -> None:
+        self._change(now, lambda b: from_snapshot(
+            b, snapshot.limit_per_minute, snapshot.used_in_window, snapshot.window_started_at,
+            snapshot.window_ends_at, now, self.rules))
 
     def snapshot(self, now: datetime) -> dict:
-        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
-        return describe(w, now, self.margin, self.reserve)
+        return describe(self._read(now), now, self.rules)
 
-    def next_window_start(self, now: datetime) -> datetime:
-        w = self._read(now) or fresh_window(now, DEFAULT_LIMIT_PER_MINUTE)
-        return rolled(w, now).window_end
+    def next_window_start(self, now: datetime, cls: QuotaClass = QuotaClass.PURCHASE,
+                          n: int = CALLS_PER_PURCHASE) -> datetime:
+        return available_at(self._read(now), now, self.rules, cls, n)
 
 
 # chiave dell'advisory lock del sync del catalogo (RF-30): costante, unica per tutti i brand
@@ -426,7 +596,8 @@ CATALOG_LOCK_KEY = 7_646_512_010
 
 
 class PostgresRepositories:
-    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20):
+    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
+                 quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.engine = engine
         self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock
         self.products = PostgresProducts(engine)
@@ -435,7 +606,9 @@ class PostgresRepositories:
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
-        self.quota = PostgresQuota(engine, margin=quota_margin, reserve=booking_reserve)
+        self.quotes = PostgresQuotes(engine)
+        self.quota = PostgresQuota(engine, rules=BucketRules(quota_margin, booking_reserve,
+                                                             quota_burst, quota_floor))
 
     @contextmanager
     def catalog_lock(self):

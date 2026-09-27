@@ -3,14 +3,18 @@
 Uso:
   VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com
   VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com --trap
+  VELA_API_TOKEN=... uv run python scripts/rest_flow.py https://vela-n506.onrender.com --phone <numero>
 
 Flusso (criterio 3): intento → proposta → rifiuto "troppo caro" (la seconda proposta deve costare
-meno) → accept (202 in coda) → stato finché c'è il link → il link si paga a mano (4242 4242 4242
-4242) → stato finché l'ordine è `confirmed` con il codice di prenotazione.
+meno) → accept (il server aspetta il prezzo effettivo, oppure 202 in coda) → stato finché
+l'ordine è `awaiting_confirmation` → secondo accept, la conferma del prezzo → stato finché c'è il
+link → il link si paga a mano (4242 4242 4242 4242) → stato finché l'ordine è `confirmed` con il
+codice di prenotazione.
 `--trap` (criterio 4): intento → proposta (il prodotto trappola della fixture di staging) →
 accept → stato finché l'ordine è `replaced` con una proposta diversa e senza errori tecnici nel
 `say`. Nessun link nasce, quindi non resta niente da pagare né da annullare.
 
+`--phone` sostituisce il telefono finto del viaggiatore (test manuale degli SMS, docs/sms.md).
 Ogni risposta deve contenere al massimo un prodotto (RF-10). Alla fine stampa i tempi di ogni
 passo in una tabella Markdown per docs/acceptance.md. Il token si legge solo da VELA_API_TOKEN e
 non viene mai stampato. Chiamate: quelle del flusso verso Vela; Vela chiama HofJ e Stripe.
@@ -32,8 +36,9 @@ from mcp_smoke import count_products  # noqa: E402
 # tests/test_staging_fixture.py). Criteri 1 e 3: Barcellona (158, poi Tarragona 115); la frase di
 # §10.1 sulla Spagna porta al 867, che su staging ha un errore di configurazione HofJ (M7).
 # Criterio 4 (`--trap`): Firenze, dove la prima proposta è la trappola 900078 solo con una fixture
-# con la trappola clonata dal 78 (`vela.fixtures.add_trap`); quella di staging non la contiene
-# più (M7).
+# con la trappola clonata dal 78 e il 78 archiviato (`vela.fixtures.add_trap(catalog, "78",
+# archive_template=True)`: da M21-B, RF-61, la trappola non vince sul 78 attivo); quella di
+# staging non la contiene più (M7).
 INTENT_FLOW = "un weekend di padel a Barcellona a ottobre, siamo in due, massimo 1500 euro"
 INTENT_TRAP = "un weekend di padel a Firenze a ottobre, siamo in due"
 REASON = "troppo caro"
@@ -120,15 +125,17 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
             raise FlowFailure("dopo \"%s\" la proposta non è più economica: %s → %s"
                               % (REASON, first["total_from"], chosen["total_from"]))
         lap("rifiuto")
-    queued = expect(call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"]),
-                    "order_queued", "accept")
+    queued = call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"])
+    if queued.get("outcome") not in ("order_queued", "order_status"):
+        expect(queued, "order_queued", "accept")
     order_id = queued["order_id"]
     lap("accept")
 
     if trap:
-        # il link nasce solo se il carrello è riuscito: allora la trappola non è fallita
+        # il prezzo effettivo (e poi il link) arriva solo se il carrello è riuscito: allora la
+        # trappola non è fallita
         replaced = wait_status(http, order_id, {"replaced"}, clock, sleep, tick, poll, timeout,
-                               stop=frozenset(TERMINAL | {"awaiting_payment"}))
+                               stop=frozenset(TERMINAL | {"awaiting_confirmation", "awaiting_payment"}))
         lap("accept → sostituzione")
         new = replaced.get("proposal") or {}
         trap_product = chosen["product"]["product_id"]
@@ -142,8 +149,11 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
         return {"status": "replaced", "order_id": order_id, "trap_product": trap_product,
                 "replacement_product": new_product, "say": said, "timings": timings}
 
+    priced = wait_status(http, order_id, {"awaiting_confirmation"}, clock, sleep, tick, poll, timeout)
+    lap("accept → prezzo effettivo")
+    call(http, "POST", "/v1/proposals/%s/accept" % chosen["proposal_id"])   # la conferma del prezzo
     ready = wait_status(http, order_id, {"awaiting_payment"}, clock, sleep, tick, poll, timeout)
-    lap("accept → link")
+    lap("conferma → link")
     open_url(ready["payment_url"])
     done = wait_status(http, order_id, {"confirmed"}, clock, sleep, tick, poll, timeout)
     lap("link → confirmed")
@@ -151,7 +161,8 @@ def run_flow(http, open_url: Callable[[str], None], intent: Optional[str] = None
     return {"status": "confirmed", "order_id": order_id, "booking_code": done["booking_code"],
             "first_product": first["product"]["product_id"], "first_total": first["total_from"],
             "second_product": chosen["product"]["product_id"], "second_total": chosen["total_from"],
-            "total": ready.get("total"), "timings": timings}
+            "estimate": priced.get("price_from_total"), "total": ready.get("total"),
+            "timings": timings}
 
 
 def format_table(timings: Timings) -> str:
@@ -177,6 +188,9 @@ def main(argv=None, env=None, client_factory=None) -> int:
     ap.add_argument("--intent", help="frase dell'intento (default: INTENT_FLOW o INTENT_TRAP)")
     ap.add_argument("--poll", type=float, default=5.0, help="secondi tra due richieste di stato")
     ap.add_argument("--timeout", type=float, default=900.0, help="attesa massima per stato, in secondi")
+    ap.add_argument("--phone", default=PROFILE["phone"],
+                    help="telefono del viaggiatore, es. il proprio per il test degli SMS "
+                         "(docs/sms.md); mai nei commit")
     args = ap.parse_args(argv)
     env = os.environ if env is None else env
     token = env.get("VELA_API_TOKEN")
@@ -186,7 +200,8 @@ def main(argv=None, env=None, client_factory=None) -> int:
     factory = client_factory or http_client
     try:
         with factory(args.url, token) as client:
-            summary = run_flow(client, print_link, intent=args.intent, trap=args.trap,
+            summary = run_flow(client, print_link, intent=args.intent,
+                               profile=dict(PROFILE, phone=args.phone), trap=args.trap,
                                poll=args.poll, timeout=args.timeout)
     except (FlowFailure, httpx.HTTPError) as exc:
         print("FALLITO: %s" % exc, file=sys.stderr)

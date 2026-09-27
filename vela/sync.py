@@ -65,9 +65,11 @@ def _utcnow() -> datetime:
 class CatalogSync:
     def __init__(self, source: CatalogSource, repos, brands: Dict[str, str],
                  now: Callable[[], datetime] = _utcnow, sleep: Callable[[float], None] = time.sleep,
-                 batch_size: int = BATCH_SIZE):
+                 batch_size: int = BATCH_SIZE, full: bool = False):
         self.source, self.repos, self.brands = source, repos, brands
         self.now, self.sleep, self.batch_size = now, sleep, batch_size
+        # `--full` (RF-83): riscarica ogni dettaglio anche con `updatedAt` invariato
+        self.full = full
 
     def run(self) -> SyncReport:
         """Un giro su tutti i brand, sotto l'advisory lock: se un altro sync lo tiene, niente."""
@@ -113,7 +115,8 @@ class CatalogSync:
                         raise BrandConflict("il prodotto %s del brand %s è già del brand %s"
                                             % (pid, br.brand, known.brand))
                     seen.append(pid)
-                    if known is None or known.archived or known.updated_at != entry.get("updatedAt"):
+                    if (self.full or known is None or known.archived
+                            or known.updated_at != entry.get("updatedAt")):
                         pending.append(self._download(br, report, pid))
                         if len(pending) >= self.batch_size:
                             self._write(br, pending)
@@ -222,8 +225,9 @@ from vela.config import Settings, live_brands  # noqa: E402
 
 USAGE = """Sync del catalogo HofJ (M10). Senza opzioni: un giro su tutti i brand di HOFJ_BRANDS
 nel database di DATABASE_URL. Con --record: una fixture per brand in --out-dir, senza database.
---dry-run stampa le chiamate previste e non ne fa nessuna. La chiave HOFJ_API_KEY non viene mai
-stampata."""
+--dry-run stampa le chiamate previste e non ne fa nessuna. --full riscarica anche i dettagli
+invariati (per esempio dopo un cambio di ciò che si conserva nel `raw`). La chiave HOFJ_API_KEY
+non viene mai stampata."""
 
 
 class _CountingSource:
@@ -255,7 +259,8 @@ def database_repositories(settings: Settings):
     from vela.adapters.db import make_engine
     from vela.adapters.repo_postgres import PostgresRepositories
     return PostgresRepositories(make_engine(settings.database_url), quota_margin=settings.quota_margin,
-                                booking_reserve=settings.booking_reserve)
+                                booking_reserve=settings.booking_reserve,
+                                quota_burst=settings.quota_burst, quota_floor=settings.quota_floor)
 
 
 def _host_fixtures(base_url: str) -> Dict[str, str]:
@@ -304,6 +309,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--out-dir", default=FIXTURES_DIR, help="cartella delle fixture (--record)")
     parser.add_argument("--locale", help="locale delle chiamate (default: quello delle fixture dell'host)")
     parser.add_argument("--dry-run", action="store_true", help="stampa le chiamate previste, nessuna rete")
+    parser.add_argument("--full", action="store_true",
+                        help="riscarica il dettaglio di ogni prodotto attivo, anche se invariato")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -347,8 +354,8 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     repos = database_repositories(settings)
     if repos.quota.acquire(QuotaClass.SYNC, 1, _utcnow()):
-        repos.quota.sync_from_snapshot(source.get_quota())
-    report = CatalogSync(source, repos, brands).run()
+        repos.quota.sync_from_snapshot(source.get_quota(), _utcnow())
+    report = CatalogSync(source, repos, brands, full=args.full).run()
     for b in report.brands:
         print("%s (%s): pagine %d, dettagli %d, scritti %d, invariati %d, archiviati %d%s"
               % (b.brand, b.sport, b.pages, b.details, b.written, b.unchanged, b.archived,

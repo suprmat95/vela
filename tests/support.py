@@ -1,8 +1,12 @@
 """Helper condivisi dai test di M2: prodotti sintetici, porta HofJ finta, invariante RF-10."""
 from datetime import date, datetime, timezone
+from datetime import timedelta as _timedelta
 from decimal import Decimal
+from decimal import Decimal as _Decimal
 
 from vela.domain.models import Availability, Product
+from vela.ports.hofj import Itinerary, Pax, ProductError, QuotaSnapshot
+from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
 TODAY = date(2026, 9, 25)
@@ -12,7 +16,8 @@ def make_product(pid, price=500, sport="padel", country="ES", destination="Lanza
                  windows=(("2026-10-01", "2026-10-04"),), min_date="2026-09-25",
                  max_date="2026-12-31", min_pax=None, max_pax=None, archived=False,
                  bookable=True, hotel="Hotel Sole", title=None, brand=None,
-                 updated_at="2026-09-25T10:44:12.537Z", category="Vacanze", slug=None):
+                 updated_at="2026-09-25T10:44:12.537Z", category="Vacanze", slug=None,
+                 max_pax_per_room=None):
     return Product(
         id=str(pid), title=title or "Padel a %s %s" % (destination, pid), slug=slug or "p-%s" % pid,
         short_description="", sport=sport, category=category, destination=destination,
@@ -24,7 +29,7 @@ def make_product(pid, price=500, sport="padel", country="ES", destination="Lanza
                              for a, b in windows),
         duration_days=4, hofj_updated_at=updated_at, raw={},
         fetched_at=NOW, bookable=bookable, bookable_checked_at=None, archived=archived,
-        provider_id="t%s" % pid, brand=brand)
+        provider_id="t%s" % pid, brand=brand, max_pax_per_room=max_pax_per_room)
 
 
 def count_products(obj):
@@ -43,12 +48,6 @@ def assert_single_product(testcase, d):
     testcase.assertNotIn("http", d["say"])
     testcase.assertNotIn("**", d["say"])
 
-
-from decimal import Decimal as _Decimal
-from datetime import timedelta as _timedelta
-
-from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
-from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 
 class FakeHofJ:
@@ -86,7 +85,7 @@ class FakeHofJ:
             raise self.fail_itinerary
         self._maybe_fail("create_itinerary")
         iid = "it-%s" % product.id
-        self.pax[iid] = [Pax("ref-%d" % i) for i in range(adults)]
+        self.pax[iid] = [Pax("pax-%d" % (i + 1)) for i in range(adults)]   # come HofJ (differenza #36)
         total = self.total if self.total is not None else product.price * adults
         self.totals[iid] = (_Decimal(total), currency)
         return iid
@@ -104,6 +103,9 @@ class FakeHofJ:
     def set_pax(self, itinerary_id, pax):
         self.calls.append(("set_pax", itinerary_id, pax))
         self._maybe_fail("set_pax")
+        known = self.pax.get(itinerary_id)
+        if known is not None and {p.ref_id for p in pax} - {p.ref_id for p in known}:
+            raise ProductError("refId sconosciuto")   # M19: il ripiego del job di prenotazione
         self.pax[itinerary_id] = list(pax)
 
     def get_itinerary(self, itinerary_id):
@@ -181,3 +183,32 @@ def inline_worker(vela, **settings):
     from vela.app import build_worker
     from vela.config import Settings
     return build_worker(vela, Settings(worker_concurrency=0, **settings))
+
+
+def drain_to_link(vela, worker, proposal_id):
+    """Il flusso fino al link (decisione 2026-09-26): il job si ferma al prezzo effettivo, la
+    seconda accettazione è la conferma e il job riparte dal link."""
+    worker.drain()
+    vela.accept_proposal(proposal_id)
+    worker.drain()
+    return worker
+
+
+
+def asgi_transport(app):
+    """Transport httpx **sincrono** verso un'app ASGI in-process (M13a). `httpx.ASGITransport` è
+    solo asincrono e `HofJHttp` usa un client sincrono; il `TestClient` di Starlette gira su un
+    suo httpx, quindi qui la richiesta passa dal `TestClient` e la risposta torna in `httpx`."""
+    import httpx
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+
+    class _Transport(httpx.BaseTransport):
+        def handle_request(self, request):
+            r = client.request(request.method, str(request.url), headers=dict(request.headers),
+                               content=request.read())
+            return httpx.Response(r.status_code, headers=list(r.headers.items()),
+                                  content=r.content, request=request)
+
+    return _Transport()

@@ -1,6 +1,7 @@
 """Superficie REST (RF-40, RF-43): auth, esiti, errori RFC 7807, flusso completo in replay, RF-10."""
 import random
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 from urllib.parse import urlparse
 
@@ -122,7 +123,7 @@ class IntentEndpointsTest(unittest.TestCase):
         self.assertEqual(body["say"], body["question"])
 
     def test_profile_is_passed_to_the_domain(self):
-        body = new_intent(self.c, text="padel a ottobre", profile={"pax": 3})
+        body = new_intent(self.c, text="padel a ottobre, due camere", profile={"pax": 3})
         self.assertEqual(body["criteria"]["pax"], 3)
 
     def test_blank_text_is_422(self):
@@ -205,9 +206,38 @@ class ProposalEndpointsTest(unittest.TestCase):
         assert_single_product(self, body)
 
     def test_reject_without_body(self):
+        """M21-F (RF-75): senza motivo né tipo la risposta è la domanda chiusa, 200, con l'id della
+        proposta che resta aperta; con `reject_kind` other è il rifiuto di prima."""
         r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"], headers=AUTH)
         self.assertEqual(r.status_code, 200, r.text)
+        question = "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?"
+        self.assertEqual(r.json(), {"outcome": "question", "question": question, "say": question,
+                                    "proposal_id": self.first["proposal_id"]})
+        r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"], headers=AUTH,
+                        json={"reject_kind": "other"})
+        self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["outcome"], "proposal")
+
+    def test_reject_kind_and_keep_product(self):
+        """M21-F (RF-52, RF-74): stesso viaggio con un'altra partenza; `keep_product` di tipo
+        sbagliato è un 422 come `wants_coaching`, un `reject_kind` fuori elenco è scartato e detto."""
+        c, _ = make_client(products=[make_product(1, windows=(("2026-10-01", "2026-10-04"),
+                                                              ("2026-10-08", "2026-10-11"))),
+                                     make_product(2, price=900)])
+        iid = new_intent(c, text="padel a ottobre, siamo in due")["intent_id"]
+        first = proposal_for(c, iid)
+        body = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                      json={"reason": "va bene il viaggio", "reject_kind": "dates",
+                            "keep_product": True}).json()
+        self.assertEqual((body["outcome"], body["product"]["product_id"], body["start_date"]),
+                         ("proposal", "1", "2026-10-08"))
+        r = c.post("/v1/proposals/%s/reject" % body["proposal_id"], headers=AUTH,
+                   json={"keep_product": "forse"})
+        self.assertEqual(r.status_code, 422)
+        body = c.post("/v1/proposals/%s/reject" % body["proposal_id"], headers=AUTH,
+                      json={"reason": "boh", "reject_kind": "meteo"}).json()
+        self.assertEqual(body["outcome"], "question")
+        self.assertTrue(body["say"].startswith("Non ho potuto usare meteo come tipo di rifiuto."))
 
     def test_reject_with_null_reason(self):
         r = self.c.post("/v1/proposals/%s/reject" % self.first["proposal_id"],
@@ -218,7 +248,7 @@ class ProposalEndpointsTest(unittest.TestCase):
         c, _ = make_client(products=[make_product(1)])
         iid = new_intent(c, text="padel a ottobre, siamo in due")["intent_id"]
         pid = proposal_for(c, iid)["proposal_id"]
-        body = c.post("/v1/proposals/%s/reject" % pid, headers=AUTH).json()
+        body = c.post("/v1/proposals/%s/reject" % pid, headers=AUTH, json={"reject_kind": "other"}).json()
         self.assertEqual(body["outcome"], "no_match")
         self.assertEqual(body["failed_criterion"], "rejected")
 
@@ -227,10 +257,26 @@ class ProposalEndpointsTest(unittest.TestCase):
         self.assertEqual(r.status_code, 202, r.text)
         body = r.json()
         self.assertEqual(body, {"outcome": "order_queued", "order_id": body["order_id"],
-                                "status": "queued", "position": 1, "wait_seconds": 4,
+                                "status": "queued", "position": 1, "wait_seconds": 2,
                                 "say": body["say"]})
         self.assertEqual(r.headers["location"], "/v1/orders/%s" % body["order_id"])
         self.assertNotIn("http", body["say"])
+        assert_single_product(self, body)
+
+    def test_accept_returns_200_with_the_link_when_the_job_finishes_during_the_wait(self):
+        """M20: il prezzo e poi il link arrivano nella risposta dell'accept, senza `Location`."""
+        worker = inline_worker(self.vela)
+        self.vela.accept_wait_seconds, self.vela.sleep = 5, lambda seconds: worker.drain()
+        path = "/v1/proposals/%s/accept" % self.first["proposal_id"]
+        priced = self.c.post(path, json={}, headers=AUTH)
+        self.assertEqual(priced.status_code, 200, priced.text)
+        self.assertEqual((priced.json()["outcome"], priced.json()["status"]), ("order_status", "awaiting_confirmation"))
+        r = self.c.post(path, headers=AUTH)                    # la conferma
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["status"]), ("order_status", "awaiting_payment"))
+        self.assertTrue(body["payment_url"].startswith("http://test/"))
+        self.assertNotIn("location", r.headers)
         assert_single_product(self, body)
 
     def test_double_accept_returns_200_order_status(self):
@@ -292,10 +338,10 @@ class ProposalEndpointsTest(unittest.TestCase):
         assert_problem(self, r, 500, "internal-error")
         self.assertNotIn("segreto", r.text)
 
-    def test_openapi_lists_the_five_endpoints(self):
+    def test_openapi_lists_the_endpoints(self):
         paths = self.c.get("/openapi.json").json()["paths"]
         for path in ("/v1/intents", "/v1/intents/{intent_id}/proposal",
-                     "/v1/proposals/{proposal_id}/reject", "/v1/proposals/{proposal_id}/accept",
+                     "/v1/proposals/{proposal_id}/details", "/v1/proposals/{proposal_id}/reject", "/v1/proposals/{proposal_id}/accept",
                      "/v1/orders/{order_id}"):
             self.assertIn(path, paths)
 
@@ -321,7 +367,12 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(order["status"], "queued")
         again = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 200)
         self.assertEqual(again["order_id"], order["order_id"])
-        c.app.state.worker.drain()                           # job d'acquisto: link pronto
+        c.app.state.worker.drain()                           # job d'acquisto: prezzo effettivo
+        priced = call("get", "/v1/orders/%s" % order["order_id"], 200)
+        self.assertEqual((priced["status"], priced["payment_url"]), ("awaiting_confirmation", None))
+        confirmed = call("post", "/v1/proposals/%s/accept" % second["proposal_id"], 202)   # il sì
+        self.assertEqual(confirmed["order_id"], order["order_id"])
+        c.app.state.worker.drain()                           # link pronto
         status = call("get", "/v1/orders/%s" % order["order_id"], 200)
         self.assertEqual(status["status"], "awaiting_payment")
 
@@ -345,7 +396,10 @@ def proposal_id(c):
 class OrderStatusPaymentTest(unittest.TestCase):
     def test_awaiting_payment_status_has_link_and_amount(self):
         c, _ = make_client()
-        order = c.post("/v1/proposals/%s/accept" % proposal_id(c), headers=AUTH).json()
+        pid = proposal_id(c)
+        order = c.post("/v1/proposals/%s/accept" % pid, headers=AUTH).json()
+        c.app.state.worker.drain()
+        c.post("/v1/proposals/%s/accept" % pid, headers=AUTH)   # conferma del prezzo effettivo
         c.app.state.worker.drain()
         r = c.get("/v1/orders/%s" % order["order_id"], headers=AUTH).json()
         self.assertEqual((r["outcome"], r["status"]), ("order_status", "awaiting_payment"))
@@ -388,7 +442,7 @@ class AgentToolContractTest(unittest.TestCase):
         c, _ = make_client(products=SIVIGLIA_MADRID)
         r = c.post("/v1/intents", headers=AUTH, json={
             "text": "Padel a Atlantide, siamo in tre.", "sport": "padel", "area": "Atlantide",
-            "pax": 30, "budget": 1000})
+            "pax": 30, "rooms": 2, "budget": 1000})
         self.assertEqual(r.status_code, 201, r.text)
         d = r.json()
         self.assertIsNone(d["criteria"]["area"])
@@ -411,7 +465,7 @@ class AgentToolContractTest(unittest.TestCase):
     def test_profile_pax_stays_the_default(self):
         c, _ = make_client(products=SIVIGLIA_MADRID)
         r = c.post("/v1/intents", headers=AUTH,
-                   json={"text": "padel a ottobre", "pax": 3, "profile": {"pax": 2}})
+                   json={"text": "padel a ottobre", "pax": 3, "rooms": 2, "profile": {"pax": 2}})
         self.assertEqual(r.json()["criteria"]["pax"], 3)
 
     def test_no_match_after_reject_carries_rejected_proposal_id(self):
@@ -419,10 +473,228 @@ class AgentToolContractTest(unittest.TestCase):
         intent = new_intent(c)
         first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
         d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
-                   json={"reason": "no"}).json()
+                   json={"reason": "no", "reject_kind": "other"}).json()
         self.assertEqual((d["outcome"], d["rejected_proposal_id"]), ("no_match", first["proposal_id"]))
         d = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
                    json={"reason": "a novembre", "period_start": "2026-11-01",
                          "period_end": "2026-11-30"}).json()
         self.assertEqual(d["outcome"], "no_match")
         self.assertEqual(d["failed_criterion"], "dates")
+
+
+def trip(pid, nights, price):
+    """Prodotto a finestra fissa di `nights` notti dal 1 ottobre."""
+    end = "2026-10-%02d" % (1 + nights)
+    return replace(make_product(pid, price=price, windows=(("2026-10-01", end),)),
+                   duration_days=nights + 1)
+
+
+class DurationContractTest(unittest.TestCase):
+    """M21-A (UC-A): `duration_min_nights`/`duration_max_nights` nel corpo JSON, `nights` nella
+    proposta."""
+
+    PRODUCTS = [trip(1, 7, 300), trip(2, 3, 400)]
+
+    def test_fields_reach_the_intent(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": "padel in Spagna a ottobre, siamo in due", "duration_min_nights": 6,
+            "duration_max_nights": 8})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["duration_min_nights"], crit["duration_max_nights"]), (6, 8))
+        self.assertIn("da 6 a 8 notti", r.json()["say"])
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "duration_min_nights": "tre"})
+        self.assertEqual(r.status_code, 422)
+        r = c.post("/v1/proposals/x/reject", headers=AUTH, json={"duration_max_nights": [3]})
+        self.assertEqual(r.status_code, 422)
+
+    def test_out_of_range_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": "padel a ottobre, siamo in due", "duration_min_nights": 5,
+            "duration_max_nights": 2})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare 5 - 2 come durata in notti."))
+
+    def test_weekend_then_reject_with_fields(self):
+        # senza i campi la proposta successiva sarebbe l'altro weekend (id 3)
+        c, _ = make_client(products=self.PRODUCTS + [trip(3, 2, 450)])
+        intent = new_intent(c, text="un weekend di padel in Spagna a ottobre, siamo in due")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        assert_single_product(self, first)
+        self.assertEqual((first["product"]["product_id"], first["nights"]), ("2", 3))
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "no grazie", "duration_min_nights": 6})
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        assert_single_product(self, d)
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+
+class BudgetScopeContractTest(unittest.TestCase):
+    """M21-E (UC-E): `budget_scope` nel corpo JSON e nei criteri."""
+
+    # il più economico costa 450 in tre: senza campo 600 si leggerebbe in tutto (regola 4)
+    PRODUCTS = [make_product(1, price=150), make_product(2, price=250)]
+    THREE = "padel in Spagna a ottobre, siamo in tre, due camere"
+
+    def test_field_reaches_the_intent(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": self.THREE + ", 600 euro", "budget": 600, "budget_scope": "per_person"})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["budget"], crit["budget_scope"]), ("1800.00", "per_person"))
+        self.assertIn("600 euro a persona, 1800 in tutto", r.json()["say"])
+
+    def test_invalid_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.THREE, "budget_scope": "each"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare each come lettura del budget"))
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "budget_scope": ["total"]})
+        self.assertEqual(r.status_code, 422)
+
+    def test_reject_with_budget_scope(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        intent = new_intent(c, text=self.THREE + ", 1800 euro in tutto")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "no", "budget_scope": "per_person"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("1800 euro a persona, 5400 in tutto", r.json()["say"])
+
+
+class RoomsContractTest(unittest.TestCase):
+    """M21-D (UC-D, RF-65): `rooms` nel corpo di `POST /v1/intents` e del rifiuto; con più di 2
+    persone senza camere la risposta è `question` e nessun intento viene salvato."""
+
+    FIVE = "padel in Portogallo a novembre, siamo in cinque"
+
+    def test_five_without_rooms_is_a_question(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE, "pax": 5})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["question"]), ("question", "In quante camere?"))
+        self.assertNotIn("intent_id", body)
+
+    def test_five_with_rooms_is_created(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE, "pax": 5, "rooms": 3})
+        self.assertEqual(r.status_code, 201, r.text)
+        body = r.json()
+        self.assertEqual((body["criteria"]["pax"], body["criteria"]["rooms"]), (5, 3))
+        self.assertIn("per 5 persone in 3 camere", body["say"])
+
+    def test_two_without_rooms_default_to_one(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        body = new_intent(c)
+        self.assertEqual(body["criteria"]["rooms"], 1)
+        self.assertNotIn("camer", body["say"])
+
+    def test_invalid_rooms_is_declared_not_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "rooms": 0})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare 0 come numero di camere."))
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "rooms": "tre"})
+        self.assertEqual(r.status_code, 422)
+
+    FIVE_TRAVELERS = dict(FULL, participants=[{"first_name": "P%d" % i, "last_name": "Rossi"}
+                                              for i in range(4)])
+
+    FIVE_OCT = "padel a ottobre, siamo in cinque"   # il prodotto sintetico parte a ottobre
+
+    def five_proposal(self, c):
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE_OCT, "pax": 5, "rooms": 3,
+                                                       "profile": self.FIVE_TRAVELERS})
+        self.assertEqual(r.status_code, 201, r.text)
+        return c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+
+    def test_proposal_reports_the_rooms(self):
+        c, _ = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        self.assertEqual((proposal["outcome"], proposal["rooms"]), ("proposal", 3))
+
+    def test_accept_below_the_minimum_is_200_question_without_an_order(self):
+        c, vela = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": 2})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["question"]), ("question", "In quante camere?"))
+        self.assertIsNone(vela.repos.orders.get_by_proposal(proposal["proposal_id"]))
+
+    def test_accept_with_a_rooms_correction(self):
+        c, vela = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": 4})
+        self.assertEqual(r.status_code, 202, r.text)
+        self.assertEqual(vela.repos.orders.get_by_proposal(proposal["proposal_id"]).rooms, 4)
+
+    def test_accept_wrong_rooms_type_is_422(self):
+        c, _ = make_client(products=[make_product(1, price=300, max_pax_per_room=2)])
+        proposal = self.five_proposal(c)
+        r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": "due"})
+        self.assertEqual(r.status_code, 422)
+
+
+class LevelContractTest(unittest.TestCase):
+    """M21-C (UC-C, RF-52, RF-62): `level` e `wants_coaching` nel corpo e nei criteri."""
+
+    UC_C = "Siamo principianti, vorremmo lezioni di padel in Spagna a ottobre, in due."
+    PRODUCTS = [replace(make_product(1, price=300), levels=frozenset({"intermediate", "advanced"})),
+                replace(make_product(2, price=400), levels=frozenset({"beginner"}), coaching=True)]
+
+    def test_fields_reach_the_criteria_and_the_proposal(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.UC_C, "level": "beginner",
+                                                      "wants_coaching": True})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["level"], crit["wants_coaching"]), ("beginner", True))
+        p = c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+        self.assertEqual(p["product"]["product_id"], "2")
+        self.assertIn("pensato per principianti", p["say"])
+
+    def test_invalid_level_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "level": "expert"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare expert come livello di gioco"))
+
+    def test_wrong_types_are_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        for body in ({"text": INTENT, "wants_coaching": "forse"}, {"text": INTENT, "level": ["beginner"]}):
+            with self.subTest(body=body):
+                self.assertEqual(c.post("/v1/intents", headers=AUTH, json=body).status_code, 422)
+
+    def test_reject_with_wants_coaching(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        intent = new_intent(c, text="padel in Spagna a ottobre, in due")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "vorremmo un maestro", "wants_coaching": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("con lezioni", r.json()["say"])
+
+    def test_replay_fixture_uc_c(self):
+        """UC-C sul catalogo delle fixture: la proposta dice se rispetta livello e lezioni."""
+        c, _ = make_client()
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.UC_C})
+        self.assertEqual(r.status_code, 201, r.text)
+        p = c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+        self.assertEqual(p["outcome"], "proposal")
+        self.assertTrue("Il programma" in p["say"] or "Non ho trovato viaggi per principianti" in p["say"],
+                        p["say"])

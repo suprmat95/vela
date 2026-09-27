@@ -10,7 +10,8 @@ Aggiornata il 2026-09-26 per il multi-brand: M10 diventa "Sync multi-brand del c
 (padel = Weebora, tennis = Terrarossa), taglia L, casi d'uso in `docs/usecases/multi-brand.md`.
 Aggiornata il 2026-09-26 per la seconda lettura del twist
 (`docs/plans/2026-09-26-twist-seconda-lettura.md`): M13 diventa M13a e M13b, nuove M18 e M19,
-M15 allargata.
+M15 allargata. Aggiornata il 2026-09-26 con M21 (scelta v3, spec §4.12, casi d'uso in
+`docs/usecases/scelta.md`): sei task in sequenza, ondata 7.
 
 ## Come usare questo file
 
@@ -39,6 +40,12 @@ Ondata 5   M10 Sync (conclusa)  M17 Contratto agente-tool (conclusa)  M12 Eleven
                   /             \
                  |               M19 Meno chiamate per link (opzionale, condizionata)
 Ondata 6          M15 Consegna (ARCHITECTURE, README, video; dopo M13b)   [M16 A2A opzionale]
+
+Ondata 7   M21 Scelta v3: M21-A Durata → M21-E Budget → M21-B Ordinamento → M21-D Camere
+                          → M21-C Livello → M21-F Rifiuti   (dopo M17, M11, M10, M5)
+
+Ondata 8   M22-a Hotel: bozza, sonda, verdetto (solo documenti, parallela a M21)
+                 → M22-b Cambio di hotel (dopo M21-D, M21-F e un verdetto "sì")
 ```
 
 Traguardo A = M3 completata (prototipo replay su Render, testato da claude.ai).
@@ -70,6 +77,16 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M18 | Quota a ritmo costante | M | M5 | 5 / M13a, M20 |
 | M19 | Meno chiamate per link e ordini silenziosi (condizionata) | M | M18, M13b | 5 / — |
 | M20 | Accettazione con attesa breve quando la coda è vuota | S | M5 | 5 / M13a, M18; mergiare dopo M13b |
+| M21 | Scelta v3 (sei task: A, E, B, D, C, F in sequenza; completata) | L | M17, M11, M10, M5 | 7 / nessuna che tocchi `chooser.py`, `intent.py`, `refine.py` |
+| M21-A | Durata | M | M17, M11 | 7 / — |
+| M21-E | Budget a testa o totale | S-M | M21-A | 7 / — |
+| M21-B | Ordinamento e prodotti equivalenti | M | M21-A | 7 / — |
+| M21-D | Persone e camere | M | M21-B, M5 | 7 / — |
+| M21-C | Livello e lezioni | M | M21-B, M10 | 7 / — |
+| M21-F | Rifiuti con motivo sempre capito (fatta) | L | M21-A, M21-B, M21-C, M21-D | 7 / — |
+| M22 | Scelta dell'hotel con degrado dinamico (due task: a, b) | L | M21-D, M21-F | 8 / — |
+| M22-a | Bozza, sonda su `/accommodations`, verdetto | S-M | — | 8 / tutte (niente codice in `vela/`) |
+| M22-b | Cambio di hotel a coda vuota (**non si fa**: verdetto di M22-a) | L | M22-a (verdetto "sì"), M21-D, M21-F | 8 / nessuna che tocchi `usecases.py`, `quota.py`, `purchase.py` |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
@@ -716,6 +733,12 @@ lettura").
 
 **Taglia.** M. **Dipende da** M18, M13b (cambia i numeri). **Ondata** 5, condizionata.
 
+**Stato (2026-09-27).** Passo 1: due sonde su staging (5 + 7 chiamate), verdetto "sì su staging"
+(`docs/api/customer-pax.md`). Passo 2 fatto su `task/m19`, non ancora in `master`: link con 2
+chiamate, booking con cliente, pax e booking (3 chiamate), riserva da `expected_pay_share`, ordini
+silenziosi a 15 minuti (migrazione 0016). Giro C-2500 con il 2% di paganti: 47,4 link/min (prima
+17,8). Aperti: domanda 10 a HofJ per la produzione, giro con il 60% di paganti, taglia vera L.
+
 **Prompt.**
 > Leggi docs/decisions.md ("2026-09-26 — Twist, seconda lettura"),
 > docs/plans/2026-09-26-twist-seconda-lettura.md (sezione 3.4), docs/hofj-questions.md
@@ -884,6 +907,11 @@ M14.
 
 ## M20 — Accettazione con attesa breve quando la coda è vuota
 
+**Stato (2026-09-27).** Assorbita dalla conferma del prezzo ("Prezzo effettivo prima del link",
+2026-09-26): `accept_proposal` aspetta già il job fino a 100 s per ogni posizione. Da M20 restano
+solo test e la correzione di RNF-04 (`docs/decisions.md`, "M20 assorbita dalla conferma del
+prezzo"). Il resto della sezione è il piano originale.
+
 **Risultato.** Chi accetta una proposta senza nessuno davanti in coda riceve il link di
 pagamento nella stessa risposta, quando HofJ è abbastanza veloce, invece di sentirsi dire "ti
 ho messo in coda" e dover chiedere lo stato. Sotto picco non cambia nulla. Il percorso resta
@@ -939,26 +967,279 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 
 ---
 
+## M21 — Scelta v3
+
+**Stato (2026-09-27).** Completata: le sei task A, E, B, D, C, F sono su `master` (M21-F per
+ultima, dopo M23). Resta il test manuale di completamento (sotto), da registrare in
+`docs/acceptance.md`.
+
+**Risultato.** Vela capisce e rispetta la durata, il livello, le lezioni, le camere e se il
+budget è a testa o in tutto; senza budget non propone più "il più economico" ma il viaggio che
+parte quando il viaggiatore ha chiesto; ogni rifiuto viene capito (hotel, luogo escluso, stesso
+viaggio in altre date) oppure produce una domanda chiusa invece di una proposta a caso. Casi
+d'uso in `docs/usecases/scelta.md` (UC-A..UC-F), requisiti in `docs/spec.md` §4.12
+(RF-58..75), decisioni in `docs/decisions.md` (2026-09-26, "Scelta v3").
+
+**Regole comuni.**
+- Sei task in sequenza, nell'ordine A, E, B, D, C, F, una alla volta (toccano tutte
+  `intent.py`, `chooser.py`, `refine.py`, `say.py`, `usecases.py`, `models.py`, `mcp.py`,
+  `rest.py`): ognuna parte da `master` con la precedente mergiata.
+- Ogni task aggiorna `docs/rest.md`, le descrizioni MCP che la riguardano e la riga dei criteri
+  in `say` (RF-54). Campi nuovi validati come RF-53: invalido scartato e dichiarato.
+- Cambi di schema: una migrazione per task che ne ha bisogno (0010 in B, 0011 in D, 0012 in C,
+  0017 in F: dopo la 0015 di M23 e la 0016 di M19, 0013 e 0014 restano numeri non usati), ognuna da approvare
+  all'inizio della task. I criteri nuovi stanno nel JSON di
+  `intents.criteria` senza migrazione.
+- I test esistenti che fissano l'ordinamento v2 o "motivo non capito → proposta successiva"
+  si aggiornano ed elencano in `docs/decisions.md`, senza indebolire le asserzioni.
+- Nessuna chiamata a HofJ, Stripe o Anthropic: i campi del catalogo che servono
+  (`description`, `maxPaxPerRoom`, `featured`, `isSpecialOffer`) sono già nelle fixture.
+
+### M21-A — Durata (UC-A)
+
+**Scope.** Parser della durata (tabella di UC-A, it/en) in `intent.py`; "un weekend" non è più
+un periodo, "questo/prossimo weekend" sì; campi `duration_min_nights`, `duration_max_nights` su
+`create_intent` e `reject_proposal`; criterio morbido nel chooser (livello "durata" di RF-60,
+inserito dopo il budget nell'ordinamento v2); motivazione e `say` di RF-59; `nights` nella
+risposta `proposal`; rifiuto "troppo lungo/troppo corto" che sposta la durata.
+**Test.** Quelli di UC-A in `docs/usecases/scelta.md`.
+**Copre.** RF-02 (durata), RF-06 (notti), RF-52 (campi), RF-58, RF-59.
+**Taglia.** M. **Dipende da** M17, M11.
+**Da decidere nel brainstorm.** Prodotti senza `defaultDurationInDays` e con finestra aperta:
+**A) durata sconosciuta = compatibile**; B) esclusi dal livello "durata compatibile".
+
+### M21-E — Budget a testa o totale (UC-E)
+
+**Scope.** Parole "in tutto/totale/in total" nel parser; campo `budget_scope` su
+`create_intent` e `reject_proposal`; regola 4 di RF-69 in `create_intent` (il caso d'uso legge
+il catalogo per trovare il prodotto compatibile più economico); `budget_scope` nei criteri; frase
+di RF-70 in ogni `say` con un budget.
+**Test.** Quelli di UC-E.
+**Copre.** RF-02 (budget), RF-52 (`budget_scope`), RF-53, RF-69, RF-70.
+**Taglia.** S-M. **Dipende da** M21-A.
+**Da decidere nel brainstorm.** Dove calcolare la regola 4: **A) `create_intent`, salvata nei
+criteri**, così il `say` la dichiara subito; B) a ogni scelta (la lettura può cambiare col
+catalogo).
+
+### M21-B — Ordinamento e prodotti equivalenti (UC-B)
+
+**Scope.** Ordinamento di RF-60 in `chooser.py` (il livello "livello e lezioni" è neutro fino a
+M21-C); partenza più vicina all'inizio del periodo; `featured`/`special_offer` letti dal sync
+(migrazione 0010: due colonne su `products`, valorizzate dal prossimo sync e dalle fixture);
+raggruppamento dei prodotti equivalenti di RF-61; motivazione che spiega la scelta ("parte a
+inizio novembre").
+**Test.** Quelli di UC-B, compresa la trappola (78 proposto, 900078 solo dopo un rifiuto del 78
+che non sia `hotel`).
+**Copre.** RF-06 (motivazione), RF-07, RF-60, RF-61.
+**Taglia.** M. **Dipende da** M21-A.
+**Da decidere nel brainstorm.**
+- Prova del criterio §10.4 con la trappola: oggi la trappola vince da sola; dopo RF-61 arriva
+  solo se il 78 è escluso. **A) `add_trap` con un'opzione che archivia l'originale nella
+  fixture di prova**; B) procedura manuale: rifiutare il 78 per date, poi accettare la
+  trappola; C) nessuna trappola, §10.4 si prova con un errore del replay.
+- Soglia di equivalenza del prezzo: **A) 5%**; B) prezzo identico o −1 € (solo la trappola).
+
+**Stato (2026-09-27).** Fatta: A e A, entrambe con l'OK dell'utente, più la migrazione 0010 con
+il backfill da `raw`. Decisioni e test cambiati in `docs/decisions.md` ("M21-B Ordinamento e
+prodotti equivalenti"); il test "rifiuto `hotel` → né 78 né 900078" è di M21-F.
+
+### M21-D — Persone e camere (UC-D)
+
+**Scope.** Parser delle camere ("tre camere", "two rooms", "due coppie"); campo `rooms` su
+`create_intent`, `reject_proposal`, `accept_proposal`; domanda "In quante camere?" con pax > 2
+(RF-04, RF-65), default 1 con pax ≤ 2; `max_pax_per_room` dal sync e filtro duro `rooms` (RF-66)
+dopo `pax`; `NoChoice("rooms")` e il `say` di "da solo" (RF-68); `orders.rooms` e il job
+d'acquisto che passa le camere a `create_itinerary` (RF-67); migrazione 0011
+(`products.max_pax_per_room`, `orders.rooms` default 1); descrizione MCP di `create_intent`
+con la domanda sulle camere.
+**Test.** Quelli di UC-D; il job d'acquisto con HofJ finto riceve `rooms=3`; replay di
+`create_itinerary` con `rooms`; migrazione su Postgres.
+**Copre.** RF-04, RF-06 (camere), RF-12, RF-14, RF-39..41, RF-52, RF-65..68.
+**Taglia.** M. **Dipende da** M21-B, M5.
+**Da decidere nel brainstorm.** Ordini già in tabella: **A) `rooms` = 1 (default della
+colonna, come oggi)**; B) ricalcolato dal prodotto.
+
+**Stato (2026-09-27).** Fatta: A con l'OK dell'utente, la migrazione 0011 con il backfill di
+`max_pax_per_room` da `raw`, e tre scelte di dettaglio (camere tenute e limitate alle persone nel
+rifiuto, camere mute con 1-2 persone in 1 camera, correzione all'accettazione che aggiorna anche
+i criteri). Decisioni, differenza sulla regola 4 del budget e test cambiati in
+`docs/decisions.md` ("M21-D Persone e camere"). Il caso "più persone nel rifiuto senza dire le
+camere" passa a M21-F come domanda chiusa.
+
+### M21-C — Livello e lezioni (UC-C)
+
+**Scope.** Parser di `level` e `wants_coaching`; campi su `create_intent` e `reject_proposal`;
+etichette del prodotto nel sync (RF-63) da `description` e `shortDescription`, migrazione 0012
+(`levels`, `levels_exclusive`, `coaching`); filtro duro solo con `levels_exclusive` (RF-64),
+livello "livello e lezioni" di RF-60 attivo; frasi del `say`; rifiuto "troppo difficile" che
+abbassa il livello.
+**Test.** Quelli di UC-C, con una tabella di frasi vere del catalogo (962, 1027, 218, un
+"tutti i livelli", un prodotto senza parole sul livello).
+**Copre.** RF-02 (livello), RF-52, RF-62..64.
+**Taglia.** M. **Dipende da** M21-B, M10.
+**Da decidere nel brainstorm.** Descrizioni in inglese nei cataloghi `it`: **A) stesse regole
+it/en su ogni catalogo**; B) regole per lingua del catalogo.
+
+**Stato (2026-09-27).** Fatta in modalità autonoma con l'OK anticipato dell'utente: A, la
+migrazione 0012 con il backfill che riusa `labels_of` del sync, le etichette riproiettate nelle
+fixture (`vela_levels`, `vela_levels_exclusive`, `vela_coaching`). Regole, conteggi, falsi positivi
+e negativi, scelte di dettaglio, differenza sulla regola 4 del budget e test cambiati in
+`docs/decisions.md` ("M21-C Livello e lezioni"). Nessun prodotto delle fixture si riserva a un
+livello: il filtro duro di RF-64 oggi non esclude nulla.
+
+### M21-F — Rifiuti con motivo sempre capito (UC-F)
+
+**Scope.** Classificazione del rifiuto in `refine.py` (RF-71) e campo `reject_kind`;
+`rejections.kind` e `rejections.keep_product` (migrazione 0017, prevista come 0013); esclusione per hotel ricavata
+dai rifiuti (RF-72); `excluded_areas` e luogo negato (RF-73), Marbella aggiunta a `geo`;
+stesso prodotto con altre date (RF-74) in `chooser.departure` con finestre escluse, e
+`keep_product=false` sulla stessa proposta che aggiorna il rifiuto (RF-55); domanda chiusa per
+il motivo non classificabile, senza rifiuto registrato né cancellazione dell'ordine `queued`
+(RF-75, RF-49); risposta `question` con `proposal_id` su MCP e REST; descrizione MCP di
+`reject_proposal`. Da M21-D: un rifiuto che porta le persone oltre 2 senza dire le camere (oggi
+le camere restano quelle di prima, limitate alle persone, e il `say` le ripete) diventa la
+domanda chiusa "In quante camere?" con `proposal_id`, senza rifiuto registrato, come RF-75.
+**Test.** Quelli di UC-F (F1-F4 e "Altri tipi"); il rifiuto "siamo in 5" senza camere da un
+intento a 2 persone (`tests/test_usecases_rooms.py`) passa dalla domanda.
+**Copre.** RF-08, RF-09, RF-39..41, RF-49, RF-52..55, RF-71..75.
+**Taglia.** L. **Dipende da** M21-A, M21-B, M21-C (tipi `duration`, `level`), M21-D (tipo
+`pax` con le camere).
+**Da decidere nel brainstorm.** Motivo con più tipi ("troppo caro e troppo lontano"): **A)
+criteri aggiornati tutti, tipo registrato = il primo dell'elenco di RF-71**; B) domanda "cosa
+conta di più?".
+
+**Stato (2026-09-27).** Fatta in modalità autonoma con l'OK anticipato dell'utente: A, la
+migrazione 0017 (scritta come 0016 dopo la 0015 di M23, rinumerata al merge dopo la 0016 di M19), i casi rimandati da M21-B (rifiuto `hotel` del 78 → né 78
+né 900078) e da M21-D (domanda sulle camere nel rifiuto, `proposal_id` sulla domanda di
+`accept_proposal`), le verifiche con la cache del prezzo (RF-84) e con il load test. Design in
+`docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md`, piano in
+`docs/plans/2026-09-27-m21f-rifiuti.md`, scelte e test cambiati in `docs/decisions.md`
+("M21-F Rifiuti con motivo sempre capito").
+
+**Test di completamento di M21.** Tutti i test elencati in `docs/usecases/scelta.md`; suite e
+lint verdi; manuale: in claude.ai, in replay, UC-A, UC-D (cinque persone) e UC-F4 registrati in
+`docs/acceptance.md`.
+
+**Copre.** RF-02, RF-04, RF-06..09, RF-12, RF-14, RF-39..41, RF-49, RF-52..55, RF-58..75.
+
+**Taglia.** L in totale (circa 12-16 h). **Dipende da** M17, M11, M10, M5 (tutte su
+`master`). **Ondata** 7, dopo le task di ondata 5-6 che toccano il dominio; nessuna parallela
+che tocchi `chooser.py`, `intent.py`, `refine.py`.
+
+**Prompt** (uno per task, sostituendo la lettera).
+> Leggi docs/spec.md (§4.12, RF-02, RF-04, RF-06..09, RF-52..55), docs/usecases/scelta.md
+> (UC-<lettera>), docs/decisions.md (2026-09-26, "Scelta v3"), vela/domain/intent.py,
+> vela/domain/chooser.py, vela/domain/refine.py, vela/domain/say.py, vela/domain/usecases.py,
+> vela/surfaces/mcp.py, vela/surfaces/rest.py e docs/roadmap.md M21-<lettera>. Obiettivo: il
+> caso UC-<lettera> con i suoi test. Prima chiudi le decisioni aperte della task e, se la task
+> ha una migrazione, chiedi l'OK sullo schema. Nessuna chiamata a servizi esterni.
+
+---
+
+## M22 — Scelta dell'hotel con degrado dinamico
+
+**Stato (2026-09-27).** M22-a conclusa con il verdetto **"M22-b non si fa"**: la sonda non ha
+mai visto un `PATCH` possibile (`docs/api/accommodations.md`). Condizioni per riaprire in
+`docs/decisions.md` (2026-09-27, "M22-a", "Sonda e verdetto"). Il resto della sezione è il
+piano, tenuto come archivio.
+
+**Risultato.** Su un ordine in `awaiting_confirmation` il viaggiatore può rifiutare l'hotel,
+con o senza una preferenza (più vicino al campo, più economico, più stelle, recensioni
+migliori), e Vela propone un solo hotel alternativo dello stesso viaggio con la motivazione e
+il nuovo totale. Il
+cambio avviene solo a coda d'acquisto vuota; con la coda piena Vela tiene l'hotel incluso e lo
+dice. Priorità della quota: `booking` > `purchase` > `hotel` > `sync`. Bozza dei requisiti
+(RF-15 riscritto, RF-76..RF-82), casi d'uso UC-G e domande aperte in
+`docs/plans/2026-09-27-m22-hotel.md`; decisioni in `docs/decisions.md` (2026-09-27, "M22-a").
+
+### M22-a — Bozza, sonda, verdetto
+
+**Scope.** Solo documenti e uno script: bozza in `docs/plans/2026-09-27-m22-hotel.md` (non
+in `docs/spec.md`, che ogni task di M21 modifica); sonda su HofJ staging
+(`scripts/accommodations_probe.py`, sul modello di `scripts/quota_probe.py`): latenza di
+`/accommodations`, formato e risposta del `PATCH` con i `roomIds`, totale dopo il `PATCH`,
+risposta di un prodotto con `hotelSelection=false`; esiti in `docs/api/accommodations.md` e
+`docs/api/differences.md`. Verdetto: M22-b si fa o no. Testo per `ARCHITECTURE.md` (branch
+`doc/architecture`) §5.2 (bilancio della quota, nuovo ordine di sacrificio) e §5.3 (cosa
+degrada: il viaggiatore a coda piena) in entrambi i casi. Tre fasi, ognuna con l'OK dell'utente.
+**Test.** Nessun codice in `vela/`; suite e lint verdi.
+**Copre.** Bozza di RF-15, RF-76..RF-82 (spec in M22-b).
+**Taglia.** S-M. **Dipende da** nessuna (le chiamate della sonda si dichiarano prima).
+
+### M22-b — Cambio di hotel a coda vuota (condizionata al verdetto)
+
+**Scope.** Testi della bozza portati in `docs/spec.md` (§4.13, RF-15, §7, RF modificati) e
+UC-G in `docs/usecases/scelta.md`; campo `hotel_preference` e parser it/en; i tre rami di RF-77
+in `reject_proposal`; job `hotel_change` (lista, `PATCH`, rilettura del totale); classe
+`hotel` nello scheduler della quota (tutti i gettoni insieme, mai con acquisti in attesa, sync
+dopo i cambi); hotel nel `say` della conferma del prezzo; porte `HofJPort` nuove e replay;
+migrazione 0014 (cinque campi hotel sull'ordine, approvata in M22-a); istruzioni del server
+MCP e descrizione di `reject_proposal` (nessuna domanda preventiva sulla preferenza; la
+risposta può essere di nuovo una conferma del prezzo); `docs/rest.md`; `scripts/rest_flow.py`
+se serve; nota su ElevenLabs: `response_timeout_secs` resta ≥ 120 anche per `reject_proposal`.
+**Test.** Quelli di UC-G nella bozza (§5).
+**Copre.** RF-15, RF-16, RF-25, RF-37, RF-39..41, RF-47, RF-49, RF-52, RF-72, RF-76..RF-82,
+RNF-04.
+**Taglia.** L. **Dipende da** M22-a (verdetto "sì"), M21-D (`orders.rooms`, `create_itinerary`
+con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
+**Da decidere nel brainstorm.** Niente di aperto: le domande di §10 della bozza sono chiuse
+(`docs/decisions.md`, 2026-09-27, "M22-a"); restano i dettagli che dipendono dalla sonda.
+
+**Prompt** (M22-b).
+> Leggi docs/plans/2026-09-27-m22-hotel.md, docs/api/accommodations.md, docs/decisions.md
+> (2026-09-27, "M22-a"), docs/spec.md (RF-15, RF-16, RF-47, RF-49, RF-71..75), vela/domain/quota.py,
+> vela/domain/purchase.py, vela/domain/usecases.py, vela/domain/refine.py e docs/roadmap.md M22-b.
+> Obiettivo: UC-G con i suoi test. Proponi l'approccio e aspetta l'OK. Nessuna chiamata a
+> servizi esterni.
+
+---
+
+## M23 — Cache del prezzo con fanout
+
+**Stato (2026-09-27).** Fatta sul branch `task/cache`. Load test rigirato lo stesso giorno, un
+solo giro C-2500 con la cache (`loadtest/RESULTS.md`, "Dopo la cache del prezzo"): criteri
+passati, prezzo subito a 473 accettazioni su 487, Marco confermato a 160 s contro 372; ritmo di
+acquisti invariato perché limitato dalla quota.
+
+**Risultato.** Nel picco molti viaggiatori accettano lo stesso viaggio: il prezzo effettivo si
+scopre una volta per chiave (prodotto, data, adulti, camere, valuta) e vale per tutti per 15
+minuti. Chi trova il prezzo in cache lo sente subito, senza coda né chiamate a HofJ, e il
+carrello si crea dopo il sì; chi arriva mentre il prezzo è in volo si aggancia al primo ordine.
+N accettazioni identiche costano 5 chiamate per il prezzo invece di 5·N. Design in
+`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`, piano in
+`docs/plans/2026-09-27-cache-prezzo-fanout.md`.
+**Scope.** Tabella `price_quotes` e `orders.follows_quote`, `orders.confirmed_total`
+(migrazione 0015); porta `QuoteRepository` in memoria e Postgres; `accept_proposal` con hit,
+leader e agganciati; pubblicazione e fanout al passo 3 del job d'acquisto; conferma senza
+carrello e secondo giro se il prezzo cambia; ripiego quando il leader esce senza prezzo;
+`loadtest/journey.py` accetta la risposta `200 awaiting_confirmation`.
+**Test.** Contratto dei repository (anche elezione concorrente su Postgres),
+`tests/test_price_quotes.py`, frase nuova in `tests/test_say.py`, viaggio del load test.
+**Copre.** RF-14, RF-16, RF-45, RF-46, RF-48, RF-49, RF-84.
+**Resta fuori.** Rifare i giri di `loadtest/RESULTS.md` per misurare il risparmio.
+
+---
+
 ## Matrice dei requisiti
 
 | Requisito | Macro task |
 |---|---|
 | RF-01 | M2, M17 (campi strutturati) |
-| RF-02 | M2 (minimo), M9 (completo), M17 (sport `any`, sinonimi) |
+| RF-02 | M2 (minimo), M9 (completo), M17 (sport `any`, sinonimi), M21-A, M21-E, M21-C, M21-D |
 | RF-03 | M9, M17 (precedenza, fallback senza sport) |
-| RF-04 | M2, M9, M17 (sport sempre indispensabile) |
+| RF-04 | M2, M9, M17 (sport sempre indispensabile), M21-D (camere) |
 | RF-05 | M2 |
-| RF-06 | M2, M11 |
-| RF-07 | M2 (v1), M11 (completo) |
-| RF-08 | M2 (base), M9, M17 (campi e direzione) |
-| RF-09 | M2, M11, M17 (niente di compatibile dopo un rifiuto) |
+| RF-06 | M2, M11, M21-A, M21-B, M21-D |
+| RF-07 | M2 (v1), M11 (completo), M21-B (v3) |
+| RF-08 | M2 (base), M9, M17 (campi e direzione), M21-F (tipi, eccezioni) |
+| RF-09 | M2, M11, M17 (niente di compatibile dopo un rifiuto), M21-F |
 | RF-10 | M2, M3, M4 |
 | RF-11 | M2 |
-| RF-12 | M2 |
+| RF-12 | M2, M21-D |
 | RF-13 | M2 (default), M5 (invio a HofJ), M15 (documentazione) |
-| RF-14 | M5 |
-| RF-15 | M5 |
-| RF-16 | M2, M5 |
+| RF-14 | M5, M21-D (camere) |
+| RF-15 | M5, M22-b (cambio di hotel) |
+| RF-16 | M2, M5, M22-b (hotel nel `say`) |
 | RF-17 | M5 |
 | RF-18, RF-19 | M6 |
 | RF-20, RF-21, RF-22 | M6 |
@@ -969,15 +1250,24 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 | RF-32 | M1, M10 (una fixture per host e brand) |
 | RF-33..RF-35 | M5 |
 | RF-36..RF-38 | M5, M18 |
-| RF-39 | M2, M17 |
-| RF-40 | M4, M17 |
-| RF-41 | M3 (Claude), M12 (ElevenLabs), M17 (descrizioni dei tool) |
+| RF-39 | M2, M17, M21-D, M21-F |
+| RF-40 | M4, M17, M21-D, M21-F |
+| RF-41 | M3 (Claude), M12 (ElevenLabs), M17 (descrizioni dei tool), M21-D, M21-F |
 | RF-42 | M2, M17 |
 | RF-43 | M4 (REST), M8 (MCP OAuth) |
 | RF-44 | M15 (documentazione), M16 (opzionale) |
-| RF-45..RF-51 | M5 (RF-45 anche M20; RF-47 anche M18) |
-| RF-52..RF-55 | M17 |
+| RF-45..RF-51 | M5 (RF-45 anche M20; RF-47 anche M18; RF-49 anche M21-F) |
+| RF-52..RF-55 | M17, M21 (campi nuovi; RF-54 e RF-55 in M21-F) |
 | RF-56 | M10 |
+| RF-57 | task/twilio-setup (SMS, fuori dalle macro task) |
+| RF-58, RF-59 | M21-A |
+| RF-60, RF-61 | M21-B |
+| RF-62..RF-64 | M21-C |
+| RF-65..RF-68 | M21-D |
+| RF-69, RF-70 | M21-E |
+| RF-71..RF-75 | M21-F (RF-72 anche M22-b) |
+| RF-76..RF-82 | M22-a (bozza), M22-b |
+| RF-84 | M23 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5, M18 |
 | RNF-05 | M13a, M13b |
@@ -997,5 +1287,5 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 | §10.5 | M13a, M13b |
 | §10.6 | M2, M3, M4 |
 
-Tutti i 56 RF, i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
+Tutti gli 82 RF (RF-76..RF-82 in bozza fino a M22-b), i 13 RNF, i vincoli di §6, le verifiche di §8, le consegne di §9 e i 7 criteri
 di §10 hanno almeno una macro task.

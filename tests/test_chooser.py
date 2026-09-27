@@ -71,7 +71,7 @@ class PriceCeilingTest(unittest.TestCase):
 
 class FilterTest(unittest.TestCase):
     def test_filter_order(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "price",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "place", "hotel", "price",
                                    "rejected"))
 
     def test_archived_bookable_rejected_are_never_chosen(self):
@@ -286,9 +286,9 @@ class ReasonTest(unittest.TestCase):
     def test_dates_and_budget(self):
         within = self.reason(crit())
         self.assertIn("Parte il 1 ottobre 2026, nel periodo che hai chiesto,", within)
-        self.assertIn("costa 600 euro in totale, dentro il tuo budget di 800 euro.", within)
+        self.assertIn("con un totale a partire da 600 euro, dentro il tuo budget di 800 euro.", within)
         over = self.reason(crit(budget=Decimal("100")))
-        self.assertIn("costa 600 euro in totale, oltre il tuo budget di 100 euro, ma è la più economica in Spagna.", over)
+        self.assertIn("con un totale a partire da 600 euro, oltre il tuo budget di 100 euro, ma è la più economica in Spagna.", over)
         over_elsewhere = self.reason(crit(area=LANZAROTE, budget=Decimal("100")), {"1"})
         self.assertTrue(over_elsewhere.endswith("oltre il tuo budget di 100 euro."), over_elsewhere)
 
@@ -317,7 +317,7 @@ class ReasonTest(unittest.TestCase):
             "I have no compatible departures in Lanzarote: this one is in Madrid, still in Spain."))
         within = self.reason(crit(**en))
         self.assertIn("It leaves on 1 October 2026, in the period you asked for,", within)
-        self.assertIn("costs 600 euros in total, within your budget of 800 euros.", within)
+        self.assertIn("with a total starting at 600 euros, within your budget of 800 euros.", within)
         self.assertEqual(self.reason(crit(area=None, budget=None, period=None, **en)),
                          "It's in Lanzarote. It leaves on 1 October 2026 and it's the cheapest "
                          "compatible option.")

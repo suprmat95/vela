@@ -1,6 +1,7 @@
 """Tool MCP in-process (RF-39, RF-41, RF-10): client dell'SDK collegato al server senza HTTP."""
 import json
 import unittest
+from dataclasses import replace
 from datetime import timedelta
 
 from mcp import Client
@@ -11,7 +12,8 @@ from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.usecases import Vela
-from vela.surfaces.mcp import DESCRIPTIONS, INSTRUCTIONS, TOOL_NAMES, build_mcp
+from vela.surfaces.mcp import (DESCRIPTIONS, DESCRIPTIONS_SMS, INSTRUCTIONS, INSTRUCTIONS_SMS,
+                               TOOL_NAMES, build_mcp)
 
 INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro"
 TRAVELER = {"first_name": "Anna", "last_name": "Rossi", "email": "anna@x.it", "phone": "+390000",
@@ -33,11 +35,12 @@ class Clock:
         return self.at
 
 
-def make_vela(products=None, hofj=None):
+def make_vela(products=None, hofj=None, sms_enabled=False):
     repos = MemoryRepositories()
     repos.products.upsert_many(PRODUCTS if products is None else products)
     ids = iter("id%d" % i for i in range(1, 100))
-    return Vela(repos, hofj or FakeHofJ(), StubPayments(), now=Clock(), new_id=lambda: next(ids))
+    return Vela(repos, hofj or FakeHofJ(), StubPayments(), now=Clock(), new_id=lambda: next(ids),
+                sms_enabled=sms_enabled)
 
 
 class McpCase(unittest.IsolatedAsyncioTestCase):
@@ -67,8 +70,9 @@ class ListToolsTest(McpCase):
         async with Client(self.server) as client:
             return {t.name: t for t in (await client.list_tools()).tools}
 
-    async def test_five_tools_named_as_rf39(self):
-        self.assertEqual(set(await self.tools()), {"create_intent", "get_proposal", "reject_proposal",
+    async def test_tools_named_as_rf39_and_rf83(self):
+        self.assertEqual(set(await self.tools()), {"create_intent", "get_proposal",
+                                                   "get_proposal_details", "reject_proposal",
                                                    "accept_proposal", "get_order_status"})
         self.assertEqual(set(TOOL_NAMES), set(await self.tools()))
 
@@ -109,7 +113,13 @@ class FlowTest(McpCase):
         self.assertEqual(again["order_id"], accepted["order_id"])
 
         worker = inline_worker(self.vela)
-        worker.drain()                                   # job d'acquisto
+        worker.drain()                                   # job d'acquisto: prezzo effettivo
+        priced = await self.ok("get_order_status", order_id=accepted["order_id"])
+        self.assertEqual((priced["status"], priced["payment_url"]), ("awaiting_confirmation", None))
+        self.assertIn("Confermi?", priced["say"])
+        confirmed = await self.ok("accept_proposal", proposal_id=second["proposal_id"])   # il sì
+        self.assertEqual(confirmed["order_id"], accepted["order_id"])
+        worker.drain()                                   # link
         awaiting = await self.ok("get_order_status", order_id=accepted["order_id"])
         self.assertEqual(awaiting["status"], "awaiting_payment")
         self.assertTrue(awaiting["payment_url"].startswith("http://pay.test/"))
@@ -153,7 +163,8 @@ class DescriptionsM5Test(unittest.TestCase):
 
     def test_accept_description_says_wait_not_link(self):
         text = DESCRIPTIONS["accept_proposal"]
-        self.assertIn("a wait, not a link", text)
+        self.assertIn("awaiting_confirmation", text)             # prima il prezzo effettivo
+        self.assertIn("call accept_proposal again on the same proposal", text)
         self.assertIn("get_order_status", text)
         self.assertNotIn("show `payment_url`", text)
 
@@ -162,9 +173,77 @@ class DescriptionsM5Test(unittest.TestCase):
         for state in ("queued", "awaiting_payment", "paid_pending_booking", "confirmed", "replaced",
                       "cancelled", "failed", "booking_failed", "expired", "proposal_changed"):
             self.assertIn(state, text)
+        self.assertIn("awaiting_confirmation", text)
 
     def test_instructions_mention_the_queue(self):
         self.assertIn("queue", INSTRUCTIONS)
+
+
+
+# Testi senza SMS: quelli di prima degli SMS (e106b9c) con la conferma del prezzo (2026-09-26).
+PRE_SMS_INSTRUCTIONS_END = (
+    "Only after that confirmation the payment link comes in the answer, or later from "
+    "get_order_status.")
+PRE_SMS_ACCEPT_END = (
+    "the answer is `queued` with `order_id`, `position` and `wait_seconds`. If the answer is "
+    "`queued`, check with get_order_status after the stated wait, or whenever the user asks.")
+PRE_SMS_STATUS_START = (
+    "Check an order after the wait stated by accept_proposal, when the user says they paid or "
+    "asks how it is going. Returns `status`: queued (with `position` and `wait_seconds`), ")
+
+
+class SmsTextsTest(unittest.TestCase):
+    """C1: gli SMS si annunciano solo se Twilio è configurato (`vela.sms_enabled`)."""
+
+    def test_default_texts_are_the_pre_sms_ones(self):
+        self.assertTrue(INSTRUCTIONS.endswith(PRE_SMS_INSTRUCTIONS_END))
+        self.assertIn(PRE_SMS_ACCEPT_END, DESCRIPTIONS["accept_proposal"])
+        self.assertTrue(DESCRIPTIONS["get_order_status"].startswith(PRE_SMS_STATUS_START))
+        for text in (INSTRUCTIONS, DESCRIPTIONS["accept_proposal"], DESCRIPTIONS["get_order_status"]):
+            self.assertNotIn("texts", text)
+
+    def test_sms_texts_say_vela_texts_the_link(self):
+        self.assertIn("texts the payment link", INSTRUCTIONS_SMS)
+        self.assertNotIn("comes later from get_order_status", INSTRUCTIONS_SMS)
+        self.assertIn("texts", DESCRIPTIONS_SMS["accept_proposal"])
+        self.assertIn("texts", DESCRIPTIONS_SMS["get_order_status"])
+        self.assertEqual(set(DESCRIPTIONS_SMS), set(DESCRIPTIONS))
+        for name in ("create_intent", "get_proposal", "reject_proposal"):
+            self.assertEqual(DESCRIPTIONS_SMS[name], DESCRIPTIONS[name])
+
+    def test_sms_texts_forbid_polling_but_always_answer_the_user(self):
+        # I1 (decisione dell'utente 2026-09-26): mai interrogare di propria iniziativa, sempre
+        # quando l'utente chiede, e una volta se dice che l'SMS non è arrivato
+        for name, text in (("instructions", INSTRUCTIONS_SMS),
+                           ("accept_proposal", DESCRIPTIONS_SMS["accept_proposal"]),
+                           ("get_order_status", DESCRIPTIONS_SMS["get_order_status"])):
+            with self.subTest(name=name):
+                self.assertIn("poll", text)
+                self.assertIn("whenever the user asks how it is going", text)
+                self.assertIn("once if the user says the text has not arrived", text)
+                self.assertNotIn("only when", text)
+
+
+class SmsServerTest(unittest.IsolatedAsyncioTestCase):
+    async def served(self, get_vela):
+        server = build_mcp(get_vela)
+        async with Client(server) as client:
+            tools = {t.name: t.description for t in (await client.list_tools()).tools}
+        return server.instructions, tools
+
+    async def test_sms_disabled_serves_the_pre_sms_texts(self):
+        vela = make_vela()
+        self.assertFalse(vela.sms_enabled)
+        for get_vela in (lambda: vela, lambda: None):
+            instructions, tools = await self.served(get_vela)
+            self.assertEqual(instructions, INSTRUCTIONS)
+            self.assertEqual(tools, DESCRIPTIONS)
+
+    async def test_sms_enabled_serves_the_sms_texts(self):
+        vela = make_vela(sms_enabled=True)
+        instructions, tools = await self.served(lambda: vela)
+        self.assertEqual(instructions, INSTRUCTIONS_SMS)
+        self.assertEqual(tools, DESCRIPTIONS_SMS)
 
 
 class ErrorsTest(McpCase):
@@ -262,6 +341,36 @@ class AgentToolContractTest(McpCase):
         self.assertEqual(intent["required"], ["text"])
         self.assertEqual(reject["required"], ["proposal_id"])
 
+    async def test_reject_kind_and_keep_product_are_optional_arguments(self):
+        """M21-F (RF-41, RF-52): solo su `reject_proposal`, con i tipi di RF-71 nella descrizione."""
+        tools = await self.tools()
+        reject = tools["reject_proposal"].input_schema
+        for field in ("reject_kind", "keep_product"):
+            self.assertIn(field, reject["properties"])
+            self.assertNotIn(field, reject["required"])
+            self.assertNotIn(field, tools["create_intent"].input_schema["properties"])
+        for kind in ("price", "place", "hotel", "dates", "duration", "sport", "pax", "level",
+                     "direction", "other"):
+            self.assertIn(kind, reject["properties"]["reject_kind"]["description"])
+
+    def test_reject_description_explains_kinds_question_and_other(self):
+        """RF-41 (M21): passare il tipo quando è chiaro, porre la domanda chiusa se torna, `other`
+        se il viaggiatore non sa dire cosa non va."""
+        for descriptions in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+            text = descriptions["reject_proposal"]
+            for piece in ("`reject_kind`", "`keep_product` true", "`question`", "`proposal_id`",
+                          "Ask the user exactly that question", "`reject_kind` other",
+                          "same trip with another departure", "every trip at that hotel",
+                          "`keep_product` false"):
+                self.assertIn(piece, text, piece)
+
+    def test_proposal_description_says_how_vela_picks(self):
+        """M21-B (RF-60): l'agente sa che la scelta non è "il più economico"."""
+        text = DESCRIPTIONS["get_proposal"]
+        for word in ("area", "budget", "length", "earliest departure", "featured", "then price"):
+            self.assertIn(word, text, word)
+        self.assertIn("do not present it as the cheapest option", text)
+
     def test_descriptions_route_changes_through_reject_proposal(self):
         texts = dict(DESCRIPTIONS, instructions=INSTRUCTIONS)
         for name, text in texts.items():
@@ -298,7 +407,7 @@ class AgentToolContractTest(McpCase):
 
     async def test_uc7_invalid_field_is_declared_not_an_error(self):
         d = await self.ok("create_intent", text="Padel a Atlantide, siamo in tre.", sport="padel",
-                          area="Atlantide", pax=3, budget=1000)
+                          area="Atlantide", pax=3, rooms=2, budget=1000)
         self.assertIsNone(d["criteria"]["area"])
         self.assertTrue(d["say"].startswith("Non conosco il luogo Atlantide."))
 
@@ -317,5 +426,268 @@ class AgentToolContractTest(McpCase):
         self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia")])
         intent = await self.ok("create_intent", text=INTENT)
         first = await self.ok("get_proposal", intent_id=intent["intent_id"])
-        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no")
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no",
+                          reject_kind="other")
         self.assertEqual(d["rejected_proposal_id"], first["proposal_id"])
+
+    async def test_unclear_reason_is_a_question_on_the_same_proposal(self):
+        """M21-F (RF-75): `question` con `proposal_id`; la seconda chiamata con il tipo propone."""
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia", hotel="A"),
+                                        make_product(2, price=350, destination="Madrid", hotel="B")])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="mah")
+        self.assertEqual(d, {"question": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                             "say": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                             "proposal_id": first["proposal_id"]})
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="mah, l'hotel",
+                          reject_kind="hotel")
+        self.assertEqual(d["product"]["product_id"], "2")
+
+    async def test_keep_product_gives_the_same_trip_with_another_departure(self):
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia", windows=(
+            ("2026-10-01", "2026-10-04"), ("2026-10-08", "2026-10-11")))])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="ok",
+                          reject_kind="dates", keep_product=True)
+        self.assertEqual((d["product"]["product_id"], d["start_date"]), ("1", "2026-10-08"))
+
+
+def trip(pid, nights, price, **kw):
+    """Prodotto a finestra fissa di `nights` notti dal 1 ottobre."""
+    end = "2026-10-%02d" % (1 + nights)
+    return replace(make_product(pid, price=price, windows=(("2026-10-01", end),), **kw),
+                   duration_days=nights + 1)
+
+
+class DurationContractTest(McpCase):
+    """M21-A (UC-A): durata come campi opzionali, criterio morbido, `nights` nella proposta."""
+
+    WEEK_CHEAP, WEEKEND = trip(1, 7, 300), trip(2, 3, 400)
+
+    async def test_duration_fields_are_optional_integer_arguments(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            props = tools[name].input_schema["properties"]
+            for field in ("duration_min_nights", "duration_max_nights"):
+                with self.subTest(tool=name, field=field):
+                    self.assertIn("integer", json.dumps(props[field]))
+                    self.assertIn("nights", props[field]["description"])
+                    self.assertNotIn(field, tools[name].input_schema["required"])
+            self.assertIn("duration_min_nights", DESCRIPTIONS[name])
+
+    async def test_fields_reach_the_intent_and_the_say(self):
+        d = await self.ok("create_intent", text=INTENT, duration_min_nights=6, duration_max_nights=8)
+        c = d["criteria"]
+        self.assertEqual((c["duration_min_nights"], c["duration_max_nights"]), (6, 8))
+        self.assertIn("da 6 a 8 notti", d["say"])
+
+    async def test_invalid_duration_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text="padel a ottobre, siamo in due",
+                          duration_min_nights=0)
+        self.assertIsNone(d["criteria"]["duration_min_nights"])
+        self.assertTrue(d["say"].startswith("Non ho potuto usare 0 - ? come durata in notti."))
+
+    async def test_weekend_is_preferred_then_too_short_moves_to_the_week(self):
+        self.vela = make_vela(products=[self.WEEK_CHEAP, self.WEEKEND])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual((first["product"]["product_id"], first["nights"]), ("2", 3))
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="troppo corto")
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+    async def test_reject_with_duration_fields(self):
+        # senza i campi la proposta successiva sarebbe l'altro weekend (id 3)
+        self.vela = make_vela(products=[self.WEEK_CHEAP, self.WEEKEND, trip(3, 2, 450)])
+        intent = await self.ok("create_intent", text="un weekend di padel in Spagna a ottobre, "
+                                                     "siamo in due")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
+                          reason="no grazie", duration_min_nights=6, duration_max_nights=8)
+        self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+    async def test_no_weekend_is_declared(self):
+        self.vela = make_vela(products=[self.WEEK_CHEAP])
+        intent = await self.ok("create_intent", text=INTENT)
+        d = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertIn("Non ho weekend compatibili: questo dura 7 notti, dal 1 all'8 ottobre.",
+                      d["say"])
+
+
+class BudgetScopeContractTest(McpCase):
+    """M21-E (UC-E): `budget_scope` opzionale, cifra passata come detta, lettura nel `say`."""
+
+    THREE = "tennis in Spagna a ottobre, siamo in tre, due camere"
+
+    def setUp(self):
+        super().setUp()
+        self.vela = make_vela(products=[make_product(1, price=400, sport="tennis"),
+                                        make_product(2, price=500, sport="tennis")])
+
+    async def test_budget_scope_is_an_optional_argument(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                self.assertIn("per_person", schema["properties"]["budget_scope"]["description"])
+                self.assertNotIn("budget_scope", schema["required"])
+                self.assertIn("never multiply or divide",
+                              schema["properties"]["budget"]["description"])
+                self.assertIn("budget_scope", DESCRIPTIONS[name])
+                self.assertIn("budget_scope", DESCRIPTIONS_SMS[name])
+
+    async def test_field_reaches_the_criteria_and_the_say(self):
+        # senza il campo la regola 4 leggerebbe 600 a persona (il più economico costa 1200)
+        d = await self.ok("create_intent", text=self.THREE + ", massimo 600 euro", budget=600,
+                          budget_scope="total")
+        c = d["criteria"]
+        self.assertEqual((c["budget"], c["budget_scope"]), ("600.00", "total"))
+        self.assertIn("con un budget di 600 euro in tutto", d["say"])
+
+    async def test_bare_figure_is_read_by_the_server(self):
+        d = await self.ok("create_intent", text=self.THREE + ", massimo 600 euro", budget=600)
+        self.assertEqual(d["criteria"]["budget_scope"], "per_person")
+
+    async def test_invalid_scope_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text=self.THREE + ", 1800 euro", budget_scope="each")
+        self.assertEqual(d["criteria"]["budget_scope"], "total")   # 1800 copre 400 × 3
+        self.assertTrue(d["say"].startswith("Non ho potuto usare each come lettura del budget"))
+
+    async def test_reject_with_budget_scope(self):
+        intent = await self.ok("create_intent", text=self.THREE + ", 1800 euro in tutto")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
+                          reason="no", budget_scope="per_person")
+        self.assertIn("con un budget di 1800 euro a persona, 5400 in tutto", d["say"])
+
+
+class RoomsContractTest(McpCase):
+    """M21-D (UC-D, RF-65): `rooms` sui tool; con più di 2 persone senza camere `question`."""
+
+    FIVE = "padel in Portogallo a novembre, siamo in cinque"
+
+    async def test_rooms_is_an_optional_argument_of_intent_and_reject(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                self.assertIn("rooms", schema["properties"])
+                self.assertNotIn("rooms", schema["required"])
+
+    async def test_five_without_rooms_is_a_question(self):
+        d = await self.ok("create_intent", text=self.FIVE, sport="padel", pax=5)
+        self.assertEqual(d["question"], "In quante camere?")
+        self.assertNotIn("intent_id", d)
+
+    async def test_five_with_rooms_is_created(self):
+        d = await self.ok("create_intent", text=self.FIVE, sport="padel", pax=5, rooms=3)
+        self.assertEqual((d["criteria"]["pax"], d["criteria"]["rooms"]), (5, 3))
+        self.assertIn("per 5 persone in 3 camere", d["say"])
+
+    FIVE_TRAVELERS = dict(TRAVELER, participants=[{"first_name": "P%d" % i, "last_name": "Rossi"}
+                                                  for i in range(4)])
+    FIVE_OCT = "padel a ottobre, siamo in cinque"   # il prodotto sintetico parte a ottobre
+
+    async def test_rooms_is_an_optional_argument_of_accept(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        schema = tools["accept_proposal"].input_schema
+        self.assertIn("rooms", schema["properties"])
+        self.assertNotIn("rooms", schema["required"])
+        self.assertIn("correct", schema["properties"]["rooms"]["description"])
+
+    async def test_descriptions_say_when_to_ask_the_rooms(self):
+        """RF-41 (M21-D): `create_intent` dice di chiedere le camere con più di 2 persone."""
+        for texts in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+            with self.subTest(sms=texts is DESCRIPTIONS_SMS):
+                self.assertIn("How many rooms?", texts["create_intent"])
+                self.assertIn("more than 2 people", texts["create_intent"])
+                self.assertIn("`rooms`", texts["reject_proposal"])
+                self.assertIn("`rooms`", texts["accept_proposal"])
+
+    async def test_accept_below_the_minimum_is_a_question_without_an_order(self):
+        self.vela = make_vela(products=[make_product(1, price=300, max_pax_per_room=2)])
+        intent = await self.ok("create_intent", text=self.FIVE_OCT, sport="padel", pax=5, rooms=3)
+        proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(proposal["rooms"], 3)
+        d = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"], rooms=2,
+                          **self.FIVE_TRAVELERS)
+        self.assertEqual(d["question"], "In quante camere?")
+        self.assertIn("per 5 servono almeno 3 camere", d["say"])
+        self.assertIsNone(self.vela.repos.orders.get_by_proposal(proposal["proposal_id"]))
+
+    async def test_accept_with_a_rooms_correction(self):
+        self.vela = make_vela(products=[make_product(1, price=300, max_pax_per_room=2)])
+        intent = await self.ok("create_intent", text=self.FIVE_OCT, sport="padel", pax=5, rooms=3)
+        proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"], rooms=4,
+                          **self.FIVE_TRAVELERS)
+        self.assertIn("order_id", d)
+        self.assertEqual(self.vela.repos.orders.get_by_proposal(proposal["proposal_id"]).rooms, 4)
+
+
+class LevelContractTest(McpCase):
+    """M21-C (UC-C, RF-52, RF-62): `level` e `wants_coaching` opzionali su intento e rifiuto,
+    restituiti nei criteri; un valore invalido è scartato e detto, non un errore."""
+
+    UC_C = "Siamo principianti, vorremmo lezioni di padel in Spagna a ottobre, in due."
+
+    def setUp(self):
+        super().setUp()
+        self.vela = make_vela(products=[
+            replace(make_product(1, price=300), levels=frozenset({"intermediate", "advanced"})),
+            replace(make_product(2, price=400), levels=frozenset({"beginner"}), coaching=True),
+            replace(make_product(3, price=100), levels=frozenset({"advanced"}), levels_exclusive=True)])
+
+    async def test_level_and_wants_coaching_are_optional_arguments(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                for field in ("level", "wants_coaching"):
+                    self.assertIn(field, schema["properties"])
+                    self.assertNotIn(field, schema["required"])
+                self.assertIn("beginner", schema["properties"]["level"]["description"])
+                self.assertIn("lessons", schema["properties"]["wants_coaching"]["description"])
+                for descriptions in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+                    self.assertIn("`level`", descriptions[name])
+                    self.assertIn("`wants_coaching`", descriptions[name])
+
+    async def test_uc_c_agent_call(self):
+        d = await self.ok("create_intent", text=self.UC_C, sport="padel", area="Spagna",
+                          period_start="2026-10-01", period_end="2026-10-31", pax=2,
+                          level="beginner", wants_coaching=True)
+        c = d["criteria"]
+        self.assertEqual((c["level"], c["wants_coaching"]), ("beginner", True))
+        self.assertIn("livello principiante, con lezioni", d["say"])
+        p = await self.ok("get_proposal", intent_id=d["intent_id"])
+        self.assertEqual(p["product"]["product_id"], "2")
+        self.assertIn("Il programma è pensato per principianti e include lezioni o allenamenti.", p["say"])
+
+    async def test_invalid_level_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text="padel a ottobre in due", level="pro")
+        self.assertIsNone(d["criteria"]["level"])
+        self.assertTrue(d["say"].startswith("Non ho potuto usare pro come livello di gioco"))
+
+    async def test_reject_with_level(self):
+        intent = await self.ok("create_intent", text="padel a ottobre in due")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(first["product"]["product_id"], "3")
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="troppo difficile",
+                          level="beginner")
+        self.assertEqual(d["product"]["product_id"], "2")
+        self.assertIn("livello principiante", d["say"])
+
+    async def test_nothing_but_reserved_trips_is_a_level_no_match(self):
+        self.vela = make_vela(products=[
+            replace(make_product(3, price=100), levels=frozenset({"advanced"}), levels_exclusive=True)])
+        intent = await self.ok("create_intent", text="padel a ottobre in due, siamo principianti")
+        d = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(d["failed_criterion"], "level")
+        self.assertEqual(d["say"], "I viaggi compatibili sono riservati a giocatori avanzati. "
+                                   "Vuoi cambiare qualcosa?")

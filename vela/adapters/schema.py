@@ -3,10 +3,12 @@
 Tipi neutri (JSON, Numeric, String, Date, DateTime): `tests/test_migrations.py` applica le
 migrazioni anche su SQLite. Postgres è l'unico backend di produzione (RNF-01).
 """
-from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
-                        Numeric, String, Table, Text, UniqueConstraint)
+from sqlalchemy import (JSON, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
+                        Numeric, String, Table, Text, UniqueConstraint, text)
 
 from vela.adapters.db import metadata
+
+ACTIVE_BOOKING_SQL = "kind = 'booking' AND status IN ('pending', 'running')"
 
 products_t = Table(
     "products", metadata,
@@ -36,6 +38,12 @@ products_t = Table(
     Column("archived", Boolean, nullable=False, default=False),
     Column("provider_id", String(32)),
     Column("brand", String(64)),
+    Column("featured", Boolean, nullable=False, default=False),        # 0010 (M21-B)
+    Column("special_offer", Boolean, nullable=False, default=False),   # 0010 (M21-B)
+    Column("max_pax_per_room", Integer),                                # 0011 (M21-D)
+    Column("levels", JSON, nullable=False, default=list),               # 0012 (M21-C)
+    Column("levels_exclusive", Boolean, nullable=False, default=False),  # 0012 (M21-C)
+    Column("coaching", Boolean, nullable=False, default=False),         # 0012 (M21-C)
 )
 
 intents_t = Table(
@@ -84,6 +92,11 @@ orders_t = Table(
     Column("paid_at", DateTime(timezone=True)),
     Column("enqueued_at", DateTime(timezone=True)),
     Column("replacement_proposal_id", String(36), index=True),
+    Column("orphan_itineraries", Integer, nullable=False, server_default="0"),   # M18
+    Column("rooms", Integer, nullable=False, server_default="1"),                # 0011 (M21-D)
+    Column("follows_quote", Boolean, nullable=False, server_default=text("false")),   # 0015 (RF-84)
+    Column("confirmed_total", Numeric(12, 2)),                                         # 0015 (RF-84)
+    Column("last_seen_at", DateTime(timezone=True)),                                   # 0016 (M19)
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
@@ -95,6 +108,8 @@ rejections_t = Table(
     Column("product_id", String(32), ForeignKey("products.id"), nullable=False),
     Column("reason", Text, nullable=False, default=""),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("kind", String(16)),                                                  # 0017 (M21-F)
+    Column("keep_product", Boolean, nullable=False, server_default=text("false")),   # 0017 (M21-F)
     UniqueConstraint("proposal_id", name="uq_rejections_proposal_id"),
 )
 
@@ -112,6 +127,9 @@ jobs_t = Table(
     Column("locked_at", DateTime(timezone=True)),
     Column("last_error", Text),
     Index("ix_jobs_claim", "status", "kind", "run_after", "enqueued_at"),
+    # Un solo job `booking` attivo per ordine (RF-51, migrazione 0009).
+    Index("uq_jobs_active_booking", "order_id", unique=True,
+          postgresql_where=text(ACTIVE_BOOKING_SQL), sqlite_where=text(ACTIVE_BOOKING_SQL)),
 )
 
 quota_window_t = Table(
@@ -120,6 +138,23 @@ quota_window_t = Table(
     Column("window_start", DateTime(timezone=True), nullable=False),
     Column("window_end", DateTime(timezone=True), nullable=False),
     Column("limit_per_minute", Integer, nullable=False),
-    Column("used", Integer, nullable=False, default=0),
     Column("needs_refresh", Boolean, nullable=False, default=False),
+    Column("tokens", Float, nullable=False),                  # token bucket (M18), può essere negativo
+    Column("refilled_at", DateTime(timezone=True), nullable=False),
+)
+
+# RF-84: cache del prezzo con fanout (migrazione 0015). Nessuna FK verso `orders`: il leader è un
+# riferimento debole, un leader sparito vale come leader non più `queued`.
+price_quotes_t = Table(
+    "price_quotes", metadata,
+    Column("product_id", String(32), primary_key=True),
+    Column("start_date", Date, primary_key=True),
+    Column("adults", Integer, primary_key=True),
+    Column("rooms", Integer, primary_key=True),
+    Column("currency", String(3), primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("leader_order_id", String(36), nullable=False),
+    Column("total", Numeric(12, 2)),
+    Column("priced_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )

@@ -56,3 +56,29 @@ imprecisione documentale.
 - `tagIds` degli articoli non ha una rotta di risoluzione.
 - Costo quota: la sola lettura completa del catalogo di default costa 12 richieste (2+1+2+2+1+1
   pagine, più config). Un ciclo `/v1/quota` prima e dopo ne aggiunge 2.
+
+## `/v1/itineraries/{id}/accommodations` (sonda M22-a, 2026-09-27)
+
+Staging, brand `staging.weebora.com`, 11 chiamate. Dettagli in [accommodations.md](accommodations.md).
+
+| # | Gravità | Dove | OAS dice | Osservato |
+|---|---|---|---|---|
+| 28 | **alta** | `GET .../accommodations` su un prodotto con `hotelSelection: true` e `allowAccommodationList: false` (124) | Lista degli hotel dell'itinerario | 200 con `elements: []`: `hotelSelection` da solo non dà alternative. L'unica lista non vuota viene da un prodotto con `allowAccommodationList: true` (25) |
+| 29 | **alta** | `Accommodation.roomsConfiguration` | Configurazioni con `rooms[].id` da passare al `PATCH` come `roomIds` | Sull'unico hotel restituito, `[]`: nessun `roomId` da mandare, `PATCH` non eseguibile |
+| 30 | **alta** | `Itinerary.accommodation` su un prodotto con `allowAccommodationList: true` (25) | Oggetto `ItineraryAccommodation` richiesto | Presente ma con tutti i campi `null`: nessun hotel preselezionato, eppure `checkout.openAmount` 1798 €. Un acquisto di oggi su quel prodotto parte senza hotel |
+| 31 | media | `GET .../accommodations` con `hotelSelection: false` (28) | Nessuna indicazione | 200 con lista vuota, non un 4xx: "hotel fisso" e "nessuna alternativa" sono indistinguibili dalla risposta |
+| 32 | media | Filtri di `GET .../accommodations` | Query `stars`, `rating`, `price`, `distance` | `aggregate.filters` usa gli id `starsRating`, `guestRating`, `price`, `distance`: i nomi dei filtri non coincidono con i parametri dell'OAS (non provati) |
+| 33 | bassa | `Itinerary` | Chiavi dello schema OAS | Chiavi in più: `removableAccommodation`, `groupTourId`, `players`, `groupTourAvailability`, `travelProgram`, `travelDetail`, `paymentOptionsConfiguration`, `withoutNavigations`, `adultCount`, `childCount`, `customer`, `passengers`, `rooms`; `accommodation.componentId` |
+| 34 | bassa | `Accommodation.totalPrice` | Prezzo dell'hotel | `0.00` sull'hotel incluso (124), `1.00` sull'unico hotel della lista (25): valori segnaposto di staging, non un prezzo |
+| 35 | bassa | `Accommodation.guestRating` | Voto | `0` con `reviewsCount: null` e filtro `guestRating` con il solo valore `"0"`: su staging nessuna recensione |
+
+## Cliente e passeggeri (sonda M19, 2026-09-27)
+
+Staging, brand `staging.weebora.com`, 5 chiamate. Dettagli in [customer-pax.md](customer-pax.md).
+
+| # | Gravità | Dove | OAS dice | Osservato |
+|---|---|---|---|---|
+| 36 | media | `GET /v1/itineraries/{id}` appena creato | Il flusso DOCS legge i passeggeri con `GET .../pax` dopo il `PUT customer` | `passengers` è già nell'itinerario dalla creazione, con i `refId` `pax-1..N` vuoti, e `customer` c'è con tutti i campi vuoti (`""`, non `null`). `PUT pax` con quei `refId` è accettato senza un `GET .../pax` prima |
+| 37 | media | Ordine dei passi del carrello (DOCS "Checkout flow") | Creazione → customer → pax → lettura del totale | Il totale non dipende da customer e pax: `openAmount`, `total`, `originalTotal` e `totalPrice` sono identici prima e dopo (1156 € sul 124). Dopo il pagamento i due `PUT` non sono verificati (domanda 10) |
+| 38 | bassa | `Customer`, `Pax` nell'itinerario | Schemi del `PUT` | La lettura ha campi che il `PUT` di Vela non manda: `customer.taxNumber`, `customer.marketingOptIn`, `passengers[].age`, `gender`, `nationalityCountryCode`. Restano ai default (`""`, `false`, `0`, `null`) e il `PUT` è accettato lo stesso |
+| 39 | media | `PUT .../customer` e `PUT .../pax` dopo il pagamento | Nessuna indicazione; il flusso DOCS li mette prima di `POST .../payment` | Accettati (200) su un itinerario con un PaymentIntent di test `succeeded` legato da `metadata.checkoutRefId`; totale e `checkout.status` invariati, `POST /v1/bookings` riuscito dopo. Verificato con un PaymentIntent diretto, non con la Checkout Session di Vela |

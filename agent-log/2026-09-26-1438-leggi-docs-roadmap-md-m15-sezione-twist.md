@@ -105,3 +105,57 @@ Riferimenti verificati nel codice (tutti corretti; il punto 3 della §3.3 del pi
 Suite verde. Aggiungo la voce in `docs/decisions.md` e faccio i commit.
 
 - 🔧 Bash: Append decision entry and commit
+
+- 🔧 Bash: Show committed files and push the branch
+
+La bozza di `ARCHITECTURE.md` è nel branch `doc/architecture`, pubblicato su origin. Non ho fatto merge né aperto una PR: si aspetta M13b.
+
+**Cosa ho fatto**
+- Ho allineato il branch a `master` con un fast-forward: senza, piano e sezione twist di M15 non c'erano. Nessuna storia riscritta.
+- Ho scritto `ARCHITECTURE.md` con tutte le parti chieste da M15:
+  - panoramica e forma del sistema, con il percorso di un acquisto;
+  - decisioni e compromessi;
+  - vincoli del prototipo, con i valori di default di RF-13 presi dal codice;
+  - la sezione twist, con le 5 richieste (§5.1-5.5), l'ipotesi sbagliata e corretta, e i precedenti (§5.6);
+  - prossimi passi: A2A, email del codice, OAuth per REST, seconda chiave, M19, domande a HofJ.
+- La tabella del load test ha "[numeri da M13a]" nella colonna "prima" e "[numeri da M13b]" nella colonna "dopo". Al posto dei comandi di lancio c'è "[comandi da `loadtest/README.md`, M13a]".
+- Ho tenuto le etichette [misurato] / [previsto] / [proposta]: le correzioni di M18 e M19 restano proposte, non fatti.
+- Ho aggiunto una voce in `docs/decisions.md` e fatto due commit (l'agent-log è stato generato dall'hook). La suite di test passa: 916 test, 47 saltati.
+
+**Da sapere**
+- **Il punto 3 della §3.3 del piano ora è confermato dal codice.** Prima del job di prenotazione, `_enqueue_booking` (`vela/domain/orders.py`) controlla se ne esiste già uno e poi accoda. Non c'è né un lock né un vincolo unico sulla tabella `jobs`, quindi due verifiche di pagamento contemporanee possono creare due job. L'ho letto nel codice, non l'ho riprodotto. L'upsert di HofJ rende innocua la seconda `POST`, ma potrebbe valere la pena aggiungerlo allo scope di M18.
+- **Il mapping degli stati A2A l'ho proposto io**, perché non era nei documenti: per esempio link da pagare → `input-required`, `confirmed` → `completed`. È marcato "[proposta, da confermare]": dimmi se lo tieni.
+- Il brief non contiene la sezione "The twist" citata da M15. Il testo del twist l'ho preso dalla §1 del piano.
+- Il documento è in italiano come il resto di `docs/`. I valutatori però sono anglofoni: forse per la consegna serve una versione inglese.
+
+Quando M13b è su `master` restano da fare: riempire la tabella, inserire i comandi di lancio, togliere la riga "bozza", rebase su `origin/develop` e PR.
+
+## Utente 19:11
+
+riallineati con il master
+
+## Agente 19:11
+
+- 🔧 Bash: Fetch and compare branch with master
+
+- 🔧 Bash: Inspect new master commits and overlapping files
+
+Il branch è già su origin, quindi un rebase richiederebbe un force push, che le regole del progetto vietano senza chiedere. Faccio un merge di `master` nel branch, come per `task/21f`.
+
+- 🔧 Bash: Merge master into the branch without committing
+
+- 🔧 Bash: Inspect local changes and master history of log files
+
+- 🔧 Bash: Check how master touches this session's log files
+
+Le modifiche locali sono gli agent-log di questa sessione, aggiornati dall'hook. Li metto da parte con uno stash con etichetta, faccio il merge e poi li ripristino.
+
+- 🔧 Bash: Set aside agent-log changes and start the merge
+
+- 🔧 Bash: Locate conflict markers in decisions log
+
+- 🔧 Bash: Resolve conflict keeping both sides, ours last
+
+Conflitto risolto: entrambe le parti tenute, la mia voce in fondo. Chiudo il merge dopo test e lint.
+
+- 🔧 Bash: Run test suite and lint on merged tree

@@ -140,22 +140,25 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(len(opened), 1)
         self.assertTrue(opened[0].startswith("http://testserver/replay/checkout/"))
         steps = [name for name, _ in summary["timings"]]
-        self.assertEqual(steps, ["intento", "proposta", "rifiuto", "accept", "accept → link",
-                                 "link → confirmed", "totale"])
+        self.assertEqual(steps, ["intento", "proposta", "rifiuto", "accept", "accept → prezzo effettivo",
+                                 "conferma → link", "link → confirmed", "totale"])
+        self.assertEqual(summary["estimate"], summary["total"])   # replay: prezzo effettivo = stima
 
     def test_timings_come_from_the_clock(self):
         clock = FakeClock()
         routes = dict(BASE_ROUTES)
-        link = status("awaiting_payment", total="480.00", payment_url="https://checkout.stripe.com/c/x")
-        # t=0 queued, t=2 queued, t=4 link; poi t=4 ancora da pagare, t=6 confirmed
-        routes[("GET", "/v1/orders/o1")] = [status("queued"), status("queued"), link, link,
+        priced = status("awaiting_confirmation", total="520.00", price_from_total="480.00")
+        link = status("awaiting_payment", total="520.00", payment_url="https://checkout.stripe.com/c/x")
+        # t=0 queued, t=2 queued, t=4 prezzo; conferma, t=4 link; t=4 ancora da pagare, t=6 confirmed
+        routes[("GET", "/v1/orders/o1")] = [status("queued"), status("queued"), priced, link, link,
                                             status("confirmed", booking_code="abc123")]
         summary = rest_flow.run_flow(canned(routes), open_url=lambda url: None, clock=clock,
                                      sleep=clock.sleep, poll=2, timeout=60)
         timings = dict(summary["timings"])
-        self.assertEqual((timings["accept → link"], timings["link → confirmed"], timings["totale"]),
-                         (4.0, 2.0, 6.0))
-        self.assertEqual(summary["booking_code"], "abc123")
+        self.assertEqual((timings["accept → prezzo effettivo"], timings["conferma → link"],
+                          timings["link → confirmed"], timings["totale"]), (4.0, 0.0, 2.0, 6.0))
+        self.assertEqual((summary["booking_code"], summary["estimate"], summary["total"]),
+                         ("abc123", "480.00", "520.00"))
 
     def test_link_never_ready_fails_after_the_timeout(self):
         app, _ = make_app()
@@ -218,7 +221,7 @@ class TrapFlowTest(unittest.TestCase):
         with authed(app) as client, self.assertRaises(rest_flow.FlowFailure) as ctx:
             rest_flow.run_flow(client, open_url=lambda url: None, trap=True,
                                tick=app.state.worker.drain, sleep=lambda s: None, poll=0)
-        self.assertIn("awaiting_payment", str(ctx.exception))
+        self.assertIn("awaiting_confirmation", str(ctx.exception))
 
     def test_replacement_that_shows_a_technical_error_fails(self):
         routes = dict(BASE_ROUTES)
@@ -279,6 +282,32 @@ class CliTest(unittest.TestCase):
                                 {"VELA_API_TOKEN": TOKEN}, lambda url, token: authed(app))
         self.assertEqual(code, 1)
         self.assertIn("FALLITO", err)
+
+    def test_phone_option_sets_the_traveler_phone(self):
+        # I2: il test manuale degli SMS usa il proprio numero; senza opzione resta quello finto
+        for argv, expected in (([], rest_flow.PROFILE["phone"]),
+                               (["--phone", "+393330000000"], "+393330000000")):
+            with self.subTest(argv=argv):
+                sent = []
+                routes = dict(BASE_ROUTES)
+                routes[("GET", "/v1/orders/o1")] = [status(
+                    "replaced", proposal_changed=True, proposal=proposal("p3", "120", "500.00"),
+                    say="Quel viaggio non è più disponibile, ti propongo questo")]
+
+                def factory(url, token):
+                    client = canned(routes)
+                    client.event_hooks["request"].append(
+                        lambda request: sent.append(json.loads(request.content))
+                        if request.url.path == "/v1/intents" else None)
+                    return client
+
+                code, out, err = run_main(["http://vela.test", "--trap", "--poll", "0"] + argv,
+                                          {"VELA_API_TOKEN": TOKEN}, factory)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(sent[0]["profile"]["phone"], expected)
+                self.assertEqual(sent[0]["profile"]["first_name"], rest_flow.PROFILE["first_name"])
+                self.assertNotIn(expected, out + err)
+        self.assertEqual(rest_flow.PROFILE["phone"], "+390000000000")
 
     def test_format_table(self):
         self.assertEqual(rest_flow.format_table([("intento", 0.25), ("totale", 12.0)]),

@@ -2,6 +2,7 @@ import os
 import unittest
 from dataclasses import replace
 from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -13,6 +14,7 @@ from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.app import create_app
 from vela.config import DEFAULT_TRAVELER, Settings
+from vela.domain.models import Job, JobKind, JobStatus, Order, OrderStatus, TravelerProfile
 from vela.domain.usecases import Vela
 
 UNREACHABLE = "postgresql+psycopg://u:p@127.0.0.1:1/x"
@@ -26,13 +28,15 @@ class HealthTest(unittest.TestCase):
     def test_no_database_configured_is_503(self):
         r = client(None).get("/health")
         self.assertEqual(r.status_code, 503)
-        self.assertEqual(r.json(), {"status": "degraded", "db": "error", "catalog": None, "quota": None})
+        self.assertEqual(r.json(), {"status": "degraded", "db": "error", "catalog": None, "quota": None,
+                                    "queue": None})
 
     def test_reachable_database_is_200(self):
         # SQLite senza tabelle: il catalogo non si legge, ma la salute dipende solo dal DB.
         r = client("sqlite://").get("/health")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json(), {"status": "ok", "db": "ok", "catalog": None, "quota": None})
+        self.assertEqual(r.json(), {"status": "ok", "db": "ok", "catalog": None, "quota": None,
+                                    "queue": None})
 
     def test_unreachable_database_is_503(self):
         r = client(UNREACHABLE).get("/health")
@@ -70,6 +74,11 @@ class AppFactoryTest(unittest.TestCase):
         self.assertIsNotNone(app.state.engine)
 
 
+def order_stub(order_id):
+    return Order(order_id, "p-" + order_id, "i1", "1", OrderStatus.QUEUED, 2, Decimal("300"), None,
+                 "EUR", TravelerProfile(), NOW, NOW, enqueued_at=NOW)
+
+
 def catalog_client(products, database_url="sqlite://", now=NOW + timedelta(hours=1)):
     repos = MemoryRepositories()
     repos.products.upsert_many(products)
@@ -86,13 +95,30 @@ class CatalogHealthTest(unittest.TestCase):
         self.assertEqual(r.json()["catalog"], {"products": 2, "fetched_at": "2026-09-25T12:00:00+00:00",
                                                "age_seconds": 3600})
 
-    def test_reports_the_quota_window(self):
-        """M5: la finestra corrente del contatore condiviso, prima di ogni lettura di /v1/quota."""
+    def test_reports_the_quota_bucket(self):
+        """M18: lo stato del token bucket condiviso, prima di ogni lettura di /v1/quota."""
         r = catalog_client([make_product(1)]).get("/health")
         self.assertEqual(r.json()["quota"], {
-            "limit_per_minute": 120, "effective_limit": 108, "reserve": 21, "used": 0,
-            "remaining": 108, "window_start": "2026-09-25T13:00:00+00:00",
-            "window_end": "2026-09-25T13:01:00+00:00", "needs_refresh": True})
+            "limit_per_minute": 120, "effective_limit": 108, "burst": 8, "rate_per_minute": 100.0,
+            "purchase_floor": 3, "tokens": 8.0, "purchases_per_minute": 46.51162790697674, "needs_refresh": True,   # M19: 100 × (1 − 0,15/2,15) ÷ 2
+            "hofj_window_start": "2026-09-25T13:00:00+00:00",
+            "hofj_window_end": "2026-09-25T13:01:00+00:00"})
+
+    def test_reports_queue_age_and_orphan_itineraries(self):
+        """M18: età del più vecchio acquisto in coda e itinerari lasciati orfani da un timeout."""
+        repos = MemoryRepositories()
+        vela = Vela(repos, ReplayHofJ(), FakePayments("http://test"), DEFAULT_TRAVELER,
+                    now=lambda: NOW + timedelta(minutes=5))
+        repos.jobs.enqueue(Job("j1", JobKind.PURCHASE, "o1", JobStatus.PENDING, NOW, NOW))
+        repos.jobs.enqueue(Job("j2", JobKind.PURCHASE, "o2", JobStatus.DONE, NOW - timedelta(hours=1), NOW))
+        repos.orders.save(replace(order_stub("o1"), orphan_itineraries=2))
+        app = create_app(Settings(database_url="sqlite://"), vela=vela, worker=inline_worker(vela))
+        r = TestClient(app).get("/health")
+        self.assertEqual(r.json()["queue"], {"oldest_purchase_age_seconds": 300, "orphan_itineraries": 2})
+
+    def test_empty_queue(self):
+        r = catalog_client([]).get("/health")
+        self.assertEqual(r.json()["queue"], {"oldest_purchase_age_seconds": None, "orphan_itineraries": 0})
 
     def test_empty_catalog(self):
         r = catalog_client([]).get("/health")

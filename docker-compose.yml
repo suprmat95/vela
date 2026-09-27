@@ -1,0 +1,78 @@
+# Banco di prova del twist (M13a): Vela in modo `loadtest` contro un finto HofJ, Postgres locale.
+# Mai HofJ vero né Stripe: Vela rifiuta un HOFJ_BASE_URL diverso da fake-hofj/localhost.
+# Chiave HofJ e token REST qui sotto sono finti e servono solo dentro il compose.
+#
+#   docker compose up -d --build
+#   docker compose run --rm locust --travelers 10000 --label 10k
+#   docker compose down -v            # ogni giro parte da un DB e un finto puliti
+#
+# Guasti e latenza del finto: FAKE_HOFJ_LATENCY, FAKE_HOFJ_FAULTS, FAKE_HOFJ_BACKGROUND_RPM,
+# FAKE_HOFJ_WINDOW (vedi loadtest/README.md).
+#
+# OPENSSL_armcap=0: su Apple M4 la VM di Docker Desktop (kernel 6.10) espone SME/SVE2 e l'OpenSSL
+# di `cryptography` (importato da `mcp`) muore con SIGILL all'avvio. La variabile spegne le
+# estensioni CPU di OpenSSL su ARM ed è ignorata su x86; il compose non usa TLS.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vela
+      POSTGRES_PASSWORD: vela
+      POSTGRES_DB: vela
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vela"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  fake-hofj:
+    build: .
+    entrypoint: ["python", "-m", "loadtest.fake_hofj", "--port", "8001"]
+    environment:
+      OPENSSL_armcap: "0"
+      FAKE_HOFJ_KEY: loadtest-key
+      FAKE_HOFJ_LOG: loadtest/out/calls.jsonl
+      FAKE_HOFJ_WINDOW: ${FAKE_HOFJ_WINDOW:-anchored}
+      FAKE_HOFJ_LATENCY: ${FAKE_HOFJ_LATENCY:-standard}
+      FAKE_HOFJ_BACKGROUND_RPM: ${FAKE_HOFJ_BACKGROUND_RPM:-12}
+      FAKE_HOFJ_FAULTS: ${FAKE_HOFJ_FAULTS:-}
+      FAKE_HOFJ_SEED: ${FAKE_HOFJ_SEED:-13}
+    volumes:
+      - ./loadtest:/app/loadtest
+    ports:
+      - "8001:8001"
+
+  vela:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fake-hofj:
+        condition: service_started
+    environment:
+      OPENSSL_armcap: "0"
+      DATABASE_URL: postgresql://vela:vela@postgres:5432/vela
+      VELA_UPSTREAM_MODE: loadtest
+      HOFJ_BASE_URL: http://fake-hofj:8001
+      HOFJ_API_KEY: loadtest-key
+      HOFJ_BRANDS: padel=weebora.com,tennis=terrarossa.com
+      VELA_API_TOKEN: loadtest-token
+      VELA_PUBLIC_URL: http://vela:8000
+    ports:
+      - "8000:8000"
+
+  locust:
+    build:
+      context: .
+      target: loadtest
+    profiles: ["loadtest"]
+    depends_on:
+      - vela
+    entrypoint: ["python", "loadtest/run.py"]
+    environment:
+      OPENSSL_armcap: "0"
+      VELA_URL: http://vela:8000
+      FAKE_HOFJ_URL: http://fake-hofj:8001
+      VELA_API_TOKEN: loadtest-token
+    volumes:
+      - ./loadtest:/app/loadtest

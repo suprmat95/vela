@@ -6,6 +6,9 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple
 
+from vela.domain.quota import DEFAULT_FLOOR, DEFAULT_PAY_SHARE
+from vela.domain.quota import booking_reserve as reserve_for
+
 DEFAULT_UPSTREAM_MODE = "replay"
 BRAND_SPORTS = ("padel", "tennis")
 
@@ -65,17 +68,33 @@ class Settings:
     vela_upstream_mode: str = DEFAULT_UPSTREAM_MODE
     anthropic_api_key: Optional[str] = None
     vela_public_url: Optional[str] = None
+    twilio_account_sid: Optional[str] = None           # SMS al viaggiatore (decisione 2026-09-26)
+    twilio_auth_token: Optional[str] = None
+    twilio_from: Optional[str] = None                  # numero Twilio del mittente, E.164
     # Parametri di M5: configurabili da codice, mai da env (l'elenco di §6 resta chiuso).
-    worker_concurrency: int = 4                        # RF-50, thread per istanza
+    # M18: il ritmo lo decide il token bucket, non i thread. Legge di Little: ~1,45 chiamate/s
+    # × 2-6 s di latenza ≈ 6-9 chiamate contemporanee.
+    worker_concurrency: int = 10                       # RF-50, thread per istanza
     quota_margin: float = 0.10                         # limite effettivo = limitPerMinute × 0,9
-    booking_reserve: float = 0.20                      # RF-47, quota della finestra per i booking
+    expected_pay_share: float = DEFAULT_PAY_SHARE      # M19: quota attesa di chi paga il link, per RF-48
+    quota_burst: int = 8                               # M18: capienza B, con B + 60·r = limite effettivo
+    quota_floor: int = DEFAULT_FLOOR                   # M18, M19: gettoni che purchase e sync lasciano ai booking
     purchase_max_attempts: int = 3                     # RF-46
     booking_max_attempts: int = 5                      # RF-24
     booking_backoff: Tuple[int, ...] = (5, 10, 20, 40)  # secondi tra i tentativi di booking
-    job_lease_seconds: int = 120                       # un job running più vecchio torna prelevabile
+    job_lease_seconds: int = 180                       # M18: 3 chiamate × 20 s di timeout (booking, M19) + margine
     payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
+    accept_wait_seconds: int = 100                     # accept aspetta prezzo e link (2026-09-26), < 120 s di ElevenLabs
+    accept_poll_seconds: float = 1.0                   # rilettura dell'ordine durante l'attesa
+    price_quote_ttl_seconds: int = 900                 # RF-84: vita del prezzo in cache; 0 = cache e fanout spenti
+    silent_order_minutes: int = 15                     # M19: ordine in coda senza segni di vita → expired; 0 = mai
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
+
+    @property
+    def booking_reserve(self) -> float:
+        """RF-48, M19: parte del ritmo delle prenotazioni, derivata da `expected_pay_share`."""
+        return reserve_for(self.expected_pay_share)
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> "Settings":
@@ -92,6 +111,9 @@ class Settings:
             vela_upstream_mode=env.get("VELA_UPSTREAM_MODE") or DEFAULT_UPSTREAM_MODE,
             anthropic_api_key=env.get("ANTHROPIC_API_KEY"),
             vela_public_url=env.get("VELA_PUBLIC_URL"),
+            twilio_account_sid=env.get("TWILIO_ACCOUNT_SID"),
+            twilio_auth_token=env.get("TWILIO_AUTH_TOKEN"),
+            twilio_from=env.get("TWILIO_FROM"),
         )
 
 

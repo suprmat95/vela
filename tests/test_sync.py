@@ -1,6 +1,5 @@
 """Sync incrementale multi-brand del catalogo (M10, RF-28..31) con sorgente finta: mai la rete."""
 import unittest
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from hofj_samples import detail_of, item
@@ -127,6 +126,39 @@ class SyncTest(unittest.TestCase):
         self.assertEqual((p.destination, p.hotel, p.fetched_at), ("Sinalunga", "Hotel Uno", T0))
         self.assertNotIn("gallery", p.raw)
 
+    def test_featured_and_special_offer_are_written_from_the_detail(self):
+        """M21-B (RF-60): le due etichette arrivano dal dettaglio esteso, non indovinate."""
+        source = FakeSource({"weebora.com": [[item(1, featured=True), item(2, isSpecialOffer=True),
+                                              item(3)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        flags = {pid: (p.featured, p.special_offer) for pid, p in self.products().items()}
+        self.assertEqual(flags, {"1": (True, False), "2": (False, True), "3": (False, False)})
+
+    def test_max_pax_per_room_is_written_from_the_detail(self):
+        """M21-D (RF-66): il limite per camera arriva dal dettaglio esteso."""
+        source = FakeSource({"weebora.com": [[item(1, maxPaxPerRoom=2), item(2)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        limits = {pid: p.max_pax_per_room for pid, p in self.products().items()}
+        self.assertEqual(limits, {"1": 2, "2": None})
+
+    def test_level_labels_are_written_from_the_detail(self):
+        """M21-C (RF-63): livelli, esclusività e lezioni letti dalle descrizioni del dettaglio, e
+        ricalcolati da un nuovo sync quando il dettaglio cambia."""
+        source = FakeSource({"weebora.com": [[
+            item(1, description="Per **giocatori di livello intermedio e avanzato**, con coach."),
+            item(2, shortDescription="Solo per avanzati", description="Mare."), item(3)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        labels = {pid: (p.levels, p.levels_exclusive, p.coaching) for pid, p in self.products().items()}
+        self.assertEqual(labels, {"1": (frozenset({"intermediate", "advanced"}), False, True),
+                                  "2": (frozenset({"advanced"}), True, False),
+                                  "3": (frozenset(), False, False)})
+        changed = FakeSource({"weebora.com": [[
+            item(1, description="Per tutti i livelli.", updatedAt="2026-09-27T10:00:00.000Z"),
+            item(2, shortDescription="Solo per avanzati", description="Mare."), item(3)]]})
+        self.sync(changed, brands={"padel": "weebora.com"}).run()
+        p = self.products()["1"]
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching), (frozenset({"all"}), False, False))
+
     def test_follows_the_cursor_across_pages(self):
         source = FakeSource({"weebora.com": [[item(1)], [item(2)], [item(3)]]})
         report = self.sync(source, {"padel": "weebora.com"}).run()
@@ -156,6 +188,18 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(report.brands[0].unchanged, 1)
         self.assertEqual({pid: p.fetched_at for pid, p in self.products().items()},
                          {"1": self.clock.t, "2": self.clock.t, "4": self.clock.t})
+
+    def test_full_run_downloads_unchanged_products_too(self):
+        """RF-83: `--full` riscarica anche i dettagli con `updatedAt` invariato."""
+        self.sync(FakeSource({"weebora.com": [[item(1), item(2)]]}), {"padel": "weebora.com"}).run()
+        second = FakeSource({"weebora.com": [[item(1), item(2)]]})
+        report = self.sync(second, {"padel": "weebora.com"}, full=True).run()
+        self.assertEqual(second.detail_calls(), ["1", "2"])
+        self.assertEqual((report.brands[0].written, report.brands[0].unchanged), (2, 0))
+
+    def test_travel_program_is_kept_in_raw(self):
+        self.sync(two_brands()).run()
+        self.assertEqual(self.products()["1"].raw["travelProgram"]["id"], "733")
 
     def test_pre_m10_row_is_relabelled_without_a_detail(self):
         self.repos.products.upsert_many([make_product(11, sport="padel",
@@ -242,8 +286,13 @@ class SyncTest(unittest.TestCase):
     def test_every_call_takes_a_sync_quota_slot(self):
         calls = []
         acquire = self.repos.quota.acquire
-        self.repos.quota.acquire = lambda cls, n, now, purchase_waiting=False: (
-            calls.append((cls, n, purchase_waiting)) or acquire(cls, n, now, purchase_waiting))
+        def taking(cls, n, now, purchase_waiting=False):
+            taken = acquire(cls, n, now, purchase_waiting)
+            if taken:   # M19: con la soglia a 3 un prelievo può essere rifiutato e ripetuto
+                calls.append((cls, n, purchase_waiting))
+            return taken
+
+        self.repos.quota.acquire = taking
         source = two_brands()
         self.sync(source).run()
         self.assertEqual(len(calls), len(source.calls))
