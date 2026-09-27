@@ -454,7 +454,8 @@ _COACHING_WORDS = (r"lezion\w*|maestr[oiae]|coach\w*|clinic\w*|cors[oi]|allenarc
                    r"instructors?")
 _COACHING_RE = re.compile(r"\b(?:%s)\b" % _COACHING_WORDS)
 _COACHING_NEGATED = re.compile(
-    r"\b(?:niente|nessun[oa]?|senza|no|non|without|don't|dont|do not|not)\s+(?:[\w']+\s+){0,3}?"
+    r"\b(?:niente|nessun[oa]?|senza|no|non|without|don't|dont|do not|not|troppe|troppi|meno|"
+    r"too many|fewer|less)\s+(?:[\w']+\s+){0,3}?"
     r"(?:%s)\b" % _COACHING_WORDS)
 _DURING = re.compile(r"\b(?:nel|durante il)\s+corso\b")   # "nel corso di ottobre": un periodo
 

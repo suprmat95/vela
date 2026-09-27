@@ -26,6 +26,8 @@ TABLE = [
     ("a padel training camp in Portugal", None, True),
     ("padel senza lezioni, solo partite", None, False),
     ("tennis without lessons please", None, False),
+    ("troppe lezioni, vogliamo giocare", None, False),
+    ("too many lessons last time", None, False),
     ("padel in Spagna a ottobre, siamo in due", None, None),
     ("tennis nel corso di ottobre", None, None),                 # "nel corso di" è un periodo
     ("padel con un maestro esperto", None, True),                # esperto è il maestro

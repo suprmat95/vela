@@ -156,7 +156,8 @@ class Vela:
         area = geo.area_of_destination(product.destination, product.country) if product else None
         now = self.now()
         refinement = refine(intent.criteria, reason, proposal, area, now.date(), fields,
-                            cheapest_total=self._cheapest_total(now, products))
+                            cheapest_total=self._cheapest_total(now, products),
+                            product_levels=product.levels if product else frozenset())
         if refinement.criteria == intent.criteria:
             return intent, refinement
         self.repos.intents.update_criteria(intent.id, refinement.criteria)

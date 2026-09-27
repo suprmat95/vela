@@ -5,7 +5,9 @@ letta a persona o in totale come in `create_intent`, M21-E; altrimenti "troppo c
 budget all'80% del totale proposto, senza mai alzarlo, e lo legge in totale),
 direzione ("più a sud"/"più a nord", "più fresco"/"più caldo" con le tabelle di `geo`), luogo
 esplicito, periodo, sport, persone, camere e durata con gli stessi parser dell'intento, "troppo
-lungo"/"troppo corto" che spostano la durata rispetto alla proposta (M21-A). Poi i campi strutturati
+lungo"/"troppo corto" che spostano la durata rispetto alla proposta (M21-A), livello e lezioni
+(M21-C) con "troppo difficile"/"troppo facile" che spostano il livello di uno rispetto a quello
+dell'intento o, senza, ai livelli del prodotto rifiutato. Poi i campi strutturati
 dell'agente (RF-52), che vincono sul testo: `direction` sostituisce la direzione del testo,
 `area` vince su ogni direzione. Le camere restano entro le persone aggiornate (M21-D): un campo
 oltre è scartato e detto, un testo oltre è ignorato, e se cambiano solo le persone le camere di
@@ -20,8 +22,10 @@ from typing import Optional
 
 from vela.domain import geo
 from vela.domain.intent import (MAX_NIGHTS, CheapestTotal, conflicts_between, parse_budget,
-                                parse_budget_scope, parse_duration, parse_pax, parse_period,
-                                parse_rooms, parse_sport, read_budget, validate_fields)
+                                parse_budget_scope, parse_duration, parse_level, parse_pax,
+                                parse_period, parse_rooms, parse_sport, parse_wants_coaching,
+                                read_budget, validate_fields)
+from vela.domain.labels import LEVELS
 from vela.domain.models import Area, Criteria, Proposal, StructuredFields
 
 PRICE_FACTOR = Decimal("0.8")
@@ -43,6 +47,15 @@ _SHORTER = re.compile(r"\b(?:troppo lung[oaie]|dura troppo|durano troppo|più br
 _LONGER = re.compile(r"\b(?:troppo cort[oaie]|troppo brev[ei]|più lung[oaie]|più notti|"
                      r"too short|longer|more nights)\b")
 
+# M21-C: il livello della proposta era sbagliato di uno (le parole di livello qui non contano come
+# livello detto: "troppo avanzato" non vuol dire "siamo avanzati")
+_EASIER = re.compile(r"\b(?:troppo (?:difficil[ei]|impegnativ[oaie]|avanzat[oaie]|tecnic[oaie]|dur[oaie])|"
+                     r"più (?:facil[ei]|semplic[ei])|meno (?:impegnativ[oaie]|difficil[ei])|"
+                     r"too (?:hard|difficult|advanced|demanding|technical)|easier|less demanding)\b")
+_HARDER = re.compile(r"\b(?:troppo (?:facil[ei]|semplic[ei]|base)|"
+                     r"più (?:difficil[ei]|impegnativ[oaie]|avanzat[oaie]|tecnic[oaie])|"
+                     r"too (?:easy|basic|simple)|harder|more (?:challenging|advanced|demanding))\b")
+
 
 @dataclass(frozen=True)
 class Refinement:
@@ -59,8 +72,30 @@ def is_price_reason(reason: Optional[str]) -> bool:
     return bool(_PRICE.search(low)) or parse_budget(low) is not None
 
 
+def _level_changes(criteria: Criteria, low: str, product_levels: frozenset) -> dict:
+    """Livello detto nel motivo; altrimenti "troppo difficile" = un livello sotto quello
+    dell'intento (senza livello: sotto il più basso del prodotto rifiutato), "troppo facile" = uno
+    sopra (sopra il più alto). Oltre gli estremi, o senza un livello da cui partire, niente."""
+    step = -1 if _EASIER.search(low) else 1 if _HARDER.search(low) else 0
+    said = parse_level(_HARDER.sub(" ", _EASIER.sub(" ", low)))
+    if said is not None:
+        return {"level": said}
+    if step == 0:
+        return {}
+    known = [LEVELS.index(lv) for lv in product_levels if lv in LEVELS]
+    if criteria.level in LEVELS:
+        start = LEVELS.index(criteria.level)
+    elif known:
+        start = min(known) if step < 0 else max(known)
+    else:
+        return {}
+    moved = start + step
+    return {"level": LEVELS[moved]} if 0 <= moved < len(LEVELS) else {}
+
+
 def _text_changes(criteria: Criteria, low: str, proposal: Proposal,
-                  product_area: Optional[Area], today: date) -> dict:
+                  product_area: Optional[Area], today: date,
+                  product_levels: frozenset = frozenset()) -> dict:
     changes = {}
     direction = "south" if _SOUTH.search(low) else "north" if _NORTH.search(low) else None
     if direction is not None:
@@ -76,6 +111,10 @@ def _text_changes(criteria: Criteria, low: str, proposal: Proposal,
         if value is not None:
             changes[name] = value
     changes.update(_duration_changes(criteria, low, proposal))
+    changes.update(_level_changes(criteria, low, product_levels))
+    coaching = parse_wants_coaching(low)
+    if coaching is not None:
+        changes["wants_coaching"] = coaching
     return changes
 
 
@@ -148,11 +187,13 @@ def _budget_changes(before: Criteria, after: Criteria, figure: Optional[Decimal]
 def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
            product_area: Optional[Area], today: date,
            fields: Optional[StructuredFields] = None,
-           cheapest_total: Optional[CheapestTotal] = None) -> Refinement:
-    """`cheapest_total`: la regola 4 di RF-69 per una cifra nuova senza lettura detta."""
+           cheapest_total: Optional[CheapestTotal] = None,
+           product_levels: frozenset = frozenset()) -> Refinement:
+    """`cheapest_total`: la regola 4 di RF-69 per una cifra nuova senza lettura detta.
+    `product_levels`: le etichette di livello del prodotto rifiutato (M21-C)."""
     fields = fields or StructuredFields()
     low = (reason or "").lower()
-    changes = _text_changes(criteria, low, proposal, product_area, today)
+    changes = _text_changes(criteria, low, proposal, product_area, today, product_levels)
     said = {k: v for k, v in (("budget", parse_budget(low)), ("budget_scope", parse_budget_scope(low)))
             if v is not None}
     given, discarded = validate_fields(fields.as_dict(), today)
