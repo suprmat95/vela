@@ -18,9 +18,9 @@ Render. Contesto: domanda 10 in `docs/hofj-questions.md`, roadmap M19.
   `GET .../pax` prima.
 - **Stesso totale della sonda di M22-a.** Lo stesso prodotto, con la stessa data e le stesse
   persone, valeva 1156 € anche il 27/09 (`arjeuuuzzw9s`, `docs/api/accommodations.md`).
-- **Non verificato da questa sonda: `PUT customer` e `PUT pax` dopo un pagamento.** Serve un
-  pagamento, fuori dal perimetro di queste 5 chiamate. Si può fare su staging con Stripe in
-  modalità test, come nella seconda sonda di M5: è la sonda `scripts/m19_paid_probe.py`.
+- **`PUT customer` e `PUT pax` sono accettati dopo il pagamento** (seconda sonda, sotto): 200 su
+  un itinerario con un PaymentIntent di test `succeeded` legato da `checkoutRefId`, totale
+  invariato, e `POST /v1/bookings` riuscito subito dopo.
 
 ## Chiamate
 
@@ -64,14 +64,46 @@ identici.
 | Il totale cambia dopo `PUT customer` e `PUT pax`? | **No** su un prodotto con hotel preselezionato, 2 adulti, 1 camera: nessuno dei quattro importi cambia |
 | Il totale del link si conosce con 2 chiamate (creazione + `GET`)? | **Sì**: `openAmount` è già definitivo alla #2 |
 | `PUT pax` senza `GET .../pax`? | **Sì**, con i `refId` `pax-1..N`, che il `GET` dell'itinerario mostra già dalla creazione |
-| `PUT customer` e `PUT pax` accettati dopo il pagamento? | **Non verificato da questa sonda**: sonda con pagamento di test, `scripts/m19_paid_probe.py` |
+| `PUT customer` e `PUT pax` accettati dopo il pagamento? | **Sì su staging**, con un PaymentIntent di test diretto (seconda sonda, sotto) |
 | La differenza `total` 368 / `openAmount` 337 di M5 (prodotto 118) dipende dai passeggeri? | Non risolta: sul 124 i due importi coincidono prima e dopo, ma in M5 il 118 fu letto solo dopo i pax. Nessun indizio che dipenda dai passeggeri; il link usa comunque `openAmount` |
 
-## Itinerario orfano
+## Seconda sonda: `PUT` dopo il pagamento
 
-`deimmovsayfq` (124), su `staging.weebora.com`, con cliente e passeggeri di prova; nessun
-pagamento, nessun booking. Registrato anche in `docs/decisions.md`.
+Eseguita il 2026-09-27 con `scripts/m19_paid_probe.py`, lanciato dall'utente: **6 chiamate
+HofJ staging e 1 Stripe in modalità test**, le 7 dichiarate, con i due `PUT` dopo il pagamento.
+
+| # | Chiamata | Esito | Latenza |
+|---|---|---|---|
+| 1 | `POST /v1/itineraries` 124, 2026-10-08, 2 adulti, 1 camera | 200 `ttlup3o1amxu` | 4282 ms |
+| 2 | `GET /v1/itineraries/ttlup3o1amxu` | 200, `openAmount` 1156 EUR, `status` `BookingInitiated` | 1700 ms |
+| 3 | Stripe `POST /v1/payment_intents`: 115600 centesimi EUR, `pm_card_visa`, `confirm`, `metadata.checkoutRefId` = itinerario | 200 `pi_3UKJpdRpam3eRRKb0twU1yQi`, `succeeded`, `livemode: false`, `capture_method: automatic` | 1025 ms |
+| 4 | `PUT .../customer` **dopo il pagamento** | 200 `{data: {now}, meta: {}}` | 2425 ms |
+| 5 | `PUT .../pax` **dopo il pagamento** | 200 `{data: {now}, meta: {}}` | 1059 ms |
+| 6 | `GET /v1/itineraries/ttlup3o1amxu` | 200, importi e `status` identici alla #2; cambiano solo `customer` e `passengers`, con i valori mandati | 1704 ms |
+| 7 | `POST /v1/bookings` `{itineraryId, paymentType: "full", paymentIntentId, paymentStatus: "succeeded"}` | 200 `{data: "ttlup3o1amxu"}` | 2444 ms |
+
+Cosa dice e cosa non dice:
+
+- HofJ non vede il pagamento: `checkout.status` resta `BookingInitiated` dopo il PaymentIntent
+  `succeeded`, come in M5. Dal lato dell'API un carrello pagato non si distingue da uno non
+  pagato, e i `PUT` passano.
+- **Approssimazione dichiarata:** Vela paga con una Checkout Session, che crea lei il
+  PaymentIntent con gli stessi metadata; qui il PaymentIntent è creato direttamente. Il brand
+  site potrebbe distinguere i due casi solo da campi che Vela non manda.
+- Il booking risponde con l'`itineraryId`, non con un codice `R-…`, come in M5 (domanda 2): la
+  sonda prova che il booking dopo i `PUT` tardivi è accettato, non che la prenotazione sia
+  confermata più di quanto lo fosse in M5.
+- Staging non garantisce la produzione: la domanda 10 resta da mandare a HofJ.
+
+## Itinerari di prova
+
+- `deimmovsayfq` (124), prima sonda: orfano, con cliente e passeggeri di prova, nessun pagamento,
+  nessun booking.
+- `ttlup3o1amxu` (124), seconda sonda: pagato in modalità test
+  (`pi_3UKJpdRpam3eRRKb0twU1yQi`, 1156 €) e prenotato su staging.
+
+Registrati anche in `docs/decisions.md`.
 
 ## Differenze nuove
 
-In `docs/api/differences.md` dal #36.
+In `docs/api/differences.md`, #36-#39.

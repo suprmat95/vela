@@ -340,3 +340,82 @@ Fix the unclosed-file warning in the test, then correct the docs.
 - 🔧 Bash: sed -n 21,23p docs/api/customer-pax.md; sed -n 94,98p docs/hofj-questions.md
 
 - 🔧 Bash: python3 - <<'EOF' def sub(p, old, new):     s=open(p).read(); assert old in s, (…
+
+La sonda con pagamento di test è pronta: `scripts/m19_paid_probe.py`, nel commit `e0bd4a6`. Non l'ho lanciata. Suite e ruff sono verdi.
+
+**Il comando da lanciare:**
+```
+! uv run --env-file .env env HOFJ_BASE_URL=https://staging.api.hofj.com python3 scripts/m19_paid_probe.py
+```
+Con `--dry-run` stampa solo il piano, senza fare chiamate. Il giro vero dura circa 1,5 minuti.
+
+**Le 7 chiamate, nell'ordine:**
+1. HofJ: creo l'itinerario sul prodotto 124, 08/10, 2 adulti.
+2. HofJ: `GET` dell'itinerario, per leggere `openAmount`.
+3. **Stripe test:** creo e confermo un PaymentIntent con importo `openAmount`, `metadata.checkoutRefId` = itinerario e carta `pm_card_visa`.
+4. HofJ: `PUT customer`, dopo il pagamento.
+5. HofJ: `PUT pax`, dopo il pagamento.
+6. HofJ: `GET` dell'itinerario, per vedere se totale e stato sono cambiati.
+7. HofJ: `POST /v1/bookings` con `paymentIntentId`.
+
+**Salvaguardie:**
+- Non fa nessuna chiamata se nel `.env` la chiave Stripe non è una chiave segreta di test (`sk_test_` o `rk_test_`), o se l'host HofJ non è staging.
+- Si ferma prima dei `PUT` se il pagamento non riesce o risulta in modalità live.
+- Se la 4 o la 5 vengono rifiutate, si ferma senza fare il booking. È proprio l'esito che cerchiamo, e finisce in `findings.json`.
+- Si ferma su 401, 403, 429 e 5xx, e comunque non va mai oltre le 7 chiamate.
+- Le chiavi non vengono mai stampate e non finiscono in `probe-m19-paid/`.
+
+**Cosa lascia su staging:** un booking di prova e un pagamento di test sull'account Stripe di HofJ, come in M5 e M7.
+
+**Il limite della prova:** Vela paga con una Checkout Session, che non si può completare via API. Il PaymentIntent diretto ha gli stessi metadata, ma resta un'approssimazione. E staging non garantisce la produzione, quindi la domanda 10 va comunque mandata a HofJ.
+
+**Correzione dei documenti.** Nello stesso commit ho corretto `customer-pax.md`, la domanda 10 e la voce in `decisions.md`, dove avevo scritto che su staging non si può pagare. In `decisions.md` l'errore resta visibile, barrato, con la correzione accanto.
+
+Quando hai l'output, lo leggo e scrivo esito e verdetto in `customer-pax.md`, in `differences.md` e in `decisions.md`. Poi mi fermo.
+
+## Utente 17:16
+
+<bash-input> uv run --env-file .env env HOFJ_BASE_URL=https://staging.api.hofj.com python3 scripts/m19_paid_probe.py</bash-input>
+
+<bash-stdout></bash-stdout><bash-stderr>rifiuto: la chiave Stripe non è una chiave segreta di test
+</bash-stderr>
+
+## Agente 17:16
+
+La sonda si è rifiutata di partire, come previsto dalle salvaguardie, e non ha fatto nessuna chiamata: né HofJ né Stripe. Il motivo è che nell'ambiente caricato dal `.env` `STRIPE_SECRET_KEY` non inizia con `sk_test_` o `rk_test_`: o manca, o ha un altro nome, o è una chiave live.
+
+Il `.env` non lo apro. Se vuoi capire quale dei tre casi è, questo comando stampa solo il tipo di chiave, mai il valore:
+
+```
+! uv run --env-file .env python3 -c "import os; k=os.environ.get('STRIPE_SECRET_KEY',''); print('assente' if not k else '_'.join(k.split('_')[:2]) if k.count('_')>=2 else 'formato sconosciuto')"
+```
+
+A seconda di cosa stampa:
+- **`sk_live` o `rk_live`**: è la chiave live, e la salvaguardia ha fatto il suo lavoro. Serve la chiave di test `rk_test_…` che HofJ ci ha dato per M5 e M6. Mettila nel `.env` e rilancia la sonda.
+- **`assente`**: la chiave non c'è, oppure è salvata con un altro nome. Aggiungila come `STRIPE_SECRET_KEY` e rilancia.
+- **`formato sconosciuto` o un altro prefisso**: dimmelo e guardiamo insieme, senza abbassare la salvaguardia.
+
+In tutti i casi il comando della sonda resta lo stesso di prima.
+
+## Utente 17:17
+
+<bash-input> uv run --env-file .env env HOFJ_BASE_URL=https://staging.api.hofj.com python3 scripts/m19_paid_probe.py</bash-input>
+
+<bash-stdout>host: staging.api.hofj.com brand: staging.weebora.com stripe: test
+ 1 create    POST  /v1/itineraries                            200   4282 ms
+ 2 before    GET   /v1/itineraries/ttlup3o1amxu               200   1700 ms
+ 3 intent    POST  /v1/payment_intents                        200   1025 ms
+ 4 customer  PUT   /v1/itineraries/ttlup3o1amxu/customer      200   2425 ms
+ 5 pax       PUT   /v1/itineraries/ttlup3o1amxu/pax           200   1059 ms
+ 6 after     GET   /v1/itineraries/ttlup3o1amxu               200   1704 ms
+ 7 booking   POST  /v1/bookings                               200   2444 ms
+chiamate: 7, esiti in probe-m19-paid/findings.json
+PUT dopo il pagamento accettati; cambiati: nessuno | booking: 200 ttlup3o1amxu</bash-stdout><bash-stderr></bash-stderr>
+
+## Agente 17:18
+
+- 🔧 Bash: python3 -c " import json;f=json.load(open('probe-m19-paid/findings.json'));f.pop…
+
+Tutte e 7 le chiamate sono andate a buon fine. HofJ ha accettato i `PUT` dopo il pagamento, il totale non è cambiato e il booking ha risposto 200. Registro l'esito nei documenti.
+
+- 🔧 Bash: python3 - <<'EOF' def sub(p, old, new):     s=open(p).read(); assert old in s, (…

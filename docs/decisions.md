@@ -1189,3 +1189,15 @@ giro.
 | Salvaguardie | Nessuna chiamata se la chiave Stripe non è `sk_test_`/`rk_test_` o se l'host HofJ non è `staging.api.hofj.com`; stop prima dei `PUT` se il pagamento non è `succeeded` o è `livemode`; stop prima del booking se un `PUT` è rifiutato | Un errore di ambiente non deve mai pagare o prenotare davvero |
 | Effetti | Un booking di prova su staging e un pagamento di test sull'account Stripe di HofJ | Come in M5 e M7 |
 | Limite | Staging non garantisce la produzione: la domanda 10 resta da inviare a HofJ | Il brand site di produzione può comportarsi diversamente |
+
+### Esito della sonda con pagamento (2026-09-27)
+
+Lanciata dall'utente: 7 chiamate su 7 dichiarate (6 HofJ staging, 1 Stripe test), tutte 200.
+Esiti in `docs/api/customer-pax.md` ("Seconda sonda"), differenza #39.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| **[misurato, staging]** `PUT` dopo il pagamento | Accettati: `PUT customer` e `PUT pax` 200 dopo un PaymentIntent di test `succeeded` con `checkoutRefId` = itinerario; totale (1156 €) e `checkout.status` (`BookingInitiated`) invariati; `POST /v1/bookings` 200 subito dopo | È la seconda metà della domanda 10 |
+| Limiti | PaymentIntent diretto invece della Checkout Session di Vela; staging invece di produzione; il booking restituisce l'`itineraryId` come in M5 (domanda 2 aperta) | Detti in `customer-pax.md`; la domanda 10 resta da mandare a HofJ per la produzione |
+| Dati di prova | `ttlup3o1amxu` (124) pagato in test (`pi_3UKJpdRpam3eRRKb0twU1yQi`, 1156 €) e prenotato su staging; `deimmovsayfq` orfano dalla prima sonda | Come in M5 e M7 |
+| **Verdetto** | **Sì su staging**: le due condizioni della roadmap reggono (totale invariato dopo i pax, `PUT` accettati dopo il pagamento). Il passo 2 di M19 è tecnicamente possibile; la decisione di farlo resta all'utente. Rischio residuo: un comportamento diverso in produzione porterebbe un ordine pagato a `booking_failed` con rimborso a mano | Condizione della task: "decido io se M19 va avanti" |
