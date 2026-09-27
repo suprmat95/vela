@@ -4,10 +4,12 @@ Prima il motivo in testo libero, con regole it/en che si combinano: budget (una 
 letta a persona o in totale come in `create_intent`, M21-E; altrimenti "troppo caro" porta il
 budget all'80% del totale proposto, senza mai alzarlo, e lo legge in totale),
 direzione ("più a sud"/"più a nord", "più fresco"/"più caldo" con le tabelle di `geo`), luogo
-esplicito, periodo, sport, persone e durata con gli stessi parser dell'intento, "troppo
+esplicito, periodo, sport, persone, camere e durata con gli stessi parser dell'intento, "troppo
 lungo"/"troppo corto" che spostano la durata rispetto alla proposta (M21-A). Poi i campi strutturati
 dell'agente (RF-52), che vincono sul testo: `direction` sostituisce la direzione del testo,
-`area` vince su ogni direzione. Un motivo non riconosciuto restituisce gli stessi criteri: il
+`area` vince su ogni direzione. Le camere restano entro le persone aggiornate (M21-D): un campo
+oltre è scartato e detto, un testo oltre è ignorato, e se cambiano solo le persone le camere di
+prima si limitano a `pax`. Un motivo non riconosciuto restituisce gli stessi criteri: il
 prodotto rifiutato resta comunque escluso. Stessi ingressi danno sempre lo stesso risultato.
 """
 import re
@@ -19,7 +21,7 @@ from typing import Optional
 from vela.domain import geo
 from vela.domain.intent import (MAX_NIGHTS, CheapestTotal, conflicts_between, parse_budget,
                                 parse_budget_scope, parse_duration, parse_pax, parse_period,
-                                parse_sport, read_budget, validate_fields)
+                                parse_rooms, parse_sport, read_budget, validate_fields)
 from vela.domain.models import Area, Criteria, Proposal, StructuredFields
 
 PRICE_FACTOR = Decimal("0.8")
@@ -70,7 +72,7 @@ def _text_changes(criteria: Criteria, low: str, proposal: Proposal,
         if area is not None:
             changes["area"] = area
     for name, value in (("period", parse_period(low, today)), ("sport", parse_sport(low)),
-                        ("pax", parse_pax(low))):
+                        ("pax", parse_pax(low)), ("rooms", parse_rooms(low))):
         if value is not None:
             changes[name] = value
     changes.update(_duration_changes(criteria, low, proposal))
@@ -93,6 +95,21 @@ def _duration_changes(criteria: Criteria, low: str, proposal: Proposal) -> dict:
     else:
         return {}
     return {"duration_min_nights": shortest, "duration_max_nights": longest}
+
+
+def _rooms(before: Criteria, pax: Optional[int], from_field: Optional[int],
+           from_text: Optional[int], discarded: list) -> Optional[int]:
+    """RF-65 sul rifiuto: campo, poi testo, entrambi solo entro `pax`; altrimenti le camere di
+    prima limitate a `pax` (None resta None: intento salvato prima di M21-D)."""
+    if from_field is not None:
+        if pax is None or from_field <= pax:
+            return from_field
+        discarded.append(("rooms", from_field))
+    if from_text is not None and (pax is None or from_text <= pax):
+        return from_text
+    if before.rooms is not None and pax is not None:
+        return min(before.rooms, pax)
+    return before.rooms
 
 
 def _lowered(criteria: Criteria, low: str, proposal: Proposal) -> Optional[Decimal]:
@@ -150,11 +167,20 @@ def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
             changes["area"] = moved
         else:
             changes.setdefault("area", moved)   # vince `area`: la direzione resta nei conflitti
-    conflicts = conflicts_between({**changes, **said}, given)
+    rooms_text, rooms_field = changes.pop("rooms", None), given.get("rooms")
+    pax = given.get("pax", changes.get("pax", criteria.pax))
+    rooms = _rooms(criteria, pax, rooms_field, rooms_text, discarded)
+    if rooms_field is not None and rooms != rooms_field:
+        given.pop("rooms")   # scartato: non è un conflitto
+    conflicts = conflicts_between({**changes, **said, "rooms": rooms_text}, given)
     figure = given.pop("budget", said.get("budget"))
     stated = given.pop("budget_scope", said.get("budget_scope"))
     lowered = _lowered(criteria, low, proposal)
     changes.update(given)
+    if rooms != criteria.rooms:
+        changes["rooms"] = rooms
+    if rooms_text is not None:
+        changes.setdefault("rooms", rooms)   # le camere dette contano come capite
     refined = replace(criteria, **changes) if changes else criteria
     budget = _budget_changes(criteria, refined, figure, stated, lowered, cheapest_total)
     # la lettura conta come capita solo se c'è un budget da leggere (decisione M21-E 3)
