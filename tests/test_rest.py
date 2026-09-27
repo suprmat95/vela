@@ -234,6 +234,22 @@ class ProposalEndpointsTest(unittest.TestCase):
         self.assertNotIn("http", body["say"])
         assert_single_product(self, body)
 
+    def test_accept_returns_200_with_the_link_when_the_job_finishes_during_the_wait(self):
+        """M20: il prezzo e poi il link arrivano nella risposta dell'accept, senza `Location`."""
+        worker = inline_worker(self.vela)
+        self.vela.accept_wait_seconds, self.vela.sleep = 5, lambda seconds: worker.drain()
+        path = "/v1/proposals/%s/accept" % self.first["proposal_id"]
+        priced = self.c.post(path, json={}, headers=AUTH)
+        self.assertEqual(priced.status_code, 200, priced.text)
+        self.assertEqual((priced.json()["outcome"], priced.json()["status"]), ("order_status", "awaiting_confirmation"))
+        r = self.c.post(path, headers=AUTH)                    # la conferma
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["status"]), ("order_status", "awaiting_payment"))
+        self.assertTrue(body["payment_url"].startswith("http://test/"))
+        self.assertNotIn("location", r.headers)
+        assert_single_product(self, body)
+
     def test_double_accept_returns_200_order_status(self):
         path = "/v1/proposals/%s/accept" % self.first["proposal_id"]
         r1 = self.c.post(path, json={}, headers=AUTH)
