@@ -11,7 +11,7 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, StubPayments, inline_worker, make_product
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.config import DEFAULT_TRAVELER, Settings
-from vela.domain.models import (Area, Criteria, Intent, JobKind, OrderQueued, OrderStatus,
+from vela.domain.models import (Area, Criteria, Intent, JobKind, JobStatus, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Participant, Period, Proposal, QuoteKey,
                                 QuoteStatus, TravelerProfile)
 from vela.domain.usecases import Vela
@@ -308,6 +308,71 @@ class FallbackTest(unittest.TestCase):
         w.settle()
         self.assertEqual(w.order(pids[1]).status, OrderStatus.CANCELLED)
         self.assertEqual(w.order(pids[2]).status, OrderStatus.AWAITING_CONFIRMATION)
+
+
+class RaceTest(unittest.TestCase):
+    """Revisione finale: un rilascio che cade tra la nascita dell'ordine e il suo `claim`."""
+
+    def jobs_of(self, w, pid):
+        oid = w.order(pid).id
+        return [j for j in w.repos.jobs._jobs.values() if j.order_id == oid and j.kind == JobKind.PURCHASE]
+
+    def test_release_before_claim_gives_one_job_only(self):
+        from vela.domain.quotes import release_quote
+        w = World()
+        leader = w.traveler()
+        w.accept(leader)
+        claim = w.repos.quotes.claim
+
+        def leader_fails_first(key, order_id, now, fresh_after):
+            lo = w.order(leader)
+            w.repos.orders.save(replace(lo, status=OrderStatus.FAILED))
+            release_quote(w.repos, lo, now, w.vela.new_id)        # sgancia l'ordine nuovo e gli dà un job
+            return claim(key, order_id, now, fresh_after)
+
+        w.repos.quotes.claim = leader_fails_first
+        pid = w.traveler()
+        w.accept(pid)
+        w.repos.quotes.claim = claim
+        self.assertEqual(len(self.jobs_of(w, pid)), 1)
+
+    def test_released_order_is_not_priced_from_cache_after_losing_the_claim(self):
+        """Sganciato con il suo job, perde il `claim` e trova una riga `ready`: resta al suo job,
+        altrimenti il sì porterebbe al link un carrello senza cliente né prezzo."""
+        from vela.domain.quotes import release_quote
+        w = World()
+        leader = w.traveler()
+        w.accept(leader)
+
+        def released_then_ready(key, order_id, now, fresh_after):
+            lo = w.order(leader)
+            w.repos.orders.save(replace(lo, status=OrderStatus.FAILED))
+            release_quote(w.repos, lo, now, w.vela.new_id)
+            w.repos.quotes.publish(key, "other", Decimal("700"), now)
+            return False
+
+        claim = w.repos.quotes.claim
+        w.repos.quotes.claim = released_then_ready
+        pid = w.traveler()
+        w.accept(pid)
+        w.repos.quotes.claim = claim
+        o = w.order(pid)
+        self.assertEqual((o.status, o.total), (OrderStatus.QUEUED, None))
+        self.assertEqual(len(self.jobs_of(w, pid)), 1)
+
+    def test_jobless_leader_stops_blocking_the_key_after_the_ttl(self):
+        w = World()
+        leader, follower = w.traveler(), w.traveler()
+        w.accept(leader)
+        w.accept(follower)
+        job = w.job(leader)
+        w.repos.jobs.save(replace(job, status=JobStatus.DEAD))   # crash: il leader resta `queued` senza job
+        w.vela.get_order_status(w.order(follower).id)
+        self.assertTrue(w.order(follower).follows_quote)          # prima del TTL si aspetta
+        w.clock.advance(901)
+        w.vela.get_order_status(w.order(follower).id)
+        self.assertFalse(w.order(follower).follows_quote)
+        self.assertIsNotNone(w.job(follower))
 
 
 class SettingsTest(unittest.TestCase):

@@ -337,6 +337,29 @@ class RepositoryContract:
         self.assertEqual(self.repos.quotes.release(self.KEY, "o1"), [])
         self.assertEqual(self.repos.quotes.get(self.KEY).status, QuoteStatus.READY)
 
+    def test_quote_claim_takes_over_jobless_leader_older_than_fresh_after(self):
+        """Leader `queued` senza job d'acquisto (crash tra `claim` e accodamento): la riga si
+        libera solo dopo `fresh_after`; con un job attivo il leader resta."""
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW + timedelta(seconds=1)))
+        self.repos.jobs.enqueue(job("j2", "o2"))
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o3", NOW, NOW + timedelta(minutes=1)))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o2")
+
+    def test_quote_detach_only_while_queued_and_following(self):
+        self.quote_world(2)
+        o1 = self.repos.orders.get("o1")
+        self.assertTrue(self.repos.quotes.detach(replace(o1, follows_quote=False)))
+        self.assertFalse(self.repos.orders.get("o1").follows_quote)
+        self.assertFalse(self.repos.quotes.detach(replace(o1, follows_quote=False, total=Decimal("1"))))
+        self.assertIsNone(self.repos.orders.get("o1").total)                  # già sganciato
+        o2 = replace(self.repos.orders.get("o2"), status=OrderStatus.CANCELLED)
+        self.repos.orders.save(o2)
+        self.assertFalse(self.repos.quotes.detach(replace(o2, status=OrderStatus.QUEUED, follows_quote=False)))
+        self.assertEqual(self.repos.orders.get("o2").status, OrderStatus.CANCELLED)
+
     def test_quote_concurrent_claim_has_one_winner(self):
         self.quote_world(THREADS)
         results = all_at_once(lambda i: self.repos.quotes.claim(self.KEY, "o%d" % (i + 1), NOW, NOW))

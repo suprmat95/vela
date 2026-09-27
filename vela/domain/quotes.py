@@ -29,10 +29,11 @@ def release_quote(repos: Repositories, order: Order, now: datetime, new_id: Call
     return _release(repos, quote_key(order, proposal.start_date), order.id, now, new_id)
 
 
-def unstick(repos: Repositories, order: Order, now: datetime, new_id: Callable[[], str]) -> None:
-    """Rete di sicurezza: un agganciato il cui leader non è più `queued` (crash, uscita senza
-    rilascio) fa il rilascio al posto suo. Il rilascio è atomico: tra più agganciati che ci
-    provano insieme vince uno solo."""
+def unstick(repos: Repositories, order: Order, now: datetime, new_id: Callable[[], str],
+            fresh_after: datetime) -> None:
+    """Rete di sicurezza: un agganciato il cui leader non è più `queued`, oppure è `queued` senza
+    job d'acquisto da prima di `fresh_after` (crash tra `claim` e accodamento), fa il rilascio al
+    posto suo. Il rilascio è atomico: tra più agganciati che ci provano insieme vince uno solo."""
     if not order.follows_quote or order.status != OrderStatus.QUEUED:
         return
     key = quote_key(order, repos.proposals.get(order.proposal_id).start_date)
@@ -40,7 +41,10 @@ def unstick(repos: Repositories, order: Order, now: datetime, new_id: Callable[[
     if quote is None or quote.status != QuoteStatus.PENDING:
         return
     leader = repos.orders.get(quote.leader_order_id)
-    if leader is None or leader.status != OrderStatus.QUEUED:
+    stalled = (leader is not None and leader.status == OrderStatus.QUEUED
+               and repos.jobs.active_for_order(leader.id, JobKind.PURCHASE) is None
+               and quote.updated_at < fresh_after)
+    if leader is None or leader.status != OrderStatus.QUEUED or stalled:
         _release(repos, key, quote.leader_order_id, now, new_id)
 
 

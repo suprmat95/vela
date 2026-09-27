@@ -320,14 +320,14 @@ class Vela:
         key = quote_key(order, proposal.start_date)
         bookable = product is not None and product.bookable
         fresh_after = now - self.price_quote_ttl if bookable else now
+        # `detach` e non `save_if_status`: se un rilascio ha già sganciato l'ordine (e gli ha dato
+        # un job) non si accoda un secondo job né si prende il prezzo in cache
         if self.repos.quotes.claim(key, order.id, now, fresh_after):
-            return self.repos.orders.save_if_status(replace(order, follows_quote=False),
-                                                    OrderStatus.QUEUED)
+            return self.repos.quotes.detach(replace(order, follows_quote=False))
         quote = self.repos.quotes.get(key)
         if quote is not None and quote.status == QuoteStatus.READY:
-            self.repos.orders.save_if_status(
-                replace(order, status=OrderStatus.AWAITING_CONFIRMATION, total=quote.total,
-                        follows_quote=False, updated_at=now), OrderStatus.QUEUED)
+            self.repos.quotes.detach(replace(order, status=OrderStatus.AWAITING_CONFIRMATION,
+                                             total=quote.total, follows_quote=False, updated_at=now))
         return False
 
     def _confirm(self, order: Order) -> Union[OrderQueued, OrderStatusResponse]:
@@ -353,7 +353,7 @@ class Vela:
             current = self.repos.orders.get(order_id)
             if current.status != OrderStatus.QUEUED:
                 return self.get_order_status(order_id)
-            unstick(self.repos, current, self.now(), self.new_id)   # RF-84
+            unstick(self.repos, current, self.now(), self.new_id, self.now() - self.price_quote_ttl)   # RF-84
         order = self.repos.orders.get(order_id)
         if order.status != OrderStatus.QUEUED:
             return self.get_order_status(order_id)
@@ -390,7 +390,7 @@ class Vela:
     def get_order_status(self, order_id: str) -> OrderStatusResponse:
         order = self.orders.get(order_id)
         if order.follows_quote:   # RF-84: un leader uscito senza rilascio non blocca nessuno
-            unstick(self.repos, order, self.now(), self.new_id)
+            unstick(self.repos, order, self.now(), self.new_id, self.now() - self.price_quote_ttl)
             order = self.orders.get(order_id)
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"

@@ -68,13 +68,17 @@ class QuoteRepository(Protocol):
     def get(self, key: QuoteKey) -> Optional[PriceQuote]: ...
     def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
         """Atomica: `order_id` diventa leader (riga `pending`) se la riga manca, se è `ready` con
-        `priced_at < fresh_after`, o se è `pending` con un leader che non è più `queued`."""
+        `priced_at < fresh_after`, o se è `pending` con un leader che non è più `queued` oppure
+        che non ha un job d'acquisto attivo e ha preso la riga prima di `fresh_after`."""
     def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
         """Riga `ready` con il totale e, nella stessa transazione, gli ordini `queued` agganciati
         alla chiave passano a `awaiting_confirmation` con quel totale (fanout). Id sbloccati."""
     def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
         """Cancella la riga se è `pending` con quel leader e sgancia i suoi ordini
         (`follows_quote` falso), restituiti in ordine di id; altrimenti []."""
+    def detach(self, order: Order) -> bool:
+        """Salva `order` solo se l'ordine salvato è ancora `queued` e agganciato, in modo atomico
+        rispetto a `release` e `publish`; dice se ha salvato."""
 
 
 class Repositories(Protocol):

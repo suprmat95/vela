@@ -161,9 +161,9 @@ class MemoryQuotes:
     """RF-84. Legge ordini e proposte dei repository accanto, come il JOIN di Postgres; il lock
     degli ordini tiene fanout e rilascio atomici rispetto alle altre scritture sugli ordini."""
 
-    def __init__(self, orders: MemoryOrders, proposals: MemoryProposals):
+    def __init__(self, orders: MemoryOrders, proposals: MemoryProposals, jobs: "MemoryJobs"):
         self._items: Dict[QuoteKey, PriceQuote] = {}
-        self._orders, self._proposals = orders, proposals
+        self._orders, self._proposals, self._jobs = orders, proposals, jobs
         self._lock = threading.Lock()
 
     def get(self, key: QuoteKey) -> Optional[PriceQuote]:
@@ -181,7 +181,10 @@ class MemoryQuotes:
         if quote.status == QuoteStatus.READY:
             return quote.priced_at < fresh_after
         leader = self._orders.get(quote.leader_order_id)
-        return leader is None or leader.status != OrderStatus.QUEUED
+        if leader is None or leader.status != OrderStatus.QUEUED:
+            return True
+        busy = self._jobs.active_for_order(leader.id, JobKind.PURCHASE) is not None
+        return not busy and quote.updated_at < fresh_after
 
     def _followers(self, key: QuoteKey) -> List[Order]:
         out = []
@@ -214,6 +217,14 @@ class MemoryQuotes:
             for o in freed:
                 self._orders._items[o.id] = o
             return freed
+
+    def detach(self, order: Order) -> bool:
+        with self._orders._lock:
+            current = self._orders._items.get(order.id)
+            if current is None or current.status != OrderStatus.QUEUED or not current.follows_quote:
+                return False
+            self._orders._items[order.id] = order
+            return True
 
 
 def claimable(j: Job, now: datetime, lease_seconds: int) -> bool:
@@ -295,7 +306,7 @@ class MemoryRepositories:
         self.orders = MemoryOrders()
         self.rejections = MemoryRejections()
         self.jobs = MemoryJobs()
-        self.quotes = MemoryQuotes(self.orders, self.proposals)
+        self.quotes = MemoryQuotes(self.orders, self.proposals, self.jobs)
         self.quota = MemoryQuota(rules=self.quota_rules)
 
 

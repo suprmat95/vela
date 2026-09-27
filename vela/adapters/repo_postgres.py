@@ -356,8 +356,13 @@ class PostgresQuotes:
             if row["status"] == QuoteStatus.READY.value:
                 takeable = row["priced_at"] < fresh_after
             else:
-                leader = conn.execute(select(orders_t.c.status).where(orders_t.c.id == row["leader_order_id"])).scalar()
-                takeable = leader != OrderStatus.QUEUED.value
+                leader_id = row["leader_order_id"]
+                leader = conn.execute(select(orders_t.c.status).where(orders_t.c.id == leader_id)).scalar()
+                busy = conn.execute(select(jobs_t.c.id).where(
+                    jobs_t.c.order_id == leader_id, jobs_t.c.kind == JobKind.PURCHASE.value,
+                    jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
+                takeable = (leader != OrderStatus.QUEUED.value
+                            or (not busy and row["updated_at"] < fresh_after))
             if takeable:
                 conn.execute(update(price_quotes_t).where(_quote_where(key)).values(**pending))
             return takeable
@@ -384,6 +389,14 @@ class PostgresQuotes:
             rows = conn.execute(update(orders_t).where(_followers_where(key))
                                 .values(follows_quote=False).returning(*orders_t.c)).mappings().all()
         return sorted((_order(m) for m in rows), key=lambda o: o.id)
+
+    def detach(self, order: Order) -> bool:
+        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order.id, orders_t.c.status == OrderStatus.QUEUED.value,
+                orders_t.c.follows_quote.is_(True)).values(**values))
+        return res.rowcount == 1
 
 
 def _job_row(j: Job) -> dict:
