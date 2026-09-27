@@ -207,3 +207,15 @@ Red for the right reasons. Adding the `say_discarded` sentence test too, then th
 Green. Full suite and lint, then commit 1.
 
 - 🔧 Bash: Run suite, lint, commit model changes
+
+- 🔧 Bash: Check which UC-E phrasings parse_budget reads today
+
+- 🔧 Bash: Write failing parser tests for rules 1-3 and 5
+
+Import error on `parse_budget_scope`, as expected. Implementing in `intent.py`:
+
+- 🔧 Bash: Implement scope words, figure patterns and read_budget
+
+Green. Full suite and lint:
+
+- 🔧 Bash: Run full suite and lint

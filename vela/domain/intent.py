@@ -2,7 +2,7 @@
 opzionale (RF-03).
 
 Estrae sport, area (dizionario `geo`), periodo, durata in notti (M21, RF-58), numero di
-persone, budget e lingua. I campi
+persone, budget con la sua lettura a persona o totale (M21-E, RF-69) e lingua. I campi
 strutturati passati dall'agente (RF-52) vincono sul parser, che vince sul fallback (RF-53). Se
 manca lo sport, oppure il numero di persone (e il profilo non lo dà), produce una sola domanda
 per l'agente, prima lo sport (RF-04). `today` è iniettato per rendere i periodi deterministici.
@@ -95,15 +95,24 @@ _PAX_PHRASES = [
 ]
 _NOT_MONEY_AFTER = (r"(?!\s*(?:persone|persona|adulti|giocatori|amici|people|persons|adults|"
                     r"players|friends|pax|notti|nights|giorni|days|stelle|stars))")
+_PER_PERSON_WORDS = r"(?:a testa|a persona|per persona|each|per person|per head|pp)"
+_TOTAL_WORDS = r"(?:in tutto|in totale|totale|complessiv[oaie]|in total|total|altogether)"
 _BUDGET_PATTERNS = [
-    re.compile(r"(?:al massimo|massimo|max|budget|under|up to|fino a|entro|non più di|non oltre|"
+    re.compile(r"(?:al massimo|massimo|max|budget(?: totale| complessivo)?|in totale|in tutto|"
+               r"in total|under|up to|fino a|entro|non più di|non oltre|"
                r"no more than|not more than|less than|meno di|sotto(?: i| ai| a)?|below|at most|"
                r"tetto(?: di)?)\s*(?:di\s+)?(?:€|eur|euro|euros)?\s*(\d[\d.,]*+)" + _NOT_MONEY_AFTER),
     re.compile(r"(\d[\d.,]*+)\s*(?:€|euros?\b|eur\b)"),
     re.compile(r"€\s*(\d[\d.,]*+)"),
+    # cifra senza valuta seguita dalla lettura ("1,800 in total", "600 each", M21-E): sopra
+    # MAX_PAX, perché "siamo 4 in tutto" parla delle persone
+    re.compile(r"(\d[\d.,]*+)\s+(?:%s|%s)\b" % (_PER_PERSON_WORDS, _TOTAL_WORDS)),
 ]
 _THOUSANDS_K = re.compile(r"(\d+(?:[.,]\d+)?)\s*k\b")
-_PER_PERSON = re.compile(r"\b(?:a testa|a persona|per persona|each|per person|per head|pp)\b")
+_PER_PERSON = re.compile(r"\b%s\b" % _PER_PERSON_WORDS)
+_TOTAL = re.compile(r"\b%s\b" % _TOTAL_WORDS)
+# "siamo 4 in tutto", "three of us in total", "3 persone in tutto": persone, non budget
+_PEOPLE_BEFORE = re.compile(r"\b(\w+)\s+(?:persone\s+|people\s+|of us\s+)?$")
 
 
 @dataclass(frozen=True)
@@ -401,16 +410,48 @@ def _expand_thousands(low: str) -> str:
 def parse_budget(text: str) -> Optional[Decimal]:
     low = _expand_thousands(text.lower())
     for pattern in _BUDGET_PATTERNS:
-        m = pattern.search(low)
-        if m:
+        for m in pattern.finditer(low):
             value = _to_money(m.group(1))
-            if value is not None and value > 0:
-                return value
+            if value is None or value <= 0:
+                continue
+            if pattern is _BUDGET_PATTERNS[-1] and value <= MAX_PAX:
+                continue
+            return value
     return None
 
 
 def is_per_person(text: str) -> bool:
     return _PER_PERSON.search(text.lower()) is not None
+
+
+def _about_people(low: str, start: int) -> bool:
+    m = _PEOPLE_BEFORE.search(low[:start])
+    if m is None:
+        return False
+    value = _to_int(m.group(1))
+    return value is not None and value <= MAX_PAX
+
+
+def parse_budget_scope(text: str) -> Optional[str]:
+    """RF-69, regole 2-3: "a testa", "each"… → `per_person`; "in tutto", "in total"… → `total`
+    (non dopo un numero di persone); nessuna parola → None."""
+    low = text.lower()
+    if _PER_PERSON.search(low):
+        return "per_person"
+    if any(not _about_people(low, m.start()) for m in _TOTAL.finditer(low)):
+        return "total"
+    return None
+
+
+def read_budget(criteria: Criteria) -> Criteria:
+    """RF-69: in ingresso `budget` è la cifra detta e `budget_scope` la lettura detta (campo o
+    parole) o None; in uscita `budget` è il tetto sul totale usato dal chooser e `budget_scope`
+    la lettura. Senza lettura detta è `total` (regola 5)."""
+    if criteria.budget is None:
+        return replace(criteria, budget_scope=None)
+    scope = criteria.budget_scope or "total"
+    budget = criteria.budget * criteria.pax if scope == "per_person" and criteria.pax else criteria.budget
+    return replace(criteria, budget=budget, budget_scope=scope)
 
 
 def _valid_period(start_raw, end_raw, today: date, label: str) -> Optional[Period]:
@@ -529,21 +570,18 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
     today = today or date.today()
     profile = profile or TravelerProfile()
     given, discarded = validate_fields(fields.as_dict(), today) if fields else ({}, ())
-    pax = parse_pax(text)
-    budget = parse_budget(text)
-    group = given.get("pax") or pax or profile.pax
-    if budget is not None and group and is_per_person(text):
-        budget = budget * group
     nights = parse_duration(text) or (None, None)
+    # budget e lettura come detti: il tetto sul totale lo calcola `read_budget` (RF-69)
     parsed = Criteria(
         sport=parse_sport(text),
         area=geo.find_area(text),
         period=parse_period(text, today),
-        pax=pax,
-        budget=budget,
+        pax=parse_pax(text),
+        budget=parse_budget(text),
         language=detect_language(text),
         duration_min_nights=nights[0],
         duration_max_nights=nights[1],
+        budget_scope=parse_budget_scope(text),
     )
     criteria = replace(parsed, **given)
     if criteria.sport is None and extractor is not None:
@@ -556,4 +594,5 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
-    return ParseResult(criteria, question, discarded, conflicts_between(vars(parsed), given))
+    return ParseResult(read_budget(criteria), question, discarded,
+                       conflicts_between(vars(parsed), given))
