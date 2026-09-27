@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 
 from vela.adapters.schema import (intents_t, jobs_t, orders_t, products_t, proposals_t,
                                   quota_window_t, rejections_t)
+from vela.domain.labels import ordered
 from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, JobStatus, Order,
                                 OrderStatus, Product, Proposal, QuotaClass, Rejection, criteria_from_dict,
                                 criteria_to_dict, profile_from_dict, profile_to_dict)
@@ -39,6 +40,7 @@ def _product_row(p: Product) -> dict:
         "provider_id": p.provider_id, "brand": p.brand,
         "featured": p.featured, "special_offer": p.special_offer,
         "max_pax_per_room": p.max_pax_per_room,
+        "levels": ordered(p.levels), "levels_exclusive": p.levels_exclusive, "coaching": p.coaching,
     }
 
 
@@ -56,7 +58,9 @@ def _product(m, raw: Optional[dict]) -> Product:
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
         provider_id=m["provider_id"], brand=m["brand"],
         featured=bool(m["featured"]), special_offer=bool(m["special_offer"]),
-        max_pax_per_room=m["max_pax_per_room"])
+        max_pax_per_room=m["max_pax_per_room"],
+        levels=frozenset(m["levels"] or ()), levels_exclusive=bool(m["levels_exclusive"]),
+        coaching=bool(m["coaching"]))
 
 
 class PostgresProducts:

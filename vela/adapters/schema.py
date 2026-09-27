@@ -41,6 +41,9 @@ products_t = Table(
     Column("featured", Boolean, nullable=False, default=False),        # 0010 (M21-B)
     Column("special_offer", Boolean, nullable=False, default=False),   # 0010 (M21-B)
     Column("max_pax_per_room", Integer),                                # 0011 (M21-D)
+    Column("levels", JSON, nullable=False, default=list),               # 0012 (M21-C)
+    Column("levels_exclusive", Boolean, nullable=False, default=False),  # 0012 (M21-C)
+    Column("coaching", Boolean, nullable=False, default=False),         # 0012 (M21-C)
 )
 
 intents_t = Table(
