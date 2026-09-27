@@ -1028,6 +1028,10 @@ che non sia `hotel`).
   trappola; C) nessuna trappola, §10.4 si prova con un errore del replay.
 - Soglia di equivalenza del prezzo: **A) 5%**; B) prezzo identico o −1 € (solo la trappola).
 
+**Stato (2026-09-27).** Fatta: A e A, entrambe con l'OK dell'utente, più la migrazione 0010 con
+il backfill da `raw`. Decisioni e test cambiati in `docs/decisions.md` ("M21-B Ordinamento e
+prodotti equivalenti"); il test "rifiuto `hotel` → né 78 né 900078" è di M21-F.
+
 ### M21-D — Persone e camere (UC-D)
 
 **Scope.** Parser delle camere ("tre camere", "two rooms", "due coppie"); campo `rooms` su

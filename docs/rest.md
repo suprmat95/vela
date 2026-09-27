@@ -60,6 +60,15 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   nuova segue le stesse regole; `budget_scope` da solo, o un numero di persone cambiato con la
   lettura a persona, rilegge la cifra già detta; "troppo caro" abbassa il tetto e lo legge in
   totale. `budget_scope` senza nessun budget non ha effetto.
+- **Ordinamento** (RF-60, RF-61, M21-B): dopo i filtri duri la proposta è il primo prodotto per
+  area, totale entro budget, durata compatibile, partenza più vicina all'inizio del periodo (o a
+  oggi senza periodo), `featured` o offerta speciale di HofJ, prezzo crescente, id numerico
+  (livello e lezioni da M21-C). Senza budget il prezzo non decide prima della partenza: un viaggio
+  che parte il 2 novembre batte uno che parte il 25 anche se costa di più. Prodotti equivalenti
+  (stesso hotel, stesso titolo, stessa destinazione, prezzo entro il 5%) contano come uno: resta
+  quello con l'id più basso. La `reason` della `proposal` dice il livello che ha deciso ("la
+  prima partenza nel periodo che hai chiesto", "è tra i viaggi in evidenza del catalogo") e "la
+  più economica" solo quando è vero. Nessun campo nuovo.
 - **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
   è `question` "Padel o tennis?" e nessun intento viene salvato.
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri

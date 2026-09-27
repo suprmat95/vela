@@ -368,3 +368,21 @@ The diff reads right. Committing commit 3.
 The 78 costs 250 a head (500 total), not 1000; my test data was wrong. Fixing the expectation, then rerunning, and committing only if the suite and lint are green.
 
 - 🔧 Bash: Fix the trap test totals, rerun the staging tests, the suite and lint, then commit commit 4
+
+- 🔧 Bash: Gather the doc and description spots to update in commit 5
+
+- 🔧 Bash: Read the UC-B example lines, the trap paragraph in the fixture doc and the spec references
+
+For commit 5, first the RED test on the MCP `get_proposal` description, then the description text and all the docs in one pass.
+
+- 🔧 Bash: Read the MCP description tests to add one next to them
+
+- 🔧 Bash: Read the README claim about cheaper proposals and the roadmap M21-B block
+
+- 🔧 Bash: Add the MCP description test and confirm it fails
+
+- 🔧 Bash: Update the MCP description and the docs, then run the suite and lint
+
+- 🔧 Bash: Show the one failing test
+
+- 🔧 Bash: Fix the description test, run suite and lint on SQLite and Postgres, commit the docs, remove the throwaway Postgres

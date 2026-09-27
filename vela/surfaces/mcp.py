@@ -91,7 +91,9 @@ DESCRIPTIONS = {
         "before a proposal exists: after a proposal never call it again, every change goes "
         "through reject_proposal." + _VOICE),
     "get_proposal": (
-        "Get the single trip Vela proposes for an intent. Returns one proposal (`proposal_id`, "
+        "Get the single trip Vela proposes for an intent. Vela picks it by area, budget, trip "
+        "length, earliest departure in the period, featured trips, then price, so do not present "
+        "it as the cheapest option: the `say` explains the choice. Returns one proposal (`proposal_id`, "
         "`product`, dates, price from) or, when nothing fits, `failed_criterion`: then no "
         "proposal exists yet, so ask the user which criterion to change and call create_intent "
         "with the changed criteria. After speaking the proposal, ask if the user likes it; from "

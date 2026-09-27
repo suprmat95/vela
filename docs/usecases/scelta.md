@@ -97,7 +97,10 @@ Tempo di riferimento degli esempi: oggi 2026-09-26.
 - **Server.** Senza budget il prezzo non decide prima di durata, partenza e `featured`: un
   prodotto che parte il 2 novembre batte uno che parte il 25 anche se costa di più.
 - **Agente legge.** "Ti propongo <titolo> dal 2 novembre, 3 notti, <totale> in totale." La
-  motivazione dice perché: "parte a inizio novembre, come hai chiesto".
+  motivazione dice perché: "Parte il 2 novembre 2026, la prima partenza nel periodo che hai
+  chiesto, con un totale a partire da <totale>" (M21-B: la frase dice la regola, non il mese;
+  senza periodo "la prima partenza disponibile"; quando decide `featured`, "ed è tra i viaggi in
+  evidenza del catalogo"; "la più economica compatibile" resta solo quando è vero).
 - **Test.**
   - Dominio: una tabella di coppie di prodotti che differiscono per un solo livello
     dell'ordine, e per ognuna il vincitore atteso; senza budget, a parità di area e durata,

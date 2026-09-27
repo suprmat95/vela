@@ -340,6 +340,13 @@ class AgentToolContractTest(McpCase):
         self.assertEqual(intent["required"], ["text"])
         self.assertEqual(reject["required"], ["proposal_id"])
 
+    def test_proposal_description_says_how_vela_picks(self):
+        """M21-B (RF-60): l'agente sa che la scelta non è "il più economico"."""
+        text = DESCRIPTIONS["get_proposal"]
+        for word in ("area", "budget", "length", "earliest departure", "featured", "then price"):
+            self.assertIn(word, text, word)
+        self.assertIn("do not present it as the cheapest option", text)
+
     def test_descriptions_route_changes_through_reject_proposal(self):
         texts = dict(DESCRIPTIONS, instructions=INSTRUCTIONS)
         for name, text in texts.items():

@@ -60,6 +60,9 @@ estendere i campi scartati o alzare il limite, con una decisione in `docs/decisi
 
 Prodotto trappola del criterio 4 (M7): `vela.fixtures.add_trap(catalog, "78")` clona il prodotto
 78 con id `900078`, prezzo più basso di 1 e `vela_trap: true`; si scrive con `write_catalog`.
+Da M21-B (RF-61) modello e trappola sono equivalenti e il chooser propone il 78: per la prova di
+§10.4 `add_trap(catalog, "78", archive_template=True)` archivia il 78 nella fixture di prova, così
+la trappola è la prima proposta (`tests/test_staging_fixture.py`, `TrapFixtureTest`).
 
 ## Registrazioni
 

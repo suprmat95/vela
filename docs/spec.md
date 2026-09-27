@@ -421,7 +421,9 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisioni in
 `docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
 (UC-A..UC-F), implementazione in roadmap M21. RF-58 e RF-59 (durata) sono implementati da
-M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E; gli altri non ancora.
+M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E, RF-60 e RF-61 (ordinamento e prodotti
+equivalenti, con il livello "livello e lezioni" neutro fino a M21-C) da M21-B; gli altri non
+ancora.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).
