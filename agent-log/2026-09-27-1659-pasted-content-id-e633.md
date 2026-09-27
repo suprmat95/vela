@@ -419,3 +419,183 @@ PUT dopo il pagamento accettati; cambiati: nessuno | booking: 200 ttlup3o1amxu</
 Tutte e 7 le chiamate sono andate a buon fine. HofJ ha accettato i `PUT` dopo il pagamento, il totale non è cambiato e il booking ha risposto 200. Registro l'esito nei documenti.
 
 - 🔧 Bash: python3 - <<'EOF' def sub(p, old, new):     s=open(p).read(); assert old in s, (…
+
+Su staging la domanda 10 ha risposta: il job di booking può inserire cliente e passeggeri dopo il pagamento.
+
+**Cosa ha mostrato la seconda sonda** (7 chiamate su 7 dichiarate, tutte 200):
+- **I `PUT` passano dopo il pagamento.** `PUT customer` e `PUT pax` sono stati accettati dopo un pagamento di test riuscito, legato al carrello con `checkoutRefId`.
+- **Il totale non si muove.** Vale sempre 1156 €, e `checkout.status` resta `BookingInitiated`: dall'API interna HofJ non vede il pagamento, come già in M5.
+- **Il booking riesce.** Subito dopo, `POST /v1/bookings` ha risposto 200.
+
+Insieme alla prima sonda (totale invariato dopo cliente e passeggeri), reggono entrambe le condizioni della roadmap. Il verdetto in `decisions.md` è "sì su staging".
+
+**Cosa resta non provato:**
+- Il pagamento è un PaymentIntent creato direttamente, non la Checkout Session che usa Vela. Ha gli stessi metadata, ma resta un'approssimazione.
+- È staging, non produzione. La domanda 10 va comunque mandata a HofJ, e l'ho riformulata così: vale anche in produzione e con una Checkout Session?
+- Il booking risponde con l'`itineraryId` invece di un codice `R-…`, come in M5. Questo non prova che la prenotazione sia confermata (domanda 2, ancora aperta).
+- Se la produzione si comportasse diversamente, un ordine pagato finirebbe in `booking_failed` e andrebbe rimborsato a mano.
+
+**Dati di prova lasciati su staging:** l'itinerario `ttlup3o1amxu`, pagato in modalità test (1156 €) e prenotato; `deimmovsayfq` è rimasto orfano dalla prima sonda.
+
+L'esito è registrato nel commit `58538ba`: la sezione "Seconda sonda" in `customer-pax.md`, la differenza #39 in `differences.md`, la domanda 10 aggiornata e il verdetto in `decisions.md`. Le cartelle `probe-m19/` e `probe-m19-paid/`, con le risposte grezze, restano fuori da git.
+
+Mi fermo qui: decidi tu se M19 passa al Passo 2. Se va avanti, all'inizio ti porto la proposta con:
+- le 3 chiamate per ordine pagato al posto di 4 (senza `get_pax`, grazie alla differenza #36);
+- la scadenza degli ordini silenziosi (N, e se basta `updated_at` o serve una colonna);
+- la riserva della quota per i booking ricalcolata.
+
+## Utente 17:19
+
+Ok cosa comporta procedere al passo 2?
+
+## Agente 17:20
+
+Per rispondere con numeri e non a memoria guardo i punti del codice che il Passo 2 toccherebbe.
+
+- 🔧 Bash: grep -n "calls_needed\|BOOKING_CALLS\|CALLS_PER_PURCHASE\|purchases_per_minute\|…
+
+- 🔧 Bash: sed -n 270,300p vela/domain/models.py; sed -n 1,80p vela/domain/jobs.py | grep -…
+
+- 🔧 Bash: grep -rn "EXPIRED" vela --include=*.py | grep -v "LinkStatus\|\"expired\"" | hea…
+
+Ecco cosa comporta il Passo 2, visto dal codice di oggi.
+
+## Cosa cambia
+
+- **Job d'acquisto: da 5 chiamate a 2.** Restano creazione dell'itinerario e `GET` del totale, poi il link.
+  - Chi ha il prezzo dalla cache e conferma genera un job da 2 chiamate invece di 5.
+  - Il leader resta com'è: 2 chiamate, `awaiting_confirmation`, poi il link senza altre chiamate.
+- **Job di prenotazione: da 1 chiamata a 3 o 4.** Prima del `POST /v1/bookings` fa `PUT customer` e `PUT pax`, ognuno salvato come passo, così una ripresa non rifà quelli già fatti. Oggi il job di booking non ha passi: vanno aggiunti.
+- **Quota.** Cambiano `CALLS_PER_PURCHASE` (5 → 2), il costo per classe in `jobs.quota_needs` (booking 1 → 3 o 4), la regola del bucket che oggi impone capienza ≥ 5 + soglia, e l'attesa dichiarata di RF-48, che oggi divide il ritmo per 5.
+- **Ordini silenziosi.** Lo stato `expired` esiste già: lo usa la scadenza del link a 24 h (`orders.py:93`). Si può riusare con una frase nuova nel `say`, senza stati nuovi e senza toccare RF-25. Manca però un dato che dica "ultima richiesta di stato". `updated_at` lo aggiornano anche i job, quindi serve una di queste due strade:
+  - `get_order_status` aggiorna `updated_at`: niente migrazione, ma il campo cambia significato;
+  - una colonna `last_seen_at`, con la migrazione 0016.
+- **Load test.** Il finto HofJ accetta già i `PUT` in qualsiasi momento. Gli farei rifiutare il booking se il carrello non ha cliente e passeggeri, così una regressione emerge dal banco. Poi `journey.py`, la proiezione, il giro C-2500 (circa 10 minuti in compose) e la nuova sezione in `RESULTS.md`.
+
+## Cosa si guadagna, onestamente
+
+I "~43 link al minuto" della roadmap valgono solo se paga pochissima gente, perché ogni ordine pagato costa di più. Con circa 99 chiamate al minuto:
+
+| Quota di chi paga il link | Link/min con booking a 4 | Link/min con booking a 3 |
+|---|---|---|
+| 60% (il banco di oggi: 78 prenotati su 127 link) | ~22 | ~26 |
+| 20% | ~35 | ~38 |
+| 0% (tetto teorico) | ~49 | ~49 |
+
+- **Nel giro C-2500 così com'è** mi aspetto da ~18 a 22-26 link al minuto, non 43. Per far vedere il guadagno sul look-to-book serve un giro con una quota di viaggiatori che non paga, e cambiare lo scenario va deciso.
+- **Il tempo da pagamento a conferma sale.** Oggi sono 5 s (1 chiamata); con 3-4 chiamate in serie diventano circa 10-15 s. I booking però passano comunque per primi, grazie alla soglia della quota.
+
+## Rischi
+
+- **Produzione non verificata.** Se in produzione HofJ rifiutasse i `PUT` dopo il pagamento, ogni ordine pagato finirebbe in `booking_failed` con rimborso a mano. Conviene mandare la domanda 10 a HofJ prima di andare live.
+- **Conflitto tra ordini silenziosi e SMS.** Dopo la conferma Vela dice "ti mando il link per SMS". Chi ha ricevuto quella promessa smette legittimamente di chiedere lo stato, e farlo scadere romperebbe la promessa. La scadenza dovrebbe quindi valere solo per chi è in coda senza SMS annunciato, oppure avere un N molto lungo. Oggi è il punto più delicato.
+
+## Decisioni da prendere prima del codice
+
+1. **Booking a 3 o a 4 chiamate.** Senza `get_pax`, perché i `refId` sono già nell'itinerario (differenza #36), oppure tenendolo per sicurezza.
+2. **Riserva per i booking.** Oggi è un 20% fisso. Con 3-4 chiamate per ordine pagato quella percentuale dipende da quanta gente paga: va ricalcolata, oppure si cambia regola.
+3. **Ordini silenziosi.** Quali ordini possono scadere (il punto sull'SMS), quanto vale N, e `updated_at` oppure colonna nuova.
+4. **Scenario del load test.** Stessi parametri, come chiede la task, oppure anche un giro con una quota di viaggiatori che non paga.
+
+## Quanto lavoro
+
+La roadmap dà taglia M, ma io la stimo più vicina a L. Tocca `purchase.py`, `booking.py`, `quota.py`, `jobs.py`, `usecases.py`, `orders.py`, `say`, `config`, il finto HofJ, il load test e circa 9 file di test (i cinque che la task elenca più `test_job_processor`, `test_usecases`, `test_hofj_http` e `support.py`). Poi spec, `rest.md`, le descrizioni MCP, `decisions.md` e la roadmap. Più eventualmente una migrazione, e il giro di load test.
+
+**Il mio parere.** Il guadagno vero è sul look-to-book: chi accetta e non paga costa 2 chiamate invece di 5. Sul banco attuale si vedrà poco. Ha senso andare avanti se ci aspettiamo che molti accettino senza pagare, ed è lo scenario del twist, oppure se vale come dimostrazione. Se decidi di andare avanti, parto dalle quattro decisioni qui sopra con le mie raccomandazioni e aspetto il tuo OK prima di scrivere codice.
+
+## Utente 17:23
+
+si facciamo che solo il 5% pafa
+
+## Agente 17:23
+
+Allora si va avanti con il Passo 2. Prima guardo come il banco decide chi paga, così la proposta per lo scenario al 5% è concreta.
+
+- 🔧 Bash: ls loadtest; grep -n "pay\|paga\|0\.[0-9]\+" loadtest/scenario.py | head -30; gr…
+
+## Utente 17:23
+
+[Request interrupted by user]
+
+anzi il 2%
+
+## Agente 17:24
+
+Ok, 2%. Con il 2% di paganti il conto torna quasi al tetto: ogni link costa 2 chiamate più circa 0,06-0,08 chiamate di booking, quindi **~48 link al minuto** contro i 17,8 di oggi.
+
+Il banco oggi fissa chi paga a 60% dei link (`Funnel.pay` in `loadtest/scenario.py`) e non ha un'opzione per cambiarlo. Marco e Anna, le due sentinelle, pagano sempre, quindi il criterio "Marco confermato" resta valido anche al 2%.
+
+## Approccio del Passo 2 (commit piccoli, TDD)
+
+1. **Job d'acquisto a 2 chiamate.** Salto da itinerario a totale e poi al link. Tengo i numeri dei passi di oggi (0, 3, 4, 5): così un job già in coda al momento del deploy riprende senza errori, e uno fermo al passo 1 o 2 salta al 3.
+   - La cache resta coerente: il leader pubblica il prezzo al passo del totale.
+   - Una conferma senza carrello accoda un job da 2 chiamate, che confronta il totale con `confirmed_total` come fa oggi.
+2. **Job di booking a passi:** customer → pax → booking. Ogni passo viene salvato, così la ripresa di RF-27 non rifà quelli completati.
+3. **Quota e attesa dichiarata:** costo per classe, `purchases_per_minute` e riserva (decisione 2).
+4. **Ordini silenziosi** (decisione 3).
+5. **Finto HofJ:** rifiuta il booking se il carrello non ha cliente e passeggeri, così una regressione del passo 2 emerge nel banco.
+6. **Banco:** opzione `--pay` in `run.py` e nel locustfile, poi i giri, la sezione nuova in `RESULTS.md` e la proiezione a 50.000 rifatta con il ritmo misurato.
+7. **Documenti:** spec (RF-46, RF-47, RF-48, RF-51), `rest.md`, descrizioni MCP, `decisions.md` (con l'elenco dei test aggiornati) e roadmap.
+
+Mi fermo prima del merge.
+
+## Decisioni, con le mie raccomandazioni
+
+**1. Booking a 3 chiamate invece di 4 (raccomandato).** Salto `get_pax` e uso i `refId` `pax-1..N`, visti su due prodotti (differenza #36).
+- Ripiego: se `PUT pax` risponde 400, faccio `get_pax` e ripeto il `PUT`. È una chiamata in più solo in quel caso, e non si finisce in `booking_failed` per un `refId` diverso.
+- Alternativa: 4 chiamate fisse, più semplice ma con un costo in più per ogni ordine pagato.
+
+**2. Riserva per i booking derivata da una quota attesa di paganti (raccomandato).**
+- Nuovo campo di `Settings` `expected_pay_share = 0.05`, un margine sopra il 2%. Da lì la riserva vale 3p/(2+3p), circa 7%, e l'attesa dichiarata stima ~46 link al minuto.
+- La priorità reale dei booking resta la soglia del bucket, che alzo da 2 a 3 gettoni perché contenga un booking intero.
+- Alternative:
+  - (b) Tenere il 20% fisso: attese dichiarate più lunghe del vero, circa 40 link al minuto stimati invece di ~48 reali.
+  - (c) Stimare la quota di paganti dagli ordini recenti: più preciso, ma è logica nuova.
+
+**3. Ordini silenziosi.**
+- **Dove:** il controllo avviene quando il worker prende il job d'acquisto. Se il viaggiatore è silenzioso da più di N minuti, l'ordine passa a `expired` (stato già esistente, RF-25 non cambia) con una frase nuova nel `say`, zero chiamate e il job chiuso. Non serve un processo di pulizia periodico.
+- **Chi può scadere:** solo gli ordini a cui non è stato promesso l'SMS. Chi ha sentito "ti mando il link per SMS" non scade mai.
+- **N = 15 minuti, fisso.** Riferimento all'attesa dichiarata: nel banco i viaggiatori chiedono lo stato ogni 30-60 s, quindi nessuno scade per errore. Nel twist le attese dichiarate sono di ore, e nessuna conversazione con un agente dura così tanto: chi tace da 15 minuti senza SMS non vedrà mai il link.
+- **Dove si legge il silenzio:** una colonna nuova, perché `updated_at` lo aggiornano anche i job. Ecco lo schema, che non scrivo senza il tuo OK:
+  ```
+  0016_orders_last_seen: ALTER TABLE orders ADD COLUMN last_seen_at TIMESTAMPTZ NULL
+  ```
+  La aggiornano `accept_proposal`, la conferma e `get_order_status`, al massimo una volta ogni 60 s per ordine, per non aggiungere una scrittura a ogni richiesta. Se è nulla vale `created_at`. `down_revision` = 0015.
+  - Alternativa senza migrazione: aggiornare `updated_at` da `get_order_status`. La sconsiglio: cambia il significato del campo.
+- **Limite:** nel banco nessun viaggiatore smette di chiedere lo stato, quindi la scadenza la provano i test unitari, non il load test.
+
+**4. Giri del load test: due, entrambi C-2500 con i parametri di `RESULTS.md` (raccomandato).**
+- `--pay 0.02`: lo scenario che hai scelto, dove si vede il guadagno.
+- `--pay 0.60`: il confronto con i giri precedenti. Mostra il costo di un pagamento con booking a 3 chiamate e controlla che non ci siano regressioni.
+
+Sono circa 10 minuti ciascuno in compose, nessuna chiamata esterna.
+
+**Taglia:** più vicina a L che a M.
+
+Confermi le quattro decisioni, la migrazione 0016 compresa, o vuoi cambiarne qualcuna?
+
+## Utente 17:26
+
+Procedi
+
+## Agente 17:26
+
+Parto. Prima leggo il codice che toccherò: job, ordini, repository e test.
+
+- 🔧 Bash: cat vela/domain/jobs.py; sed -n 1,140p vela/domain/orders.py
+
+- 🔧 Bash: cat tests/test_purchase_job.py | head -250; wc -l tests/test_purchase_job.py tes…
+
+- 🔧 Bash: grep -n "ref\|def \|class " tests/support.py | sed -n 1,80p; grep -n "ref_id\|re…
+
+- 🔧 Bash: sed -n 50,130p tests/support.py; sed -n 175,195p tests/support.py; sed -n 75,125…
+
+- 🔧 Bash: sed -n 128,150p vela/adapters/hofj_http.py; grep -n "itinerary=" vela/adapters/h…
+
+- 🔧 Bash: grep -rn "PurchaseJob(\|BookingJob(" --include=*.py . | grep -v "^./.venv"
+
+- 🔧 Bash: sed -n 250,329p tests/test_purchase_job.py; grep -rn "step=\|STEP_\|set_customer…
+
+Sto partendo con il primo pezzo: registro le decisioni approvate, poi il job d'acquisto a 2 chiamate con i test prima del codice.
+
+- 🔧 Bash: cat >> docs/decisions.md <<'EOF'  ## 2026-09-27 — M19 passo 2: decisioni approva…

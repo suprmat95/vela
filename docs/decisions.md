@@ -1201,3 +1201,17 @@ Esiti in `docs/api/customer-pax.md` ("Seconda sonda"), differenza #39.
 | Limiti | PaymentIntent diretto invece della Checkout Session di Vela; staging invece di produzione; il booking restituisce l'`itineraryId` come in M5 (domanda 2 aperta) | Detti in `customer-pax.md`; la domanda 10 resta da mandare a HofJ per la produzione |
 | Dati di prova | `ttlup3o1amxu` (124) pagato in test (`pi_3UKJpdRpam3eRRKb0twU1yQi`, 1156 €) e prenotato su staging; `deimmovsayfq` orfano dalla prima sonda | Come in M5 e M7 |
 | **Verdetto** | **Sì su staging**: le due condizioni della roadmap reggono (totale invariato dopo i pax, `PUT` accettati dopo il pagamento). Il passo 2 di M19 è tecnicamente possibile; la decisione di farlo resta all'utente. Rischio residuo: un comportamento diverso in produzione porterebbe un ordine pagato a `booking_failed` con rimborso a mano | Condizione della task: "decido io se M19 va avanti" |
+
+## 2026-09-27 — M19 passo 2: decisioni approvate
+
+Approvate dall'utente ("procedi") prima del codice, dopo le due sonde (verdetto "sì su staging").
+Scenario di riferimento scelto dall'utente: paga il link il 2% di chi lo riceve.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Job d'acquisto | 2 chiamate: itinerario e totale, poi il link. Numeri dei passi invariati (0 itinerario, 3 totale, 4 link, 5 fatto): dopo l'itinerario il job salta al 3; un job di prima fermo al passo 1 o 2 salta al 3 senza chiamate | Un job in volo al deploy riprende senza sorprese. Cache (RF-84) invariata: il leader pubblica al passo del totale, la conferma senza carrello accoda un job da 2 chiamate |
+| Job di prenotazione | 3 chiamate: `PUT customer`, `PUT pax` con i `refId` `pax-1..N` senza `GET .../pax` (differenza #36), `POST /v1/bookings`; ogni passo salvato (RF-27). Ripiego: un 4xx su `PUT pax` porta a un passo con `get_pax` + `set_pax`, rimesso in coda per prendere i suoi gettoni | Una chiamata in meno per ordine pagato; un `refId` diverso non porta a `booking_failed` |
+| Riserva `booking` | Derivata da `Settings.expected_pay_share` = 0,05 (margine sul 2%): quota del ritmo = 3p / (2 + 3p) ≈ 7%, usata solo per l'attesa dichiarata (RF-48). La soglia del bucket sale da 2 a 3 gettoni, un booking intero | Con 3 chiamate per ordine pagato una percentuale fissa dipende da quanti pagano. La priorità vera resta la soglia |
+| Ordini silenziosi | Al prelievo del job d'acquisto: ordine `queued` senza SMS annunciato e senza segni di vita da `Settings.silent_order_minutes` = 15 → `expired`, zero chiamate, job chiuso, frase propria nel `say`. Stato esistente, nessuno stato nuovo in RF-25 | Chi ha sentito "ti mando il link per SMS" può tacere. Nel twist le attese dichiarate sono di ore: chi tace da 15 minuti senza SMS non vedrà il link |
+| Segni di vita | Migrazione 0016: `orders.last_seen_at TIMESTAMPTZ NULL`, aggiornata da `accept_proposal`, conferma e `get_order_status` al massimo ogni 60 s per ordine; nulla = `created_at` | `updated_at` lo scrivono anche i job. Schema approvato dall'utente |
+| Load test | Due giri C-2500 con i parametri di `RESULTS.md`: `--pay 0.02` (scenario dell'utente) e `--pay 0.60` (confronto con i giri precedenti). Il finto HofJ rifiuta il booking di un carrello senza cliente o passeggeri | Il primo mostra il guadagno, il secondo il costo di un pagamento e l'assenza di regressioni |
