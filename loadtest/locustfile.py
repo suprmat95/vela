@@ -22,7 +22,7 @@ from locust import FastHttpUser, events, task
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from loadtest.journey import ScenarioClock, run_journey  # noqa: E402
-from loadtest.scenario import travelers  # noqa: E402
+from loadtest.scenario import Funnel, travelers  # noqa: E402
 
 
 @events.init_command_line_parser.add_listener
@@ -32,6 +32,7 @@ def _arguments(parser):
     parser.add_argument("--tail-minutes", type=float, default=5.0,
                         help="minuti dopo l'ultimo arrivo prima di chiudere il giro")
     parser.add_argument("--scenario-seed", type=int, default=13)
+    parser.add_argument("--pay", type=float, default=0.60, help="quota di chi riceve il link e paga (M19)")
     parser.add_argument("--events-out", default="loadtest/out/travelers.jsonl")
     parser.add_argument("--vela-token", default=os.environ.get("VELA_API_TOKEN", "loadtest-token"),
                         help="token REST di Vela (quello finto del compose)")
@@ -47,14 +48,15 @@ class Arrivals(FastHttpUser):
     def scenario(self):
         opts = self.environment.parsed_options
         auth = {"Authorization": "Bearer " + opts.vela_token}
-        plan = travelers(opts.travelers, opts.arrival_minutes, opts.scenario_seed)
+        plan = travelers(opts.travelers, opts.arrival_minutes, opts.scenario_seed, Funnel(pay=opts.pay))
         deadline = (opts.arrival_minutes + opts.tail_minutes) * 60
         clock = ScenarioClock()
         os.makedirs(os.path.dirname(os.path.abspath(opts.events_out)), exist_ok=True)
         out = open(opts.events_out, "w", encoding="utf-8")
         out.write(json.dumps({"type": "run", "epoch_start": clock.epoch_start,
                               "travelers": opts.travelers, "arrival_minutes": opts.arrival_minutes,
-                              "tail_minutes": opts.tail_minutes, "seed": opts.scenario_seed}) + "\n")
+                              "tail_minutes": opts.tail_minutes, "seed": opts.scenario_seed,
+                              "pay": opts.pay}) + "\n")
         live = {}
 
         def call(method, path, name, json_body=None):

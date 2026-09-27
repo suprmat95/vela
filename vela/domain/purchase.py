@@ -1,10 +1,12 @@
 """Job d'acquisto (RF-46): prepara su HofJ il carrello di un ordine `queued` e il link di pagamento.
 
-Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà ciò che è già fatto:
+Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà ciò che è già fatto.
+M19: cliente e passeggeri passano nel job di prenotazione (`vela.domain.booking`), dopo il
+pagamento; il totale non dipende da loro (sonda del 2026-09-27, `docs/api/customer-pax.md`).
+I numeri dei passi restano quelli di prima: dopo l'itinerario si salta al 3, e un job salvato
+dal codice di prima al passo 1 o 2 salta al 3 senza chiamate.
 
   0 itinerario (`create_itinerary`, salva `itinerary_id`)       1 chiamata HofJ
-  1 cliente (`set_customer`)                                    1
-  2 passeggeri (`get_pax` + `set_pax`, un'unica unità di ripresa) 2
   3 importo da pagare (`get_itinerary`, salva `total`, pubblica il prezzo in cache, RF-84)  1
     → l'ordine passa a `awaiting_confirmation` e il job si chiude qui (decisione 2026-09-26):
       il viaggiatore sente il prezzo effettivo e solo la sua conferma accoda un nuovo job
@@ -12,6 +14,12 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
       (RF-84: se l'ordine ha già un `confirmed_total` uguale, si prosegue al link senza fermarsi)
   4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
+
+Ordini silenziosi (M19): prima di prendere i gettoni il processore chiede `skip`. Un ordine
+`queued` senza segni di vita (`last_seen_at`, o la creazione) da più di `silent_after` passa a
+`expired` senza chiamate, e il job si chiude; se era il leader di un prezzo in cache, gli
+agganciati ricevono il loro job (RF-84, ripiego). Non scade chi ha sentito "ti mando il link per
+SMS": totale già noto (dopo la conferma), SMS attivi e un numero valido.
 
 Prima di ogni passo l'ordine viene riletto: se non è più `queued` (rinuncia, RF-49) il job si
 ferma senza altre chiamate. Esiti degli errori:
@@ -29,20 +37,20 @@ import logging
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Callable, Union
+from typing import Callable, Optional, Union
 
-from vela.domain import say
+from vela.domain import phone, say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
-                                Rejection, TravelerDefaults)
+                                Rejection)
 from vela.domain.notify import enqueue_sms
 from vela.domain.quotes import quote_key, release_quote
-from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError,
-                             UpstreamTimeout)
+from vela.ports.hofj import ConfigError, HofJError, HofJRouter, ProductError, QuotaError, UpstreamTimeout
 from vela.ports.payments import PaymentsError, PaymentsPort
 from vela.ports.repositories import Repositories
 
 STEP_ITINERARY, STEP_CUSTOMER, STEP_PAX, STEP_TOTAL, STEP_LINK, STEP_DONE = range(6)
-_CALLS = {STEP_ITINERARY: 5, STEP_CUSTOMER: 4, STEP_PAX: 3, STEP_TOTAL: 1, STEP_LINK: 0, STEP_DONE: 0}
+_CALLS = {STEP_ITINERARY: 2, STEP_CUSTOMER: 1, STEP_PAX: 1, STEP_TOTAL: 1, STEP_LINK: 0, STEP_DONE: 0}
+_NEXT = {STEP_ITINERARY: STEP_TOTAL, STEP_CUSTOMER: STEP_TOTAL, STEP_PAX: STEP_TOTAL}   # M19
 UNBOOKABLE_REASON = "prodotto non prenotabile"
 
 log = logging.getLogger("vela.purchase")
@@ -61,11 +69,13 @@ class JobResult:
 
 class PurchaseJob:
     def __init__(self, repos: Repositories, hofj: HofJRouter, payments: PaymentsPort,
-                 propose: Callable[..., Union[ProposalMade, NoMatch]], defaults: TravelerDefaults,
-                 now: Callable[[], datetime], max_attempts: int = 3,
-                 new_id: Callable[[], str] = lambda: str(uuid.uuid4()), poll_seconds: int = 60):
+                 propose: Callable[..., Union[ProposalMade, NoMatch]], now: Callable[[], datetime],
+                 max_attempts: int = 3, new_id: Callable[[], str] = lambda: str(uuid.uuid4()),
+                 poll_seconds: int = 60, silent_after: Optional[timedelta] = None,
+                 sms_enabled: bool = False):
         self.repos, self.hofj, self.payments = repos, hofj, payments
-        self.propose, self.defaults, self.now = propose, defaults, now
+        self.propose, self.now = propose, now
+        self.silent_after, self.sms_enabled = silent_after, sms_enabled
         self.max_attempts, self.new_id, self.poll_seconds = max_attempts, new_id, poll_seconds
 
     def run(self, job: Job, next_window: datetime) -> JobResult:
@@ -94,6 +104,25 @@ class PurchaseJob:
         except HofJError as exc:
             return self._retry(job, next_window, exc, "upstream")
 
+    def skip(self, job: Job) -> Optional[JobResult]:
+        """M19: chiude senza chiamate il job di un ordine silenzioso; None se il job va eseguito."""
+        order = self.repos.orders.get(job.order_id)
+        if self.silent_after is None or order is None or order.status != OrderStatus.QUEUED:
+            return None
+        now = self.now()
+        if now - (order.last_seen_at or order.created_at) <= self.silent_after or self._sms_announced(order):
+            return None
+        expired = replace(order, status=OrderStatus.EXPIRED, updated_at=now)
+        if not self.repos.orders.save_if_status(expired, OrderStatus.QUEUED):
+            return None   # una rinuncia o un rilascio nel frattempo: il giro normale decide
+        log.info("silent_order_expired order_id=%s", order.id)
+        release_quote(self.repos, order, now, self.new_id)   # RF-84: ripiego
+        return self._close(job, JobStatus.DONE)
+
+    def _sms_announced(self, order: Order) -> bool:
+        """Dopo la conferma Vela ha detto "te lo mando per SMS" (`say_queued` con le cifre)."""
+        return self.sms_enabled and order.total is not None and phone.tail(order.traveler.phone) is not None
+
     # --- passi -------------------------------------------------------------------------
 
     def _step(self, job: Job, order: Order) -> Job:
@@ -107,18 +136,6 @@ class PurchaseJob:
             if not product.bookable:
                 self.repos.products.set_bookable(product.id, True, self.now())   # RF-34
             self._save_order(replace(order, itinerary_id=itinerary_id))
-        elif job.step == STEP_CUSTOMER:
-            t, d = order.traveler, self.defaults
-            hofj.set_customer(order.itinerary_id, Customer(
-                t.first_name, t.last_name, t.email, t.phone,
-                d.street1, d.postal_code, d.city, d.region, d.country_code))
-        elif job.step == STEP_PAX:
-            t = order.traveler
-            names = [(t.first_name, t.last_name)] + [(p.first_name, p.last_name) for p in t.participants]
-            slots = hofj.get_pax(order.itinerary_id)
-            filled = [replace(slot, first_name=names[i][0], last_name=names[i][1])
-                      if i < len(names) else slot for i, slot in enumerate(slots)]
-            hofj.set_pax(order.itinerary_id, filled)
         elif job.step == STEP_TOTAL:
             itinerary = hofj.get_itinerary(order.itinerary_id)
             self._publish(order, itinerary.total)   # RF-84: prima che l'ordine lasci `queued`
@@ -138,7 +155,7 @@ class PurchaseJob:
             self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PAYMENT_CHECK, order.id, JobStatus.PENDING,
                                         now, now + timedelta(seconds=self.poll_seconds)))
             enqueue_sms(self.repos, JobKind.SMS_LINK, order.id, now, self.new_id)   # RF-19
-        job = replace(job, step=job.step + 1)
+        job = replace(job, step=_NEXT.get(job.step, job.step + 1))
         self.repos.jobs.save(job)
         return job
 

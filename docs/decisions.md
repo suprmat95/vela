@@ -1157,3 +1157,78 @@ prezzo"). Nessuna chiamata a HofJ né a Stripe: tutto nel compose locale.
 | Hit contati a posteriori | Da `travelers.jsonl`: accettazione senza `position` né `wait_seconds` = hit (200 `order_status`); `t_priced` = polling in cui il viaggiatore vede il prezzo. `report.py` non li calcola | Nessuna modifica al banco per un solo giro; la regola è scritta in `RESULTS.md` e riproducibile |
 | Aperto | Per un hit non esiste un'attesa dichiarata (`position` e `wait_seconds` nulli): la misura "scarto attesa reale − dichiarata" del report non vale più e RF-48 non dice cosa dichiarare a chi ha già il prezzo e aspetta il link | Da decidere se e cosa dichiarare; `report.py` da adeguare quando si rifanno gli altri giri |
 
+
+## 2026-09-27 — M19 passo 1: sonda di cliente e passeggeri (domanda 10)
+
+Task M19, passo 1 approvato dall'utente: sonda `scripts/m19_probe.py` con 5 chiamate dichiarate
+su HofJ staging, lanciata dall'utente dal proprio terminale (`uv run --env-file .env` con
+`HOFJ_BASE_URL` forzato su staging; il `.env` non è stato aperto da Claude). Esiti in
+`docs/api/customer-pax.md`, differenze #36-#38 in `docs/api/differences.md`, risposta parziale
+alla domanda 10 in `docs/hofj-questions.md`. Nessuna modifica a `vela/`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Prodotto | 124 "Magnificent Padel in Lanzarote", 2026-10-08, 2 adulti, 1 camera: `allowAccommodationList: false`, hotel preselezionato, proponibile | Preferenza dell'utente (`allowAccommodationList` false); totale già misurato dalla sonda di M22-a per gli stessi parametri. Il 118 di M5 è escluso dal chooser come torneo |
+| Chiamate | Le 5 dichiarate: creazione, `GET` del totale, `PUT customer`, `PUT pax` (senza `GET .../pax`, con i `refId` di M5), `GET` del totale. Nessun `GET /v1/quota` | Vincolo della task; lo script non può superare 5 chiamate e il test lo fissa |
+| Itinerario orfano | `deimmovsayfq` (124) su `staging.weebora.com`, con cliente e passeggeri di prova; nessun pagamento, nessun booking | Come nelle sonde di M5 e M22-a |
+| **[misurato] Totale** | Invariato dopo cliente e passeggeri: `openAmount`, `total`, `originalTotal` e `totalPrice` = 1156 € prima e dopo; tra le due letture cambiano solo `customer` e `passengers` | È la condizione "il totale non cambia dopo i pax" della roadmap. Il link porta `openAmount` (RF-16), che si conosce con 2 chiamate |
+| **[non verificato]** `PUT` dopo il pagamento | Resta aperto se HofJ accetta `PUT customer` e `PUT pax` su un itinerario già pagato. ~~Non verificabile su staging~~: errore corretto lo stesso giorno, la seconda sonda di M5 ha pagato su staging con Stripe in modalità test. Si verifica con `scripts/m19_paid_probe.py` (sotto) | Pagamento e booking erano fuori dal perimetro delle 5 chiamate |
+| **[misurato] Passeggeri dalla creazione** | Il `GET` dell'itinerario appena creato ha già `passengers` con `pax-1..N`; `PUT pax` li accetta senza `GET .../pax` | Differenza #36. Spunto per il passo 2, non deciso: il job di prenotazione potrebbe fare 3 chiamate (customer, `set_pax` con `refId` noti, booking) invece di 4 |
+| **Verdetto** | Sulla parte verificabile, **sì**: il job d'acquisto può fermarsi a itinerario + totale + link senza che il prezzo detto al viaggiatore cambi dopo. Rischio residuo non verificato: un rifiuto dei `PUT` dopo il pagamento porterebbe l'ordine pagato a `booking_failed` con rimborso a mano, come un booking rifiutato oggi. Se M19 prosegua lo decide l'utente | Condizione della task: "decido io se M19 va avanti" |
+
+### Sonda con pagamento di test (proposta, 2026-09-27)
+
+Scelta dell'utente tra A (sonda su staging con pagamento di test), B (domanda a HofJ) e C (primo
+giro `live`): **A**. `scripts/m19_paid_probe.py`, da lanciare dall'utente. Esiti qui sotto dopo il
+giro.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiamate | 6 HofJ staging (creazione, `GET`, `PUT customer`, `PUT pax`, `GET`, `POST /v1/bookings`) e 1 Stripe test (`POST /v1/payment_intents` confermato con `pm_card_visa`), con i due `PUT` dopo il pagamento. Tetto rigido a 7 nello script | Il flusso di M19 nell'ordine in cui lo farebbe Vela |
+| Pagamento | PaymentIntent diretto con importo `openAmount`, `metadata.checkoutRefId` = itinerario e `Idempotency-Key` per itinerario, invece della Checkout Session di Vela | Una Checkout Session non si completa via API; stessi metadata del PaymentIntent del link (`vela/adapters/stripe_links.py`) |
+| Salvaguardie | Nessuna chiamata se la chiave Stripe non è `sk_test_`/`rk_test_` o se l'host HofJ non è `staging.api.hofj.com`; stop prima dei `PUT` se il pagamento non è `succeeded` o è `livemode`; stop prima del booking se un `PUT` è rifiutato | Un errore di ambiente non deve mai pagare o prenotare davvero |
+| Effetti | Un booking di prova su staging e un pagamento di test sull'account Stripe di HofJ | Come in M5 e M7 |
+| Limite | Staging non garantisce la produzione: la domanda 10 resta da inviare a HofJ | Il brand site di produzione può comportarsi diversamente |
+
+### Esito della sonda con pagamento (2026-09-27)
+
+Lanciata dall'utente: 7 chiamate su 7 dichiarate (6 HofJ staging, 1 Stripe test), tutte 200.
+Esiti in `docs/api/customer-pax.md` ("Seconda sonda"), differenza #39.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| **[misurato, staging]** `PUT` dopo il pagamento | Accettati: `PUT customer` e `PUT pax` 200 dopo un PaymentIntent di test `succeeded` con `checkoutRefId` = itinerario; totale (1156 €) e `checkout.status` (`BookingInitiated`) invariati; `POST /v1/bookings` 200 subito dopo | È la seconda metà della domanda 10 |
+| Limiti | PaymentIntent diretto invece della Checkout Session di Vela; staging invece di produzione; il booking restituisce l'`itineraryId` come in M5 (domanda 2 aperta) | Detti in `customer-pax.md`; la domanda 10 resta da mandare a HofJ per la produzione |
+| Dati di prova | `ttlup3o1amxu` (124) pagato in test (`pi_3UKJpdRpam3eRRKb0twU1yQi`, 1156 €) e prenotato su staging; `deimmovsayfq` orfano dalla prima sonda | Come in M5 e M7 |
+| **Verdetto** | **Sì su staging**: le due condizioni della roadmap reggono (totale invariato dopo i pax, `PUT` accettati dopo il pagamento). Il passo 2 di M19 è tecnicamente possibile; la decisione di farlo resta all'utente. Rischio residuo: un comportamento diverso in produzione porterebbe un ordine pagato a `booking_failed` con rimborso a mano | Condizione della task: "decido io se M19 va avanti" |
+
+## 2026-09-27 — M19 passo 2: decisioni approvate
+
+Approvate dall'utente ("procedi") prima del codice, dopo le due sonde (verdetto "sì su staging").
+Scenario di riferimento scelto dall'utente: paga il link il 2% di chi lo riceve.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Job d'acquisto | 2 chiamate: itinerario e totale, poi il link. Numeri dei passi invariati (0 itinerario, 3 totale, 4 link, 5 fatto): dopo l'itinerario il job salta al 3; un job di prima fermo al passo 1 o 2 salta al 3 senza chiamate | Un job in volo al deploy riprende senza sorprese. Cache (RF-84) invariata: il leader pubblica al passo del totale, la conferma senza carrello accoda un job da 2 chiamate |
+| Job di prenotazione | 3 chiamate: `PUT customer`, `PUT pax` con i `refId` `pax-1..N` senza `GET .../pax` (differenza #36), `POST /v1/bookings`; ogni passo salvato (RF-27). Ripiego: un 4xx su `PUT pax` porta a un passo con `get_pax` + `set_pax`, rimesso in coda per prendere i suoi gettoni | Una chiamata in meno per ordine pagato; un `refId` diverso non porta a `booking_failed` |
+| Riserva `booking` | Derivata da `Settings.expected_pay_share` = 0,05 (margine sul 2%): quota del ritmo = 3p / (2 + 3p) ≈ 7%, usata solo per l'attesa dichiarata (RF-48). La soglia del bucket sale da 2 a 3 gettoni, un booking intero | Con 3 chiamate per ordine pagato una percentuale fissa dipende da quanti pagano. La priorità vera resta la soglia |
+| Ordini silenziosi | Al prelievo del job d'acquisto: ordine `queued` senza SMS annunciato e senza segni di vita da `Settings.silent_order_minutes` = 15 → `expired`, zero chiamate, job chiuso, frase propria nel `say`. Stato esistente, nessuno stato nuovo in RF-25 | Chi ha sentito "ti mando il link per SMS" può tacere. Nel twist le attese dichiarate sono di ore: chi tace da 15 minuti senza SMS non vedrà il link |
+| Segni di vita | Migrazione 0016: `orders.last_seen_at TIMESTAMPTZ NULL`, aggiornata da `accept_proposal`, conferma e `get_order_status` al massimo ogni 60 s per ordine; nulla = `created_at` | `updated_at` lo scrivono anche i job. Schema approvato dall'utente |
+| Load test | Due giri C-2500 con i parametri di `RESULTS.md`: `--pay 0.02` (scenario dell'utente) e `--pay 0.60` (confronto con i giri precedenti). Il finto HofJ rifiuta il booking di un carrello senza cliente o passeggeri | Il primo mostra il guadagno, il secondo il costo di un pagamento e l'assenza di regressioni |
+| Load test, rettifica | Un solo giro, `--pay 0.02`: il giro `--pay 0.60` non si fa (scelta dell'utente durante l'esecuzione) | Il confronto con i giri precedenti a parità di paganti resta da fare se servirà |
+
+## 2026-09-27 — M19 passo 2: esecuzione e load test
+
+Implementazione delle decisioni del passo 2 (sopra) su `task/m19`. Numeri in `loadtest/RESULTS.md`
+("Dopo M19"). Nessuna chiamata a HofJ, Stripe o Anthropic dopo le due sonde del passo 1.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| **[misurato]** Load test | C-2500 con il 2% di paganti: 47,4 link/min a regime (prima 17,8), 2,11 chiamate per link, 3,00 per ordine prenotato, 0 429, massimo 104 in 60 s, 159 in coda alla fine (prima 360). Proiezione a 50.000: smaltimento 3,5 h (prima 9,4) | Il limite resta la quota; cambia il costo di un link |
+| `last_seen_at` con scrittura propria | `orders.touch` è l'unica scrittura dopo l'inserimento; `save`, `save_if_status` e `quotes.detach` non lo scrivono | `save` riscrive la riga letta prima: scrivere il segno di vita con `save` da `get_order_status` avrebbe potuto riportare indietro uno stato scritto dal worker nello stesso istante |
+| Scadenza prima dei gettoni | Il processore chiede `skip` al job prima di prendere gettoni; un ordine silenzioso chiude il job senza chiamate e senza consumare quota | Un ordine scaduto dopo aver preso i gettoni li avrebbe sprecati (i gettoni non tornano nel bucket) |
+| Frase dell'ordine scaduto in coda | `expired` senza `payment_url` = scaduto per silenzio (frase `say_expired_silent`); con `payment_url` = link scaduto (RF-21, frase di prima). Nessun campo nuovo | Il link a 24 h nasce solo con il link; un ordine scaduto in coda non l'ha mai avuto |
+| Replay dopo un riavvio | `ReplayHofJ` accetta `set_customer` e `set_pax` su un id `it-replay-…` di un processo precedente, come `create_booking`; un id di un altro tipo resta un errore | Cliente e pax arrivano dopo il pagamento: su Render in modo replay un riavvio tra link e pagamento avrebbe portato l'ordine pagato a `booking_failed` |
+| Modello del finto HofJ | Rifiuta con 400 il booking di un carrello senza cliente o con passeggeri senza nome; accetta cliente e pax in ogni momento, totale invariato | Le sonde; il rifiuto è prudente e non verificato su HofJ: fa emergere un job che salta quei passi |
+| Rischio aperto | Un 4xx di HofJ su cliente o pax dopo il pagamento porta a `booking_failed` con rimborso a mano. Verificato solo su staging con un PaymentIntent diretto | Domanda 10 da mandare a HofJ prima del primo giro `live` |
+| Test esistenti cambiati | **I 5 passi dell'acquisto:** `test_purchase_job` (2 chiamate; i test su cliente, pax e ripresa ai passi 1-2 riscritti sul passo del totale; ripresa di un job di prima ai passi 1-2; rinuncia tra i passi con un salvataggio intercettato), `test_booking_job` (cliente, pax, booking e ripiego), `test_queue_flow` (attese 258 s e 5 minuti, ripresa al passo 3, ≤ 5 minuti per 200 acquisti), `test_fake_hofj_app` e `test_fake_hofj_contract` (booking dopo cliente e pax con tutti i nomi). **Quota a 2/3 chiamate e soglia 3:** `quota_contract`, `test_quota_rules`, `test_quota_postgres`, `test_job_processor`, `test_config`, `test_health`, `test_sync` (conta solo i prelievi riusciti: con la soglia a 3 uno può essere rifiutato e ripetuto). **Attesa dichiarata (46,5 acquisti/min):** `test_usecases`, `test_rest`. **Chiamate del carrello:** `test_usecases` (cliente e pax verificati dopo il pagamento), `test_usecases_multibrand`, `test_brand_router` (cliente e pax una volta anche con un riavvio). **Altro:** `support.FakeHofJ` (`refId` `pax-1..N` come HofJ, `set_pax` rifiuta `refId` sconosciuti), `test_replay_adapters`, `test_migrations` (testa 0016), `test_payment_check`. `test_loadtest_journey` invariato: il viaggiatore finto non dipende dai passi | Nessuna asserzione indebolita: dove un numero cambia, il test fissa il nuovo valore esatto; dove un passo sparisce, lo stesso controllo è spostato sul job che ora lo fa |

@@ -74,12 +74,14 @@ class SettingsDefaultsTest(unittest.TestCase):
         s = Settings.from_env({})
         self.assertEqual(s.worker_concurrency, 10)          # M18
         self.assertEqual(s.quota_margin, 0.10)
-        self.assertEqual(s.booking_reserve, 0.20)
+        self.assertEqual(s.expected_pay_share, 0.05)          # M19
+        self.assertEqual(s.silent_order_minutes, 15)          # M19
+        self.assertAlmostEqual(s.booking_reserve, 0.15 / 2.15)   # M19: 3p / (2 + 3p)
         self.assertEqual(s.purchase_max_attempts, 3)
         self.assertEqual(s.booking_max_attempts, 5)
         self.assertEqual(s.booking_backoff, (5, 10, 20, 40))
-        self.assertEqual(s.job_lease_seconds, 180)          # M18: 5 × 20 s più margine
-        self.assertEqual((s.quota_burst, s.quota_floor), (8, 2))
+        self.assertEqual(s.job_lease_seconds, 180)          # M18: 3 × 20 s (booking, M19) più margine
+        self.assertEqual((s.quota_burst, s.quota_floor), (8, 3))   # M19: soglia = un booking
         self.assertEqual(s.payment_poll_seconds, 60)
         self.assertEqual((s.accept_wait_seconds, s.accept_poll_seconds), (100, 1.0))   # 2026-09-26
         self.assertEqual(s.replay_latency, (0.0, 0.0))

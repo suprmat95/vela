@@ -6,6 +6,9 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Tuple
 
+from vela.domain.quota import DEFAULT_FLOOR, DEFAULT_PAY_SHARE
+from vela.domain.quota import booking_reserve as reserve_for
+
 DEFAULT_UPSTREAM_MODE = "replay"
 BRAND_SPORTS = ("padel", "tennis")
 
@@ -73,19 +76,25 @@ class Settings:
     # × 2-6 s di latenza ≈ 6-9 chiamate contemporanee.
     worker_concurrency: int = 10                       # RF-50, thread per istanza
     quota_margin: float = 0.10                         # limite effettivo = limitPerMinute × 0,9
-    booking_reserve: float = 0.20                      # RF-48: quota del ritmo non contata per gli acquisti
+    expected_pay_share: float = DEFAULT_PAY_SHARE      # M19: quota attesa di chi paga il link, per RF-48
     quota_burst: int = 8                               # M18: capienza B, con B + 60·r = limite effettivo
-    quota_floor: int = 2                               # M18: gettoni che purchase e sync lasciano ai booking
+    quota_floor: int = DEFAULT_FLOOR                   # M18, M19: gettoni che purchase e sync lasciano ai booking
     purchase_max_attempts: int = 3                     # RF-46
     booking_max_attempts: int = 5                      # RF-24
     booking_backoff: Tuple[int, ...] = (5, 10, 20, 40)  # secondi tra i tentativi di booking
-    job_lease_seconds: int = 180                       # M18: 5 chiamate × 20 s di timeout + link e margine
+    job_lease_seconds: int = 180                       # M18: 3 chiamate × 20 s di timeout (booking, M19) + margine
     payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
     accept_wait_seconds: int = 100                     # accept aspetta prezzo e link (2026-09-26), < 120 s di ElevenLabs
     accept_poll_seconds: float = 1.0                   # rilettura dell'ordine durante l'attesa
     price_quote_ttl_seconds: int = 900                 # RF-84: vita del prezzo in cache; 0 = cache e fanout spenti
+    silent_order_minutes: int = 15                     # M19: ordine in coda senza segni di vita → expired; 0 = mai
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
+
+    @property
+    def booking_reserve(self) -> float:
+        """RF-48, M19: parte del ritmo delle prenotazioni, derivata da `expected_pay_share`."""
+        return reserve_for(self.expected_pay_share)
 
     @classmethod
     def from_env(cls, environ: Optional[Mapping[str, str]] = None) -> "Settings":

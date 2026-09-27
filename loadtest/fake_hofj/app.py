@@ -8,6 +8,10 @@ Forme reali (`docs/api/internal-checkout.md`, `docs/api/quota-health.md`): envel
 `{data, meta: {now}}`, errori RFC 7807 in `application/json`, `openAmount.amount` stringa,
 `pax-1` precompilato dal customer, 429 con `retryAfterSeconds` nel corpo e senza header,
 `POST /v1/bookings` → `{data: "<itineraryId>"}` (upsert per itinerario, come osservato).
+M19 (sonde del 2026-09-27, `docs/api/customer-pax.md`): i `refId` `pax-1..N` esistono dalla
+creazione, cliente e passeggeri si accettano in qualsiasi momento e non cambiano il totale; il
+booking di un carrello senza cliente o senza nomi dei passeggeri è rifiutato con 400 (modello
+prudente, non verificato su HofJ).
 
 Ordine di ogni chiamata: autenticazione → quota → guasto → latenza → esecuzione. Le rotte
 `/_fake/*` e `/health` non consumano quota.
@@ -248,7 +252,11 @@ class FakeHofJ:
 
     def create_booking(self, body: dict) -> str:
         iid = str(body.get("itineraryId") or "")
-        self._itinerary(iid)
+        it = self._itinerary(iid)
+        if it["customer"] is None or not all(p.first_name for p in it["pax"]):
+            # M19, modello prudente: il booking di un carrello senza cliente o passeggeri non
+            # parte. Non verificato su HofJ; fa emergere nel banco un job che salta quei passi.
+            raise FakeError(400, "bad-request", "Bad Request", "itinerary without customer or passengers")
         self.bookings[iid] = self.bookings.get(iid, 0) + 1
         return iid
 

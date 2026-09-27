@@ -26,6 +26,9 @@ USE_CASES = ("create_intent", "get_proposal", "reject_proposal", "accept_proposa
 QUOTA_LINE = 108          # limite effettivo di Vela: 120 × 0,9
 ITINERARY_CREATE = "POST /v1/itineraries"
 BOOKING = "POST /v1/bookings"
+PURCHASE_ENDPOINTS = (ITINERARY_CREATE, "GET /v1/itineraries/{id}")                 # M19: il link
+BOOKING_ENDPOINTS = ("PUT /v1/itineraries/{id}/customer", "PUT /v1/itineraries/{id}/pax",
+                     "GET /v1/itineraries/{id}/pax", BOOKING)                         # M19: dopo il pagamento
 FAILED = {"failed", "booking_failed", "cancelled", "expired", "replaced"}
 
 
@@ -120,6 +123,16 @@ def booking_measures(calls: List[dict], end: float, grace: float = 60.0) -> dict
             "orphan_itineraries": len(orphans)}
 
 
+def cost_measures(by_endpoint: Dict[str, int], links: int, booked: int) -> dict:
+    """M19: chiamate del carrello per link e di cliente, pax e booking per itinerario prenotato.
+    I carrelli in volo alla fine del giro contano senza link: il rapporto è per eccesso."""
+    purchase = sum(by_endpoint.get(e, 0) for e in PURCHASE_ENDPOINTS)
+    booking = sum(by_endpoint.get(e, 0) for e in BOOKING_ENDPOINTS)
+    return {"purchase_calls": purchase, "booking_calls": booking,
+            "calls_per_link": round(purchase / links, 2) if links else None,
+            "calls_per_paid_order": round(booking / booked, 2) if booked else None}
+
+
 def traveler_measures(travelers: List[dict], duration: float) -> dict:
     accepted = [t for t in travelers if "t_accept" in t]
     linked = [t for t in accepted if "t_link" in t]
@@ -177,9 +190,11 @@ def build(calls: List[dict], events: List[dict], stats: Dict[str, dict]) -> dict
     travelers = [e for e in events if e.get("type") == "traveler"]
     duration = (run["arrival_minutes"] + run["tail_minutes"]) * 60
     start = run["epoch_start"]
-    return {"run": run, "quota": quota_measures(calls, start, start + duration),
-            "bookings": booking_measures(calls, start + duration),
-            "travelers": traveler_measures(travelers, duration),
+    quota = quota_measures(calls, start, start + duration)
+    bookings = booking_measures(calls, start + duration)
+    people = traveler_measures(travelers, duration)
+    return {"run": run, "quota": quota, "bookings": bookings, "travelers": people,
+            "cost": cost_measures(quota["by_endpoint"], people["links"], bookings["booked_itineraries"]),
             "use_cases": {name: stats.get(name) for name in USE_CASES + ("replay_checkout",)}}
 
 
@@ -215,7 +230,10 @@ def markdown(report: dict, label: str) -> str:
              "| Itinerari creati / prenotati | %d / %d |" % (b["itineraries"], b["booked_itineraries"]),
              "| POST di booking per itinerario, massimo (itinerari con più di una) | %d (%d) |"
              % (b["booking_posts_max_per_itinerary"], b["itineraries_booked_more_than_once"]),
-             "| Itinerari orfani | %d |" % b["orphan_itineraries"], ""]
+             "| Itinerari orfani | %d |" % b["orphan_itineraries"],
+             "| Chiamate per link (carrello) / per ordine prenotato (cliente, pax, booking) | %s / %s |"
+             % (_fmt(report["cost"]["calls_per_link"], 2), _fmt(report["cost"]["calls_per_paid_order"], 2)),
+             ""]
     for role, name in (("marco", "Marco (accetta a 60 s)"), ("anna", "Anna (arriva al 60% della finestra)")):
         s = t.get(role)
         if s:

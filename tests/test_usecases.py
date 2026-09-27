@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
+from vela.domain import say
 from vela.domain.intent import QUESTION_PAX
 from vela.domain.models import (Area, IntentCreated, IntentQuestion, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, OrderQueued, OrderStatus,
@@ -298,9 +300,9 @@ class AcceptProposalTest(unittest.TestCase):
         vela, _, proposal = accepted_vela()
         r = vela.accept_proposal(proposal.proposal.id, FULL)
         self.assertIsInstance(r, OrderQueued)
-        self.assertEqual((r.status, r.position, r.wait_seconds), (OrderStatus.QUEUED, 1, 4))
+        self.assertEqual((r.status, r.position, r.wait_seconds), (OrderStatus.QUEUED, 1, 2))   # 60 ÷ 46,5 per eccesso (M19)
         self.assertEqual(r.to_dict(), {"order_id": r.order_id, "status": "queued", "position": 1,
-                                       "wait_seconds": 4, "say": r.say})
+                                       "wait_seconds": 2, "say": r.say})
         self.assertIn("prezzo effettivo", r.say)
         self.assertIn("un minuto", r.say)
         self.assertEqual(vela.hofj.calls, [])
@@ -330,7 +332,7 @@ class AcceptProposalTest(unittest.TestCase):
         first = vela.accept_proposal(proposal.proposal.id, FULL)
         second = accept_second_intent(vela)
         self.assertEqual((first.position, second.position), (1, 2))
-        self.assertEqual(second.wait_seconds, 8)             # 2 × 60 ÷ 16 per eccesso (M18)
+        self.assertEqual(second.wait_seconds, 3)             # 2 × 60 ÷ 46,5 per eccesso (M19)
 
     def test_profile_from_intent_is_enough(self):
         vela = make_vela()
@@ -349,7 +351,8 @@ class AcceptProposalTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             make_vela().accept_proposal("nope", FULL)
 
-    def test_the_job_prepares_itinerary_customer_pax_and_link(self):
+    def test_the_job_prepares_itinerary_and_link_then_booking_sends_customer_and_pax(self):
+        """M19: 2 chiamate prima del link; cliente e passeggeri nel job di prenotazione."""
         vela, _, proposal = accepted_vela()
         r = vela.accept_proposal(proposal.proposal.id, FULL)
         worker = inline_worker(vela)
@@ -361,21 +364,25 @@ class AcceptProposalTest(unittest.TestCase):
         vela.accept_proposal(proposal.proposal.id)           # la conferma
         worker.drain()
         calls = [c[0] for c in vela.hofj.calls]
-        self.assertEqual(calls, ["get_quota", "create_itinerary", "set_customer", "get_pax", "set_pax",
-                                 "get_itinerary"])          # il link non chiama HofJ
+        self.assertEqual(calls, ["get_quota", "create_itinerary", "get_itinerary"])   # il link non chiama HofJ
         self.assertEqual(vela.hofj.calls[1][1:], ("3", date(2026, 10, 1), 2, 1, "EUR"))
-        customer = vela.hofj.calls[2][2]
-        self.assertEqual((customer.first_name, customer.email), ("Anna", "anna@x.it"))
-        self.assertEqual((customer.city, customer.country_code),
-                         (DEFAULT_TRAVELER.city, DEFAULT_TRAVELER.country_code))
-        pax = vela.hofj.calls[4][2]
-        self.assertEqual([(p.ref_id, p.first_name, p.last_name) for p in pax],
-                         [("ref-0", "Anna", "Rossi"), ("ref-1", "Bo", "Bi")])
         order = vela.repos.orders.get(r.order_id)
         self.assertEqual((order.status, order.itinerary_id, order.total, order.payment_ref),
                          (OrderStatus.AWAITING_PAYMENT, "it-3", Decimal("700"), "pi_" + r.order_id))
         product = vela.repos.products.get(proposal.proposal.product_id)
         self.assertEqual(vela.payments.descriptions, [product.title])
+        vela.orders.mark_paid(r.order_id, "pi_" + r.order_id)
+        worker.drain()
+        calls = [c[0] for c in vela.hofj.calls]
+        self.assertEqual(calls[3:], ["set_customer", "set_pax", "create_booking"])
+        customer = vela.hofj.calls[3][2]
+        self.assertEqual((customer.first_name, customer.email), ("Anna", "anna@x.it"))
+        self.assertEqual((customer.city, customer.country_code),
+                         (DEFAULT_TRAVELER.city, DEFAULT_TRAVELER.country_code))
+        pax = vela.hofj.calls[4][2]
+        self.assertEqual([(p.ref_id, p.first_name, p.last_name) for p in pax],
+                         [("pax-1", "Anna", "Rossi"), ("pax-2", "Bo", "Bi")])
+        self.assertEqual(vela.repos.orders.get(r.order_id).status, OrderStatus.CONFIRMED)
 
     def test_accept_on_replacement_inherits_enqueued_at(self):
         """RF-17: il nuovo ordine sulla proposta sostitutiva passa davanti a chi è arrivato dopo."""
@@ -583,6 +590,57 @@ class RejectQueuedTest(unittest.TestCase):
         self.assertTrue(vela.reject_proposal(proposal.proposal.id, "no").say.startswith("I've cancelled the order. "))
 
 
+class SignsOfLifeTest(unittest.TestCase):
+    """M19: accettazione, conferma e richieste di stato sono segni di vita (`last_seen_at`)."""
+
+    def queued(self):
+        vela, _, proposal = accepted_vela()
+        vela.accept_wait_seconds = 0
+        r = vela.accept_proposal(proposal.proposal.id, FULL)
+        return vela, proposal, r.order_id
+
+    def test_accept_is_a_sign_of_life(self):
+        vela, _, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        self.assertEqual(order.last_seen_at, order.created_at)
+
+    def test_status_request_is_a_sign_of_life(self):
+        vela, _, oid = self.queued()
+        vela.now.at += timedelta(minutes=10)
+        vela.get_order_status(oid)
+        self.assertGreaterEqual(vela.repos.orders.get(oid).last_seen_at, NOW + timedelta(minutes=10))
+
+    def test_status_requests_write_at_most_once_a_minute(self):
+        vela, _, oid = self.queued()
+        vela.now.at += timedelta(minutes=10)
+        vela.get_order_status(oid)
+        seen = vela.repos.orders.get(oid).last_seen_at
+        vela.now.at += timedelta(seconds=30)
+        vela.get_order_status(oid)
+        self.assertEqual(vela.repos.orders.get(oid).last_seen_at, seen)
+
+    def test_confirmation_is_a_sign_of_life(self):
+        vela, proposal, oid = self.queued()
+        inline_worker(vela).drain()
+        vela.now.at += timedelta(minutes=10)
+        vela.accept_proposal(proposal.proposal.id)                   # la conferma
+        self.assertGreaterEqual(vela.repos.orders.get(oid).last_seen_at, NOW + timedelta(minutes=10))
+
+    def test_silent_expiry_has_its_own_sentence(self):
+        vela, proposal, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.EXPIRED))
+        r = vela.get_order_status(oid)
+        self.assertEqual((r.status, r.say), (OrderStatus.EXPIRED, say.say_expired_silent("it")))
+        self.assertEqual(vela.accept_proposal(proposal.proposal.id).say, say.say_expired_silent("it"))
+
+    def test_expired_link_keeps_its_sentence(self):
+        vela, _, oid = self.queued()
+        order = vela.repos.orders.get(oid)
+        vela.repos.orders.save(replace(order, status=OrderStatus.EXPIRED, payment_url="http://pay.test/x"))
+        self.assertIn("link di pagamento è scaduto", vela.get_order_status(oid).say)
+
+
 class OrderStatusTest(unittest.TestCase):
     """RF-25, RF-39, RF-48: stessi campi per ogni stato, `null` quando non pertinenti."""
     KEYS = {"order_id", "status", "position", "wait_seconds", "total", "currency", "price_from_total",
@@ -595,7 +653,7 @@ class OrderStatusTest(unittest.TestCase):
         d = vela.get_order_status(oid).to_dict()
         self.assertEqual(set(d), self.KEYS)
         self.assertEqual((d["status"], d["position"], d["wait_seconds"], d["total"], d["payment_url"],
-                          d["proposal_changed"], d["proposal"]), ("queued", 1, 4, None, None, False, None))
+                          d["proposal_changed"], d["proposal"]), ("queued", 1, 2, None, None, False, None))
         self.assertIn("un minuto", d["say"])
         assert_single_product(self, d)
 
@@ -607,7 +665,7 @@ class OrderStatusTest(unittest.TestCase):
         worker = inline_worker(vela)
         worker.processor.run_once()                       # il primo acquisto è fatto
         r = vela.get_order_status(second.order_id)
-        self.assertEqual((r.position, r.wait_seconds), (1, 4))
+        self.assertEqual((r.position, r.wait_seconds), (1, 2))
 
     def test_queued_in_progress_has_no_position(self):
         vela, _, proposal = accepted_vela()
