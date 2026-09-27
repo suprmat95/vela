@@ -94,6 +94,7 @@ def locust_command(args, run_dir: str) -> List[str]:
             "--csv", os.path.join(run_dir, "locust"),
             "--travelers", str(args.travelers), "--arrival-minutes", str(args.arrival_minutes),
             "--tail-minutes", str(args.tail_minutes), "--scenario-seed", str(args.seed),
+            "--pay", str(args.pay),
             "--events-out", os.path.join(run_dir, "travelers.jsonl")]
 
 
@@ -106,6 +107,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--arrival-minutes", type=float, help="default: 2/3 di --duration")
     ap.add_argument("--tail-minutes", type=float, help="default: il resto di --duration")
     ap.add_argument("--seed", type=int, default=13)
+    ap.add_argument("--pay", type=float, default=0.60,
+                    help="quota di chi riceve il link e paga (default 0,60; M19: 0,02)")
     ap.add_argument("--vela", default=os.environ.get("VELA_URL", "http://vela:8000"))
     ap.add_argument("--fake", default=os.environ.get("FAKE_HOFJ_URL", "http://fake-hofj:8001"))
     ap.add_argument("--calls", default=os.path.join(ROOT, "loadtest", "out", "calls.jsonl"),

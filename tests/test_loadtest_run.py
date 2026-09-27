@@ -34,8 +34,9 @@ class RunTest(unittest.TestCase):
 
     def test_locust_command(self):
         args = argparse.Namespace(arrival_minutes=10.0, tail_minutes=5.0, vela="http://vela:8000",
-                                  travelers=50000, seed=13)
+                                  travelers=50000, seed=13, pay=0.02)
         cmd = locust_command(args, "/out/50k")
+        self.assertEqual(cmd[cmd.index("--pay") + 1], "0.02")               # M19
         self.assertEqual(cmd[cmd.index("--run-time") + 1], "960s")   # giro + 60 s per chiudere
         self.assertEqual(cmd[cmd.index("--travelers") + 1], "50000")
         self.assertIn("--headless", cmd)
