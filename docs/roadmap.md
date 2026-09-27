@@ -86,7 +86,7 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M21-F | Rifiuti con motivo sempre capito | L | M21-A, M21-B, M21-C, M21-D | 7 / — |
 | M22 | Scelta dell'hotel con degrado dinamico (due task: a, b) | L | M21-D, M21-F | 8 / — |
 | M22-a | Bozza, sonda su `/accommodations`, verdetto | S-M | — | 8 / tutte (niente codice in `vela/`) |
-| M22-b | Cambio di hotel a coda vuota | L | M22-a (verdetto "sì"), M21-D, M21-F | 8 / nessuna che tocchi `usecases.py`, `quota.py`, `purchase.py` |
+| M22-b | Cambio di hotel a coda vuota (**non si fa**: verdetto di M22-a) | L | M22-a (verdetto "sì"), M21-D, M21-F | 8 / nessuna che tocchi `usecases.py`, `quota.py`, `purchase.py` |
 
 Regola per i worktree: le task della stessa ondata toccano file diversi salvo
 `vela/domain/orders.py` (M5, M6), `vela/domain/intent.py` (M9, M11) e
@@ -1097,6 +1097,11 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 ---
 
 ## M22 — Scelta dell'hotel con degrado dinamico
+
+**Stato (2026-09-27).** M22-a conclusa con il verdetto **"M22-b non si fa"**: la sonda non ha
+mai visto un `PATCH` possibile (`docs/api/accommodations.md`). Condizioni per riaprire in
+`docs/decisions.md` (2026-09-27, "M22-a", "Sonda e verdetto"). Il resto della sezione è il
+piano, tenuto come archivio.
 
 **Risultato.** Su un ordine in `awaiting_confirmation` il viaggiatore può rifiutare l'hotel,
 con o senza una preferenza (più vicino al campo, più economico, più stelle, recensioni

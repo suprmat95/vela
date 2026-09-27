@@ -975,3 +975,22 @@ dove diverse; la bozza è già aggiornata (§10).
 | Altre domande (raccomandazioni della bozza) | Nessun tetto ai cambi per ordine; hotel sceglibile letto dal JSON grezzo del prodotto; ordine non in conferma → RF-72; tre riletture del totale fallite → ordine `failed` con motivo leggibile; "torna all'hotel di prima" fuori da M22 | Scelta dell'utente: "segui le tue raccomandazioni" |
 | Migrazione 0014 | Approvata come proposta: cinque campi su `orders` (`hotel_name`, `accommodation_id`, `hotel_preference`, `rejected_accommodations`, `hotel_change`) | Tipo di job e classe di quota senza migrazione |
 | ARCHITECTURE.md | Sul branch `doc/architecture`: il nuovo ordine di sacrificio (catalogo → scelta dell'hotel → attesa del link → mai le prenotazioni pagate) va in §5.2 (bilancio della quota), l'esperienza del viaggiatore a coda piena in §5.3 (il minuto sei) | Correzione dell'utente sui riferimenti del piano |
+
+### Sonda e verdetto (2026-09-27)
+
+Sonda `scripts/accommodations_probe.py` su staging, 11 chiamate HofJ su 13 approvate
+dall'utente (12 del piano più 1 per il giro sul prodotto 25), nessun booking, nessuna chiamata
+Stripe. Esiti in `docs/api/accommodations.md`, differenze #28-#35 in
+`docs/api/differences.md`, domande 11-13 in `docs/hofj-questions.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| `.env` | L'utente ha chiesto di usare `.env`: caricato con `set -a; . ./.env` nel solo processo della sonda, senza aprirlo né stamparlo, con `HOFJ_BASE_URL` forzato su staging | Eccezione esplicita dell'utente alla regola "mai aprire `.env`"; il valore forzato evita un host di produzione eventualmente scritto nel file |
+| Giro sul prodotto 25 | Dopo 8 chiamate con tre liste vuote, 3 chiamate su un prodotto con `allowAccommodationList: true` (l'unico su staging), approvate dall'utente come 5 massimo | Verificare l'ipotesi "la lista esiste solo con `allowAccommodationList`" |
+| Chiamate non fatte | Nessun `PATCH` e nessuna rilettura del totale: nessun hotel con `roomsConfiguration` non vuota. Le 2 chiamate approvate e non usate non sono state spese su chiamate diverse da quelle concordate | Senza `roomIds` il `PATCH` non si può scrivere |
+| Itinerari orfani | `arjeuuuzzw9s` (124), `fcocq0pgspd1` (28), `p8htf0mqbarg` (124, 2 camere), `phtjys9d6rip` (25), su `staging.weebora.com`; nessun pagamento, nessun booking | Come nelle sonde di M5 |
+| Latenza di `/accommodations` | 1,5-2,1 s su 4 misure, anche con la lista vuota | Un cambio di 3 chiamate starebbe nel tetto di 100 s |
+| **Verdetto: M22-b non si fa** | M22 si chiude con M22-a. Bozza, casi d'uso e decisioni restano come archivio pronto. Criterio dell'utente: "se il `PATCH` non è affidabile, M22 si chiude qui". Il `PATCH` non è stato visto funzionare nemmeno una volta: su 4 itinerari nessun hotel con camere da mandare | Costruire job, classe di quota, migrazione e contratto nuovo su una chiamata mai osservata vorrebbe dire scoprire in produzione se funziona. Inoltre la lista esiste di fatto solo con `allowAccommodationList` (1 prodotto su 56 a staging, 8 su 126 in produzione): il vincolo 4 ("`hotelSelection` o `allowAccommodationList`") coprirebbe quasi solo prodotti senza lista |
+| Condizioni per riaprire M22 | Risposte di HofJ alle domande 11-13, oppure una sonda approvata su un prodotto di produzione con `allowAccommodationList` (323, 326, 985, 1059, 1065 padel; 372, 795, 1007 tennis) che mostri `roomsConfiguration`, `PATCH` e totale. Alla riapertura, il vincolo 4 va ristretto ad `allowAccommodationList` | La bozza non cambia: cambiano solo i prodotti a cui si applica |
+| Scoperta fuori da M22 (aperta) | Sul prodotto 25 l'itinerario non ha un hotel preselezionato (differenza #30): un acquisto di oggi su un prodotto con `allowAccommodationList` potrebbe essere prenotato senza hotel. **Non deciso**: da portare all'utente (opzioni: escludere questi prodotti dal chooser, controllare `accommodation` nel passo del totale e trattarlo come errore del prodotto, oppure aspettare la risposta alla domanda 13) | Tocca RF-15 e RF-17 di oggi, non il cambio di hotel |
+| `ARCHITECTURE.md` | Testi per §5.2 e §5.3 (branch `doc/architecture`) in `docs/plans/2026-09-27-m22-architecture.md`, in due varianti: senza M22-b (quella che vale ora) e con M22-b (per la riapertura) | Richiesta dell'utente |
