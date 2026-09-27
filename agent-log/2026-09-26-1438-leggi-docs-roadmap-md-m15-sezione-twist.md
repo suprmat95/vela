@@ -1231,3 +1231,27 @@ Lascio perdere il load test e faccio l'opzione 1, cioè solo testo in `ARCHITECT
 - 🔧 Bash: Rewrite the conversation-load claims honestly
 
 - 🔧 Bash: Record decision, verify, and commit
+
+Ho aggiornato `ARCHITECTURE.md` con l'opzione 1, solo testo (commit `6f4c0da`, nessun push). Il load test non è partito.
+
+**Cosa dice adesso**
+- **§4.1 e §4.3:** "la conversazione non degrada mai" non è più un'affermazione assoluta. Resta vero che non usa quota HofJ a nessun carico e che chi ha pagato viene sempre confermato. Il tempo di risposta però è misurato solo fino a 34 req/s su un'istanza (p95 peggiore 220 ms, zero errori); a 50.000 viaggiatori dipende da quante istanze girano.
+- **§4.5:** ho scomposto i ~420 req/s previsti: circa 208 dagli arrivi e circa 212 da chi aspetta in coda e chiede lo stato.
+  - Se un'istanza reggesse solo i 34 req/s misurati, servirebbero **al massimo circa 13 istanze**. È una stima, e vale solo se il carico si divide bene tra le istanze e Postgres tiene. Nessuna delle due cose è verificata.
+  - Il banco sottostima il carico reale per due motivi, ora scritti. In `loadtest` l'accept non aspetta, mentre in `live` tiene un thread fino a 100 s. E ogni proposta rilegge tutto il catalogo, perché non c'è una cache per istanza.
+- **§7:** il test a gradini è tra le cose da misurare.
+- Ho aggiunto una voce in `decisions.md`. Test verdi e ruff pulito.
+
+Lo stack `master-*` dell'altro worktree è ancora spento. L'ho fermato senza cancellarlo: si riaccende con `docker start master-postgres-1 master-fake-hofj-1 master-vela-1`. Del load test mai avviato restano solo le immagini buildate col nome `capacity` e tre script nello scratchpad; nessun container è acceso.
+
+## Utente 19:40
+
+in The path of a purchase manca la possibilità di chiedere maggiori info su un viagigo
+
+## Agente 19:40
+
+- 🔧 Bash: Check what get_proposal_details does and costs
+
+- 🔧 Bash: Locate the rejection row in the purchase table
+
+- 🔧 Bash: Insert details step and renumber the table

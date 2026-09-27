@@ -69,12 +69,13 @@ Two consequences shape everything else:
 |---|---|---|
 | 1 | `create_intent`: parse the sentence (or take the agent's structured fields); ask "padel or tennis?" if the sport is missing | 0 |
 | 2 | `get_proposal`: the chooser reads the catalogue **from Postgres** and returns one trip with a "from" price and its reasons | 0 |
-| 3 | `reject_proposal`: the reason becomes criteria ("too expensive", "somewhere cooler" → north, "not that hotel"); a new single proposal | 0 |
-| 4 | `accept_proposal`: create a `queued` order, never call HofJ or Stripe. If the price for the same product, date and party is cached, answer at once; otherwise wait up to 100 s for the purchase job to price it | 0 |
-| 5 | Purchase job: `POST /v1/itineraries` (includes the default hotel, 2–6 s) and `GET` the total → `awaiting_confirmation`, "the actual price is 840 euro for two, confirm?" | 2 |
-| 6 | Second `accept_proposal` = confirmation → Stripe Checkout Session → `awaiting_payment`, link read via `get_order_status` (and by SMS) | 0 |
-| 7 | `payment_check` job reads the Checkout Session every 60 s and whenever the traveller asks | 0 |
-| 8 | Booking job: `PUT customer`, `PUT pax`, `POST /v1/bookings` with the PaymentIntent → `confirmed`, code by status and SMS | 3 |
+| 3 | `get_proposal_details` (optional, any time): "what's included?" → the day-by-day programme, hotel, club, playing hours, from the product details the sync already stored. Read-only: no state change, works on a rejected proposal too | 0 |
+| 4 | `reject_proposal`: the reason becomes criteria ("too expensive", "somewhere cooler" → north, "not that hotel"); a new single proposal | 0 |
+| 5 | `accept_proposal`: create a `queued` order, never call HofJ or Stripe. If the price for the same product, date and party is cached, answer at once; otherwise wait up to 100 s for the purchase job to price it | 0 |
+| 6 | Purchase job: `POST /v1/itineraries` (includes the default hotel, 2–6 s) and `GET` the total → `awaiting_confirmation`, "the actual price is 840 euro for two, confirm?" | 2 |
+| 7 | Second `accept_proposal` = confirmation → Stripe Checkout Session → `awaiting_payment`, link read via `get_order_status` (and by SMS) | 0 |
+| 8 | `payment_check` job reads the Checkout Session every 60 s and whenever the traveller asks | 0 |
+| 9 | Booking job: `PUT customer`, `PUT pax`, `POST /v1/bookings` with the PaymentIntent → `confirmed`, code by status and SMS | 3 |
 
 ---
 
