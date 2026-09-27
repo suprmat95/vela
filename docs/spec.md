@@ -16,7 +16,9 @@ RF-46, RF-49 e RNF-05 aggiornati il 2026-09-26 per la conferma del prezzo effett
 del link. RNF-04 aggiornato il 2026-09-27 per l'attesa dell'accettazione (roadmap M20). RF-84
 aggiunto e RF-14, RF-16, RF-45, RF-46, RF-48, RF-49 aggiornati il 2026-09-27 per la cache del
 prezzo con fanout (roadmap M23,
-`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`). Origine: `docs/brief.md` e
+`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`). RF-14, RF-21, RF-23, RF-25,
+RF-45..48, RF-51 e l'introduzione di §4.10 aggiornati il 2026-09-27 per M19 (link con 2 chiamate,
+cliente e passeggeri dopo il pagamento, ordini silenziosi; sonde in `docs/api/customer-pax.md`). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -142,10 +144,11 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   compilati con valori di default dichiarati nella configurazione e documentati in
   `ARCHITECTURE.md` come vincolo del prototipo.
 - **RF-14** Il job d'acquisto (RF-46) crea l'itinerario HofJ (`POST /v1/itineraries` con prodotto,
-  data di inizio, adulti, camere dell'ordine (RF-67, M21; prima era sempre 1), valuta EUR),
-  imposta il cliente (`PUT .../customer`), legge
-  gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`). Il
-  carrello di un ordine servito dalla cache del prezzo nasce dopo il sì (RF-84).
+  data di inizio, adulti, camere dell'ordine (RF-67, M21; prima era sempre 1), valuta EUR) e ne
+  legge il totale. Cliente (`PUT .../customer`) e passeggeri (`PUT .../pax` con i `refId`
+  `pax-1..N`, che esistono dalla creazione) si impostano dopo il pagamento, nel job di
+  prenotazione (RF-23, M19): il totale non dipende da loro. Il carrello di un ordine servito
+  dalla cache del prezzo nasce dopo il sì (RF-84).
 - **RF-15** Vela accetta la sistemazione di default dell'itinerario. Non sceglie hotel
   alternativi né aggiunge attività: il prodotto HofJ è già "esperienza + hotel".
 - **RF-16** Vela legge il totale reale dall'itinerario. La proposta dice il prezzo "a partire da"
@@ -184,15 +187,20 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   `POST /v1/bookings`. Una verifica ripetuta non produce effetti doppi (decisione del
   2026-09-25, M5).
 - **RF-21** Vela non riceve, memorizza né inoltra dati di carta. Il link scade dopo 24 ore;
-  un ordine con link scaduto passa a `expired`.
+  un ordine con link scaduto passa a `expired`. Passa a `expired`, senza link, anche un ordine
+  in coda il cui viaggiatore tace (RF-45, M19).
 - **RF-22** Un solo pagamento per ordine, tipo `full`. Nessun pagamento a rate, nessun promo
   code, nessuna valuta diversa da EUR.
 
 ### 4.5 Prenotazione e consegna del codice
 
-- **RF-23** Dopo il pagamento Vela chiama `POST /v1/bookings` con `itineraryId`,
-  `paymentType: "full"`, `paymentIntentId` e `paymentStatus` ricevuti da Stripe. Il codice
-  restituito viene salvato e l'ordine passa a `confirmed`.
+- **RF-23** Dopo il pagamento un job di prenotazione imposta sull'itinerario il cliente
+  (`PUT .../customer`, dati del viaggiatore e default di RF-13) e i passeggeri (`PUT .../pax` con
+  i `refId` `pax-1..N`; se HofJ risponde 4xx, li legge con `GET .../pax` e riprova), poi chiama
+  `POST /v1/bookings` con `itineraryId`, `paymentType: "full"`, `paymentIntentId` e
+  `paymentStatus` ricevuti da Stripe. Ogni passo salva il proprio esito (RF-27). Il codice
+  restituito viene salvato e l'ordine passa a `confirmed` (M19: HofJ accetta cliente e
+  passeggeri su un itinerario pagato, verificato su staging il 2026-09-27).
 - **RF-24** La chiamata di prenotazione è ripetibile: HofJ tratta `POST /v1/bookings` come
   upsert per itinerario, e Vela ripete la chiamata su errore di rete o 5xx con backoff, fino a
   un numero massimo configurato, poi marca l'ordine `booking_failed` con il motivo.
@@ -200,7 +208,9 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   La risposta contiene lo stato, l'attesa stimata se `queued` (RF-48), totale reale e stima se
   `awaiting_confirmation` (RF-16), link e importo se `awaiting_payment`, la proposta sostitutiva se `replaced` (RF-17), il codice di prenotazione
   se `confirmed`, il motivo leggibile se `failed` o `booking_failed`, e una frase pronta da
-  leggere ("La tua prenotazione è confermata, codice R-789012"). Stati possibili: `queued`,
+  leggere ("La tua prenotazione è confermata, codice R-789012"). `expired` ha due frasi: link
+  scaduto (RF-21) o ordine chiuso in coda per silenzio del viaggiatore, senza nulla da pagare
+  (RF-45, M19). Stati possibili: `queued`,
   `awaiting_confirmation`, `awaiting_payment`, `paid_pending_booking`, `confirmed`, `replaced`, `cancelled`, `failed`,
   `booking_failed`, `expired`.
 - **RF-26** Il codice di prenotazione resta disponibile tramite `get_order_status` senza
@@ -345,9 +355,10 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
 Origine: twist del 2026-09-25 ("Vela ha appena chiuso un accordo di distribuzione": 50.000
 viaggiatori in dieci minuti). Analisi e decisioni in `docs/decisions.md`. Il vincolo che non
-si sposta è la quota HofJ: con 120 chiamate al minuto e 5 chiamate per acquisto prima del link
-più una per la prenotazione, Vela completa al massimo 20 acquisti al minuto per client. Il
-design trasforma questo tetto in attesa dichiarata invece che in errori.
+si sposta è la quota HofJ: con 120 chiamate al minuto, 2 chiamate per link e 3 per ogni ordine
+pagato (M19; prima 5 e 1), il tetto dipende da quanti pagano: circa 48 link al minuto se paga il
+2%, circa 26 se paga il 60%. Il design trasforma questo tetto in attesa dichiarata invece che in
+errori, e non spende chiamate su chi ha smesso di chiedere.
 
 - **RF-45** `accept_proposal` valida i dati del viaggiatore (RF-12), crea l'ordine in stato
   `queued` con posizione in coda e attesa stimata, senza chiamare HofJ né Stripe. Poi aspetta
@@ -357,9 +368,15 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   `queued` e la frase `say` dichiara l'attesa in minuti, arrotondata per eccesso. In modalità
   `loadtest` il tetto è zero (decisione del 2026-09-26). Con un prezzo in cache risponde subito
   `awaiting_confirmation`; con un prezzo in volo per la stessa chiave l'ordine si aggancia al
-  leader senza job suo (RF-84).
-- **RF-46** Un job d'acquisto per ordine esegue in sequenza: creazione itinerario, cliente,
-  lettura pax, scrittura pax, lettura del totale reale; qui l'ordine passa a
+  leader senza job suo (RF-84). Ordini silenziosi (M19): accettazione, conferma e
+  `get_order_status` sono segni di vita (`orders.last_seen_at`, migrazione 0016, scritto al
+  massimo una volta al minuto). Un ordine `queued` senza segni di vita da 15 minuti
+  (`silent_order_minutes`, 0 = mai) passa a `expired` quando il worker lo preleva, prima di
+  prendere gettoni e senza chiamate a HofJ, salvo che Vela gli abbia annunciato il link per SMS
+  (totale già noto, SMS attivi, numero valido). Se era il leader di un prezzo in volo, gli
+  agganciati tornano ordini normali (RF-84).
+- **RF-46** Un job d'acquisto per ordine esegue in sequenza: creazione itinerario e lettura del
+  totale reale (2 chiamate, M19; cliente e passeggeri sono di RF-23); qui l'ordine passa a
   `awaiting_confirmation` e il job si chiude. La conferma (RF-16) accoda un job d'acquisto che
   riparte dalla creazione del link di pagamento; poi l'ordine passa a `awaiting_payment`. Ogni passo salva il proprio esito (`itineraryId`
   compreso) così che un'interruzione riprenda dal passo successivo. Un passo fallito per rete,
@@ -371,14 +388,17 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   in Postgres (RF-36), tre classi in ordine di priorità: `booking` (prenotazioni di ordini
   pagati), `purchase` (job d'acquisto, in ordine di arrivo), `sync` (solo a coda `purchase`
   vuota). La riserva per le prenotazioni è una soglia: `purchase` e `sync` prendono gettoni
-  solo se nel bucket ne restano almeno 2 (configurabile), `booking` può arrivare a zero, quindi
-  una prenotazione non aspetta mai gli acquisti. Un job prende atomicamente i gettoni che gli
-  servono (5 per un acquisto, 1 per una prenotazione) oppure attende che il bucket li abbia.
+  solo se nel bucket ne restano almeno 3 (configurabile; una prenotazione intera, M19),
+  `booking` può arrivare a zero, quindi una prenotazione non aspetta mai gli acquisti. Un job
+  prende atomicamente i gettoni dei passi che gli restano (2 per un acquisto, 3 per una
+  prenotazione: cliente, passeggeri, booking; M19) oppure attende che il bucket li abbia.
   Una risposta 429 svuota il bucket (RF-38). `GET /v1/quota` si chiama al boot e dopo un 429,
   mai in ciclo.
 - **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti al minuto, con acquisti al
-  minuto = ritmo al minuto × 80% ÷ 5 (16 con il limite di 120): il 20% del ritmo si lascia
-  alle prenotazioni, così la stima è prudente. Ricalcolata a ogni `get_order_status`. Non
+  minuto = ritmo al minuto × (1 − riserva) ÷ 2. La riserva è la parte del ritmo che va alle
+  prenotazioni se paga una quota p di chi riceve il link, 3p ÷ (2 + 3p); con p =
+  `expected_pay_share` = 5% (margine sul 2% atteso) vale il 7% e gli acquisti al minuto sono
+  46,5 con il limite di 120 (M19; prima 80% ÷ 5 = 16). Ricalcolata a ogni `get_order_status`. Non
   esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata. Un ordine agganciato
   (RF-84) ha la posizione del suo leader.
 - **RF-49** `reject_proposal` sulla proposta di un ordine `queued`, `awaiting_confirmation` o
@@ -402,8 +422,8 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   istanza configurabile (default 10, M18). Un job è idempotente e ripartibile (RF-27).
 - **RF-51** Un ordine pagato viene prenotato entro la finestra successiva alla verifica del
   pagamento (RF-20), salvo
-  errori di RF-24: la soglia di RF-47 garantisce che la prenotazione avvenga anche a coda
-  d'acquisto piena.
+  errori di RF-24: la soglia di RF-47, che contiene le 3 chiamate di una prenotazione (M19),
+  garantisce che la prenotazione avvenga anche a coda d'acquisto piena.
 
 ### 4.11 Contratto agente-tool
 

@@ -145,7 +145,7 @@ Campi di `order_status` (RF-25, RF-39): `order_id`, `status`, `position`, `wait_
 | `replaced` | `proposal_changed: true`, `proposal` = la nuova proposta (stessa forma di `proposal`, RF-17) |
 | `cancelled` | — (rinuncia, RF-49) |
 | `failed`, `booking_failed` | `failure_reason` leggibile |
-| `expired` | `total`, `currency` |
+| `expired` | `total`, `currency` se è scaduto il link (RF-21); nessun campo se l'ordine è stato chiuso in coda dopo 15 minuti senza segni di vita e senza SMS annunciato (M19, RF-45): lo dice il `say`. Accettazione, conferma e `GET /v1/orders/{id}` contano come segni di vita |
 
 ## Errori (RFC 7807)
 

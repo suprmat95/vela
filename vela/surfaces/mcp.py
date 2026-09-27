@@ -74,7 +74,9 @@ _STATES = (
     "if the user confirms, reject_proposal if not), awaiting_payment (with `payment_url` and "
     "the real `total`: show the link in the chat, never read it aloud), paid_pending_booking, confirmed (with `booking_code`), replaced "
     "(`proposal_changed` is true and `proposal` is the new single trip: speak it and ask if "
-    "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired."
+    "the user likes it), cancelled, failed or booking_failed (with `failure_reason`), expired "
+    "(the payment link expired, or the order was closed in the queue after a long silence with "
+    "nothing to pay: speak `say`)."
     + _VOICE)
 
 DESCRIPTIONS = {

@@ -837,3 +837,39 @@ Il report del banco ha già le chiamate per endpoint. Aggiungo le due misure che
 - 🔧 Bash: grep -n 'fake.call(request, "' loadtest/fake_hofj/app.py | sed 's/.*fake.call(re…
 
 - 🔧 Bash: python3 - <<'EOF' p='loadtest/README.md' s=open(p).read() def sub(o,n):     glob…
+
+Codice e banco sono pronti. Prima di lanciare i due giri controllo che il compose di questo worktree non vada in conflitto con lo stack `master-*` già acceso.
+
+- 🔧 Bash: cat docker-compose.yml; docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Status}}'
+
+- 🔧 Bash: mkdir -p /private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-…
+
+- 🔧 Bash: O=/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m19/f41…
+
+Mentre il giro al 2% gira (circa 12 minuti) aggiorno la spec. Leggo RF-25, RF-45..51.
+
+- 🔧 Bash: grep -n "^- \*\*RF-2[5-7]\*\*\|^- \*\*RF-4[5-9]\*\*\|^- \*\*RF-5[01]\*\*\|^- \*\…
+
+- 🔧 Bash: sed -n 1,21p docs/spec.md; sed -n 140,160p docs/spec.md; sed -n 195,215p docs/sp…
+
+Aggiorno la spec: RF-14, RF-23, RF-25, RF-45, RF-46, RF-47, RF-48, RF-51, l'introduzione di §4.10 e l'intestazione.
+
+- 🔧 Bash: sed -n 190,198p docs/spec.md
+
+- 🔧 Bash: sed -n 175,191p docs/spec.md
+
+- 🔧 Bash: python3 - <<'EOF' p='docs/spec.md' s=open(p).read() def sub(o,n):     global s  …
+
+Ora `rest.md` e le descrizioni MCP: cerco dove parlano di `expired`, delle chiamate o dei tempi.
+
+- 🔧 Bash: grep -n "expired\|5 chiamate\|cinque chiamate\|customer\|passeggeri\|pax" docs/r…
+
+- 🔧 Bash: sed -n 130,160p docs/rest.md; sed -n 55,80p vela/surfaces/mcp.py; sed -n 125,145…
+
+- 🔧 Bash: python3 - <<'EOF' def edit(p, subs):     s=open(p).read()     for o,n in subs:  …
+
+- 🔧 Bash: tail -5 /tmp/claude-501/m19-pay2.log 2>/dev/null; tail -3 /tmp/claude-501/m19-bu…
+
+Il giro al 2% è partito (9 minuti di Locust). Intanto faccio il commit di spec, `rest.md` e descrizione MCP.
+
+- 🔧 Bash: uv run ruff check . >/dev/null && git add docs/spec.md docs/rest.md vela/surface…
