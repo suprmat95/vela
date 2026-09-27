@@ -21,7 +21,8 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 ### Campi strutturati (M17, RF-52..55)
 
 `Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?,
-"duration_min_nights"?, "duration_max_nights"?}` (la durata da M21-A), gli stessi
+"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?}` (la durata da M21-A, la
+lettura del budget da M21-E), gli stessi
 nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
 già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
 viaggiatore. Un client che manda solo testo funziona come prima.
@@ -32,7 +33,8 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `area` | nome di un luogo (paese, regione, città) | sconosciuto a `geo` |
 | `period_start`, `period_end` | date `YYYY-MM-DD`, servono entrambe | una sola, non ISO, inizio dopo la fine, fine passata |
 | `pax` | intero | fuori da 1..20 |
-| `budget` | numero, totale massimo in euro per il gruppo | non positivo |
+| `budget` | numero, budget massimo in euro: la cifra così come l'ha detta il viaggiatore, mai moltiplicata o divisa per il numero di persone | non positivo |
+| `budget_scope` | `per_person` (il viaggiatore ha detto "a testa", "each"), `total` ("in tutto", "in total"). Solo se il viaggiatore l'ha detto in modo esplicito | altro valore |
 | `duration_min_nights`, `duration_max_nights` | interi, notti del viaggio (M21-A, RF-58): weekend 1..3, ponte o weekend lungo 2..4, una settimana 6..8, N giorni = N−1 notti. Basta uno dei due; uno solo sostituisce tutta la durata letta nel testo | fuori da 1..30, minimo maggiore del massimo, non interi |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
 
@@ -48,6 +50,16 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   "troppo lungo"/"too long" chiede al massimo una notte in meno della proposta, "troppo
   corto"/"too short" almeno una in più. "Un weekend" è solo durata; "questo/prossimo weekend"
   è anche un periodo.
+- **Budget a testa o totale** (RF-69, RF-70, M21-E): la lettura segue quest'ordine: campo
+  `budget_scope`; nel testo "a testa", "a persona", "each", "per person" → a persona; "in
+  tutto", "totale", "in total", "altogether" → totale; con più persone e nessuna lettura detta,
+  a persona se la cifra come totale non copre il viaggio compatibile più economico (filtri duri,
+  senza budget) e a persona sì, altrimenti totale; con una persona totale. Nei criteri `budget` è
+  il tetto sul totale (600 a testa in 3 → `"1800.00"`) e `budget_scope` la lettura; il `say` la
+  dichiara sempre ("con un budget di 600 euro a persona, 1800 in tutto"). Nel rifiuto una cifra
+  nuova segue le stesse regole; `budget_scope` da solo, o un numero di persone cambiato con la
+  lettura a persona, rilegge la cifra già detta; "troppo caro" abbassa il tetto e lo legge in
+  totale. `budget_scope` senza nessun budget non ha effetto.
 - **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
   è `question` "Padel o tennis?" e nessun intento viene salvato.
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
@@ -65,7 +77,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 
 | `outcome` | HTTP | Significato |
 |---|---|---|
-| `intent_created` | 201 | intento salvato con i criteri estratti |
+| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget) |
 | `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
 | `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A) |
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |

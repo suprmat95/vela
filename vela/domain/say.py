@@ -120,9 +120,21 @@ def _describe(c: Criteria) -> str:
     if c.pax:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if c.budget is not None:
-        parts.append(("with a maximum budget of %s" if en else "con un budget massimo di %s")
-                     % fmt_money(c.budget, lang))
+        parts.append(_budget_reading(c))
     return " ".join(parts)
+
+
+def _budget_reading(c: Criteria) -> str:
+    """RF-70: "con un budget di 600 euro a persona, 1800 in tutto", "… di 600 euro in tutto";
+    un budget salvato prima di M21-E è un totale."""
+    lang = c.language
+    en = lang == "en"
+    if c.budget_scope == "per_person" and c.pax:
+        each = fmt_money(c.budget / c.pax, lang)
+        total = fmt_money(c.budget, lang).rsplit(" ", 1)[0]
+        return ("with a budget of %s per person, %s in total" if en
+                else "con un budget di %s a persona, %s in tutto") % (each, total)
+    return ("with a budget of %s in total" if en else "con un budget di %s in tutto") % fmt_money(c.budget, lang)
 
 
 def say_understood(c: Criteria) -> str:
@@ -147,14 +159,16 @@ _DISCARDED = {
            "pax": "Non ho potuto usare %s come numero di persone.",
            "budget": "Non ho potuto usare %s come budget.",
            "direction": "Non so spostare la ricerca verso %s.",
-           "duration": "Non ho potuto usare %s come durata in notti."},
+           "duration": "Non ho potuto usare %s come durata in notti.",
+           "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
            "pax": "I couldn't use %s as the number of people.",
            "budget": "I couldn't use %s as the budget.",
            "direction": "I can't move the search %s.",
-           "duration": "I couldn't use %s as the length in nights."},
+           "duration": "I couldn't use %s as the length in nights.",
+           "budget_scope": "I couldn't use %s as the budget reading, per person or in total."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 

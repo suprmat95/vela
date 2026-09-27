@@ -27,12 +27,22 @@ class CriteriaRoundTripTest(unittest.TestCase):
         d = criteria_to_dict(c)
         self.assertEqual(d, {"sport": None, "area": None, "period": None, "pax": None,
                              "budget": None, "duration_min_nights": None,
-                             "duration_max_nights": None, "language": "it"})
+                             "duration_max_nights": None, "budget_scope": None,
+                             "language": "it"})
         self.assertEqual(criteria_from_dict(d), c)
 
     def test_duration_round_trip(self):
         c = Criteria(sport="padel", duration_min_nights=1, duration_max_nights=3)
         self.assertEqual(criteria_from_dict(criteria_to_dict(c)), c)
+
+    def test_budget_scope_round_trip(self):
+        c = Criteria(sport="padel", pax=3, budget=Decimal("1800"), budget_scope="per_person")
+        self.assertEqual(criteria_from_dict(criteria_to_dict(c)), c)
+
+    def test_intent_saved_before_m21e_has_no_budget_scope(self):
+        old = {"sport": "padel", "area": None, "period": None, "pax": 2, "budget": "800.00",
+               "language": "it"}
+        self.assertIsNone(criteria_from_dict(old).budget_scope)
 
     def test_intent_saved_before_m21_has_no_duration(self):
         old = {"sport": "padel", "area": None, "period": None, "pax": 2, "budget": None,

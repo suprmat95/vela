@@ -228,12 +228,12 @@ Tempo di riferimento degli esempi: oggi 2026-09-26.
 - **Agente.** `create_intent(text="…", sport="tennis", area="Spagna", period_start="2026-05-01",
   period_end="2026-05-31", pax=3, budget=600)`; se l'utente l'ha detto, anche
   `budget_scope="per_person"` o `"total"`.
-- **Server.** Nei criteri `budget` resta il tetto totale usato dal chooser (600 × 3 = 1.800 se
+- **Server.** Nei criteri `budget` resta il tetto totale usato dal chooser (600 × 3 = 1800 se
   per persona) e `budget_scope` dice come è stato letto; la regola 4 si applica in
   `create_intent`, quando il catalogo è disponibile, e il risultato si salva nei criteri. Su
   `reject_proposal` valgono le stesse regole per una cifra nuova nel motivo o nei campi.
 - **Agente legge** (RF-70, sempre, anche con le regole 1-3): "Ho capito: un viaggio di tennis
-  in Spagna a maggio per 3 persone con un budget di 600 euro a persona, 1.800 in tutto." oppure
+  in Spagna a maggio per 3 persone con un budget di 600 euro a persona, 1800 in tutto." oppure
   "… con un budget di 600 euro in tutto per 3 persone." Il viaggiatore sente l'interpretazione
   e la corregge con `reject_proposal(…, budget_scope="total")`.
 - **Test.**

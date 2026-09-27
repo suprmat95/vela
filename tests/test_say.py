@@ -386,6 +386,40 @@ class AgentToolSayTest(unittest.TestCase):
         self.assertEqual(say.say_discarded((("duration", (0, None)),), "en"),
                          "I couldn't use 0 - ? as the length in nights.")
 
+    def test_understood_says_the_budget_per_person_and_in_total(self):
+        """RF-70: la lettura del budget, sempre."""
+        c = Criteria("tennis", SPAIN, pax=3, budget=Decimal("1800"), budget_scope="per_person")
+        self.assertEqual(say.say_understood(c),
+                         "Ho capito: un viaggio di tennis in Spagna per 3 persone con un budget "
+                         "di 600 euro a persona, 1800 in tutto.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a tennis trip in Spain for 3 people with a budget of 600 euros "
+                         "per person, 1800 in total.")
+
+    def test_understood_says_a_total_budget(self):
+        c = Criteria("tennis", SPAIN, pax=3, budget=Decimal("600"), budget_scope="total")
+        self.assertEqual(say.say_understood(c),
+                         "Ho capito: un viaggio di tennis in Spagna per 3 persone con un budget "
+                         "di 600 euro in tutto.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a tennis trip in Spain for 3 people with a budget of 600 euros "
+                         "in total.")
+
+    def test_understood_budget_saved_before_m21e_is_a_total(self):
+        c = Criteria("padel", pax=2, budget=Decimal("800"))
+        self.assertTrue(say.say_understood(c).endswith("con un budget di 800 euro in tutto."))
+
+    def test_understood_per_person_with_cents(self):
+        c = Criteria("padel", pax=2, budget=Decimal("1001.00"), budget_scope="per_person")
+        self.assertTrue(say.say_understood(c).endswith(
+            "con un budget di 500,50 euro a persona, 1001 in tutto."))
+
+    def test_discarded_budget_scope(self):
+        self.assertEqual(say.say_discarded((("budget_scope", "each"),), "it"),
+                         "Non ho potuto usare each come lettura del budget, a persona o in tutto.")
+        self.assertEqual(say.say_discarded((("budget_scope", "each"),), "en"),
+                         "I couldn't use each as the budget reading, per person or in total.")
+
     def test_direction_discarded_names_the_direction(self):
         self.assertIn("nord", say.say_discarded((("direction", "north"),), "it"))
         self.assertIn("north", say.say_discarded((("direction", "north"),), "en"))

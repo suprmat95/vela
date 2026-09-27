@@ -459,3 +459,51 @@ class DurationContractTest(McpCase):
         d = await self.ok("get_proposal", intent_id=intent["intent_id"])
         self.assertIn("Non ho weekend compatibili: questo dura 7 notti, dal 1 all'8 ottobre.",
                       d["say"])
+
+
+class BudgetScopeContractTest(McpCase):
+    """M21-E (UC-E): `budget_scope` opzionale, cifra passata come detta, lettura nel `say`."""
+
+    THREE = "tennis in Spagna a ottobre, siamo in tre"
+
+    def setUp(self):
+        super().setUp()
+        self.vela = make_vela(products=[make_product(1, price=400, sport="tennis"),
+                                        make_product(2, price=500, sport="tennis")])
+
+    async def test_budget_scope_is_an_optional_argument(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                self.assertIn("per_person", schema["properties"]["budget_scope"]["description"])
+                self.assertNotIn("budget_scope", schema["required"])
+                self.assertIn("never multiply or divide",
+                              schema["properties"]["budget"]["description"])
+                self.assertIn("budget_scope", DESCRIPTIONS[name])
+                self.assertIn("budget_scope", DESCRIPTIONS_SMS[name])
+
+    async def test_field_reaches_the_criteria_and_the_say(self):
+        # senza il campo la regola 4 leggerebbe 600 a persona (il più economico costa 1200)
+        d = await self.ok("create_intent", text=self.THREE + ", massimo 600 euro", budget=600,
+                          budget_scope="total")
+        c = d["criteria"]
+        self.assertEqual((c["budget"], c["budget_scope"]), ("600.00", "total"))
+        self.assertIn("con un budget di 600 euro in tutto", d["say"])
+
+    async def test_bare_figure_is_read_by_the_server(self):
+        d = await self.ok("create_intent", text=self.THREE + ", massimo 600 euro", budget=600)
+        self.assertEqual(d["criteria"]["budget_scope"], "per_person")
+
+    async def test_invalid_scope_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text=self.THREE + ", 1800 euro", budget_scope="each")
+        self.assertEqual(d["criteria"]["budget_scope"], "total")   # 1800 copre 400 × 3
+        self.assertTrue(d["say"].startswith("Non ho potuto usare each come lettura del budget"))
+
+    async def test_reject_with_budget_scope(self):
+        intent = await self.ok("create_intent", text=self.THREE + ", 1800 euro in tutto")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
+                          reason="no", budget_scope="per_person")
+        self.assertIn("con un budget di 1800 euro a persona, 5400 in tutto", d["say"])

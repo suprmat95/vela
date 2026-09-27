@@ -504,3 +504,40 @@ class DurationContractTest(unittest.TestCase):
         d = r.json()
         assert_single_product(self, d)
         self.assertEqual((d["product"]["product_id"], d["nights"]), ("1", 7))
+
+
+class BudgetScopeContractTest(unittest.TestCase):
+    """M21-E (UC-E): `budget_scope` nel corpo JSON e nei criteri."""
+
+    # il più economico costa 450 in tre: senza campo 600 si leggerebbe in tutto (regola 4)
+    PRODUCTS = [make_product(1, price=150), make_product(2, price=250)]
+    THREE = "padel in Spagna a ottobre, siamo in tre"
+
+    def test_field_reaches_the_intent(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={
+            "text": self.THREE + ", 600 euro", "budget": 600, "budget_scope": "per_person"})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["budget"], crit["budget_scope"]), ("1800.00", "per_person"))
+        self.assertIn("600 euro a persona, 1800 in tutto", r.json()["say"])
+
+    def test_invalid_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.THREE, "budget_scope": "each"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare each come lettura del budget"))
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "budget_scope": ["total"]})
+        self.assertEqual(r.status_code, 422)
+
+    def test_reject_with_budget_scope(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        intent = new_intent(c, text=self.THREE + ", 1800 euro in tutto")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "no", "budget_scope": "per_person"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("1800 euro a persona, 5400 in tutto", r.json()["say"])

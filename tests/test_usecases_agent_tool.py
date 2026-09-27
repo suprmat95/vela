@@ -165,7 +165,8 @@ class UC7InvalidFieldTest(unittest.TestCase):
         self.assertIsInstance(r, IntentCreated)
         self.assertIsNone(r.criteria.area)
         self.assertTrue(r.say.startswith("Non conosco il luogo Atlantide."))
-        self.assertIn("un viaggio di padel per 3 persone con un budget massimo di 1000 euro", r.say)
+        # M21-E: la lettura del budget (RF-70); 1000 copre il più economico (300 × 3), quindi in tutto
+        self.assertIn("un viaggio di padel per 3 persone con un budget di 1000 euro in tutto", r.say)
 
     def test_discarded_field_before_the_question(self):
         r = make_vela().create_intent("una vacanza per due", fields=StructuredFields(sport="golf"))
