@@ -256,3 +256,87 @@ La sonda è andata: 5 chiamate, tutte 200, e nessun importo cambiato. Tra la let
 - 🔧 Bash: cat >> docs/api/differences.md <<'EOF'  ## Cliente e passeggeri (sonda M19, 2026…
 
 - 🔧 Bash: cat >> docs/decisions.md <<'EOF'  ## 2026-09-27 — M19 passo 1: sonda di cliente …
+
+La sonda risponde a metà della domanda 10: il totale non cambia dopo cliente e passeggeri. Resta da verificare se HofJ accetta cliente e passeggeri dopo un pagamento vero, cosa che su staging non si può fare.
+
+**Cosa ha misurato** (5 chiamate, tutte 200, sul prodotto 124):
+- **Il totale non cambia.** `openAmount`, `total`, `originalTotal` e `totalPrice` valgono 1156 € sia subito dopo la creazione sia dopo `PUT customer` e `PUT pax`. Tra le due letture cambiano solo `customer` e `passengers`. Quindi il totale del link si conosce già con 2 chiamate.
+- **I passeggeri esistono già alla creazione.** L'itinerario appena creato contiene `pax-1` e `pax-2` vuoti, e `PUT pax` li accetta senza un `GET .../pax` prima.
+- **Non verificato:** se HofJ accetta `PUT customer` e `PUT pax` dopo un pagamento vero. Nei documenti l'ho segnato come aperto, da vedere al primo giro `live` con la carta di test o da far confermare a HofJ.
+
+**Verdetto, scritto in `decisions.md`:** sulla parte verificabile M19 può andare avanti. Il rischio che resta: se HofJ rifiutasse i `PUT` dopo il pagamento, l'ordine pagato finirebbe in `booking_failed` e andrebbe rimborsato a mano, come succede oggi con un booking rifiutato.
+
+**Uno spunto per il Passo 2, non ancora deciso.** Visto che i `refId` dei passeggeri si conoscono già, il job di prenotazione potrebbe fare 3 chiamate per ordine pagato (customer, pax, booking) invece delle 4 previste. Ne parliamo al Passo 2.
+
+**Commit sul branch:**
+- `b40fb8f`: la sonda con i suoi test;
+- `f17594a`: i documenti, cioè `docs/api/customer-pax.md`, le differenze #36-#38, la risposta parziale alla domanda 10 e il verdetto.
+
+L'itinerario orfano è `deimmovsayfq` (124), senza pagamento né booking. La cartella `probe-m19/` con le risposte grezze non è versionata; non ho toccato né `vela/` né `.gitignore`.
+
+Mi fermo qui: decidi tu se M19 va avanti al Passo 2.
+
+## Utente 17:11
+
+ok come verifichiamo se hofj accetta o no?
+
+## Agente 17:11
+
+- 🔧 Bash: ls vela/adapters | grep -i stripe; grep -n "metadata\|checkoutRefId\|itinerary\|…
+
+- 🔧 Bash: grep -n "senza webhook" -B2 -A4 docs/hofj-questions.md docs/decisions.md | head …
+
+Prima una correzione, perché nel Passo 1 ho scritto una cosa sbagliata. Ho detto che su staging non si può pagare, e l'ho scritto in `customer-pax.md`, nella domanda 10 e in `decisions.md`. Non è vero: la seconda sonda di M5 ha pagato il carrello `iznhotwwgneg` in modalità test di Stripe con `pm_card_visa` e poi ha fatto il booking. Si può quindi verificare su staging, senza soldi veri. Correggo quei tre documenti nel prossimo commit.
+
+**Cosa sappiamo già.** HofJ ha detto che il pagamento si chiude con `POST /v1/bookings`, senza webhook. In M5, dall'API interna un carrello pagato e uno non pagato erano identici: `checkout.status` restava `BookingInitiated` anche dopo il booking. Quindi chi potrebbe rifiutare i `PUT` non è l'API di HofJ, ma il brand site. Ha il PaymentIntent sullo stesso account Stripe, legato al carrello con `checkoutRefId`, e potrebbe bloccare il carrello quando il pagamento riesce.
+
+## Come verificarlo
+
+**A. Sonda su staging con pagamento di test (consigliata).** È il flusso M19, nell'ordine in cui lo farebbe Vela:
+
+| # | Chiamata | Servizio |
+|---|---|---|
+| 1 | `POST /v1/itineraries` (124, come nel Passo 1) | HofJ |
+| 2 | `GET /v1/itineraries/{id}`, per leggere `openAmount` | HofJ |
+| 3 | PaymentIntent creato e confermato in una chiamata: importo `openAmount`, `metadata.checkoutRefId` = itinerario, `pm_card_visa` | Stripe test |
+| 4 | `PUT .../customer` **dopo il pagamento** | HofJ |
+| 5 | `PUT .../pax` **dopo il pagamento** | HofJ |
+| 6 | `GET /v1/itineraries/{id}`, per vedere se il totale è ancora quello | HofJ |
+| 7 | `POST /v1/bookings` con `paymentIntentId` e `paymentStatus` | HofJ |
+
+In tutto 6 chiamate HofJ e 1 Stripe in modalità test, quindi nessun addebito. Lo script si ferma se la 4 o la 5 vengono rifiutate, e in quel caso il booking non parte. Lo lanci tu dal terminale, come prima.
+
+- **Limite:** Vela in realtà passa da una Checkout Session, che non si può completare via API. Un PaymentIntent con gli stessi metadata ci si avvicina, ma non è identico, e lo scrivo.
+- **Effetti collaterali:** un booking di prova su staging (lo hanno già fatto M5 e M7) e un pagamento di test sull'account di HofJ.
+
+**B. Chiederlo a HofJ.** La domanda 10 è già scritta in `docs/hofj-questions.md`, ancora da inviare. Costa zero chiamate, ma non sappiamo quando rispondono. La farei comunque in parallelo: anche se A dice sì su staging, non garantisce che la produzione si comporti allo stesso modo.
+
+**C. Rimandare al primo giro `live`,** come chiedeva la task. È la prova più fedele (Checkout Session vera, Vela vera), ma richiede di aver già costruito il Passo 2, cioè di scrivere il codice prima di sapere se funziona.
+
+**La mia raccomandazione è A più B.** A risponde oggi con 7 chiamate. B copre la differenza tra staging e produzione.
+
+Se mi dai l'OK, scrivo `scripts/m19_paid_probe.py` sul modello di `m19_probe.py`: test senza rete, `--dry-run`, tetto rigido a 6 chiamate HofJ e 1 Stripe. Nello stesso commit correggo i documenti. Poi te lo passo da lanciare.
+
+## Utente 17:13
+
+A
+
+## Agente 17:13
+
+- 🔧 Bash: ls scripts; grep -ln "payment_intents\|pm_card_visa" scripts/* vela/adapters/*.p…
+
+Scrivo prima i test della sonda con pagamento.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m19/tests/test_m19_paid_probe.py
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-m19/scripts/m19_paid_probe.py
+
+- 🔧 Bash: uv run python3 -m unittest tests.test_m19_paid_probe tests.test_m19_probe 2>&1 |…
+
+Fix the unclosed-file warning in the test, then correct the docs.
+
+- 🔧 Bash: python3 - <<'EOF' p='tests/test_m19_paid_probe.py' s=open(p).read() s=s.replace(…
+
+- 🔧 Bash: sed -n 21,23p docs/api/customer-pax.md; sed -n 94,98p docs/hofj-questions.md
+
+- 🔧 Bash: python3 - <<'EOF' def sub(p, old, new):     s=open(p).read(); assert old in s, (…

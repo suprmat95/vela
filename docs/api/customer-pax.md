@@ -18,9 +18,9 @@ Render. Contesto: domanda 10 in `docs/hofj-questions.md`, roadmap M19.
   `GET .../pax` prima.
 - **Stesso totale della sonda di M22-a.** Lo stesso prodotto, con la stessa data e le stesse
   persone, valeva 1156 € anche il 27/09 (`arjeuuuzzw9s`, `docs/api/accommodations.md`).
-- **Non verificabile su staging: `PUT customer` e `PUT pax` dopo un pagamento vero.** Serve un
-  pagamento sul PaymentIntent del brand, che su staging non si fa senza la carta di test e senza
-  un booking. Resta al primo giro `live` con la carta di test.
+- **Non verificato da questa sonda: `PUT customer` e `PUT pax` dopo un pagamento.** Serve un
+  pagamento, fuori dal perimetro di queste 5 chiamate. Si può fare su staging con Stripe in
+  modalità test, come nella seconda sonda di M5: è la sonda `scripts/m19_paid_probe.py`.
 
 ## Chiamate
 
@@ -64,7 +64,7 @@ identici.
 | Il totale cambia dopo `PUT customer` e `PUT pax`? | **No** su un prodotto con hotel preselezionato, 2 adulti, 1 camera: nessuno dei quattro importi cambia |
 | Il totale del link si conosce con 2 chiamate (creazione + `GET`)? | **Sì**: `openAmount` è già definitivo alla #2 |
 | `PUT pax` senza `GET .../pax`? | **Sì**, con i `refId` `pax-1..N`, che il `GET` dell'itinerario mostra già dalla creazione |
-| `PUT customer` e `PUT pax` accettati dopo il pagamento? | **Non verificabile su staging**: al primo giro `live` con la carta di test |
+| `PUT customer` e `PUT pax` accettati dopo il pagamento? | **Non verificato da questa sonda**: sonda con pagamento di test, `scripts/m19_paid_probe.py` |
 | La differenza `total` 368 / `openAmount` 337 di M5 (prodotto 118) dipende dai passeggeri? | Non risolta: sul 124 i due importi coincidono prima e dopo, ma in M5 il 118 fu letto solo dopo i pax. Nessun indizio che dipenda dai passeggeri; il link usa comunque `openAmount` |
 
 ## Itinerario orfano

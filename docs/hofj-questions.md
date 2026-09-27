@@ -93,8 +93,9 @@ Nate dalla rilettura del twist (`docs/plans/2026-09-26-twist-seconda-lettura.md`
 
     *Verificato in parte su staging il 2026-09-27 (`docs/api/customer-pax.md`, sonda M19):* il
     totale non cambia dopo `PUT customer` e `PUT pax` (1156 € prima e dopo sul prodotto 124).
-    Resta aperta la prima metà: su staging non si paga, quindi i `PUT` dopo un pagamento vero
-    sono da vedere al primo giro `live` con la carta di test, o da confermare da HofJ.
+    Resta aperta la prima metà: i `PUT` dopo un pagamento si verificano su staging con Stripe in
+    modalità test (`scripts/m19_paid_probe.py`); la conferma di HofJ serve comunque per la
+    produzione.
 
 ## Domande aggiunte il 2026-09-27 (sonda di `/accommodations`, M22-a)
 

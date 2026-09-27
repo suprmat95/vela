@@ -1172,6 +1172,20 @@ alla domanda 10 in `docs/hofj-questions.md`. Nessuna modifica a `vela/`.
 | Chiamate | Le 5 dichiarate: creazione, `GET` del totale, `PUT customer`, `PUT pax` (senza `GET .../pax`, con i `refId` di M5), `GET` del totale. Nessun `GET /v1/quota` | Vincolo della task; lo script non può superare 5 chiamate e il test lo fissa |
 | Itinerario orfano | `deimmovsayfq` (124) su `staging.weebora.com`, con cliente e passeggeri di prova; nessun pagamento, nessun booking | Come nelle sonde di M5 e M22-a |
 | **[misurato] Totale** | Invariato dopo cliente e passeggeri: `openAmount`, `total`, `originalTotal` e `totalPrice` = 1156 € prima e dopo; tra le due letture cambiano solo `customer` e `passengers` | È la condizione "il totale non cambia dopo i pax" della roadmap. Il link porta `openAmount` (RF-16), che si conosce con 2 chiamate |
-| **[non verificabile su staging]** `PUT` dopo il pagamento | Resta aperto se HofJ accetta `PUT customer` e `PUT pax` su un itinerario già pagato. Da verificare al primo giro `live` con la carta di test, o con la risposta di HofJ alla domanda 10 | Su staging non si paga il PaymentIntent del brand senza carta di test e booking, esclusi dal perimetro della sonda |
+| **[non verificato]** `PUT` dopo il pagamento | Resta aperto se HofJ accetta `PUT customer` e `PUT pax` su un itinerario già pagato. ~~Non verificabile su staging~~: errore corretto lo stesso giorno, la seconda sonda di M5 ha pagato su staging con Stripe in modalità test. Si verifica con `scripts/m19_paid_probe.py` (sotto) | Pagamento e booking erano fuori dal perimetro delle 5 chiamate |
 | **[misurato] Passeggeri dalla creazione** | Il `GET` dell'itinerario appena creato ha già `passengers` con `pax-1..N`; `PUT pax` li accetta senza `GET .../pax` | Differenza #36. Spunto per il passo 2, non deciso: il job di prenotazione potrebbe fare 3 chiamate (customer, `set_pax` con `refId` noti, booking) invece di 4 |
 | **Verdetto** | Sulla parte verificabile, **sì**: il job d'acquisto può fermarsi a itinerario + totale + link senza che il prezzo detto al viaggiatore cambi dopo. Rischio residuo non verificato: un rifiuto dei `PUT` dopo il pagamento porterebbe l'ordine pagato a `booking_failed` con rimborso a mano, come un booking rifiutato oggi. Se M19 prosegua lo decide l'utente | Condizione della task: "decido io se M19 va avanti" |
+
+### Sonda con pagamento di test (proposta, 2026-09-27)
+
+Scelta dell'utente tra A (sonda su staging con pagamento di test), B (domanda a HofJ) e C (primo
+giro `live`): **A**. `scripts/m19_paid_probe.py`, da lanciare dall'utente. Esiti qui sotto dopo il
+giro.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Chiamate | 6 HofJ staging (creazione, `GET`, `PUT customer`, `PUT pax`, `GET`, `POST /v1/bookings`) e 1 Stripe test (`POST /v1/payment_intents` confermato con `pm_card_visa`), con i due `PUT` dopo il pagamento. Tetto rigido a 7 nello script | Il flusso di M19 nell'ordine in cui lo farebbe Vela |
+| Pagamento | PaymentIntent diretto con importo `openAmount`, `metadata.checkoutRefId` = itinerario e `Idempotency-Key` per itinerario, invece della Checkout Session di Vela | Una Checkout Session non si completa via API; stessi metadata del PaymentIntent del link (`vela/adapters/stripe_links.py`) |
+| Salvaguardie | Nessuna chiamata se la chiave Stripe non è `sk_test_`/`rk_test_` o se l'host HofJ non è `staging.api.hofj.com`; stop prima dei `PUT` se il pagamento non è `succeeded` o è `livemode`; stop prima del booking se un `PUT` è rifiutato | Un errore di ambiente non deve mai pagare o prenotare davvero |
+| Effetti | Un booking di prova su staging e un pagamento di test sull'account Stripe di HofJ | Come in M5 e M7 |
+| Limite | Staging non garantisce la produzione: la domanda 10 resta da inviare a HofJ | Il brand site di produzione può comportarsi diversamente |
