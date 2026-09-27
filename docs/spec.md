@@ -10,8 +10,9 @@ RNF-10 aggiornati il 2026-09-26 per la seconda lettura del twist
 (`docs/plans/2026-09-26-twist-seconda-lettura.md`). RF-36..38, RF-47, RF-48 e RF-50 aggiornati il
 2026-09-26 con M18 (token bucket con soglia per le prenotazioni). RF-02, RF-04, RF-06..09,
 RF-12, RF-14, RF-39..41, RF-49, RF-52..54, §7 e §4.12 (RF-58..75) aggiornati il 2026-09-26 per la scelta
-v3 (roadmap M21, `docs/usecases/scelta.md`): descrivono il comportamento dopo M21, le parti
-marcate "(M21)" non sono ancora implementate. RF-06, RF-16, RF-19, RF-25, RF-39, RF-45,
+v3 (roadmap M21, `docs/usecases/scelta.md`): descrivono il comportamento dopo M21; le parti
+marcate "(M21)" sono implementate (M21 completata il 2026-09-27 con M21-F: RF-08, RF-09, RF-65,
+RF-71..75 e lo schema di §4.12 aggiornati quel giorno). RF-06, RF-16, RF-19, RF-25, RF-39, RF-45,
 RF-46, RF-49 e RNF-05 aggiornati il 2026-09-26 per la conferma del prezzo effettivo prima
 del link. RNF-04 aggiornato il 2026-09-27 per l'attesa dell'accettazione (roadmap M20). RF-84
 aggiunto e RF-14, RF-16, RF-45, RF-46, RF-48, RF-49 aggiornati il 2026-09-27 per la cache del
@@ -459,7 +460,8 @@ Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisio
 M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E, RF-60 e RF-61 (ordinamento e prodotti
 equivalenti; il livello "livello e lezioni" attivo da M21-C) da M21-B, RF-65..68 (persone
 e camere, con la migrazione 0011) da M21-D, RF-62..64 (livello e lezioni, con la migrazione 0012) da
-M21-C; gli altri non ancora.
+M21-C, RF-71..75 (rifiuti, con la migrazione 0016) da M21-F. M21 è completata (2026-09-27); design
+di M21-F in `docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md`.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).
@@ -513,7 +515,10 @@ l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'in
   Con più di 2 persone e senza camere, né nei campi né nel testo, `create_intent` restituisce la
   domanda "In quante camere?" / "How many rooms?" e non salva l'intento (RF-04); con 1 o 2
   persone il default è 1 camera. `rooms` su `accept_proposal` è una correzione: sotto il
-  minimo del prodotto (RF-66) la risposta è una domanda e nessun ordine viene creato.
+  minimo del prodotto (RF-66) la risposta è una domanda con l'id della proposta e nessun ordine
+  viene creato. Su `reject_proposal`, persone portate oltre 2 senza camere dette → la domanda "In
+  quante camere?" con l'id della proposta, senza rifiuto (RF-75, M21-F); un intento salvato prima
+  di M21-D resta senza camere.
 - **RF-66** (UC-D) Un prodotto con `maxPaxPerRoom` richiede almeno ceil(pax /
   `maxPaxPerRoom`) camere; con meno camere chieste è escluso (`failed_criterion` `rooms` se
   nessuno resta). Il `say` della proposta dice il limite quando conta ("camere da massimo 2
@@ -533,14 +538,20 @@ l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'in
   del budget ("ho inteso 600 euro a persona, 1.800 in tutto").
 - **RF-71** (UC-F) Ogni rifiuto ha un tipo: `price`, `place`, `hotel`, `dates`, `duration`,
   `sport`, `pax`, `level`, `direction`, `other`. Il campo `reject_kind` vince sul testo; senza
-  campo il tipo si ricava dal motivo con regole it/en. Il tipo si salva sul rifiuto (migrazione
-  0013, M21-F).
+  campo il tipo si ricava dal motivo con regole it/en, altrimenti dai campi strutturati; con più
+  tipi cambiano tutti i criteri e si registra il primo di questo elenco. Il tipo si salva sul
+  rifiuto (migrazione 0016, M21-F; nullo = rifiuto senza tipo, prima di M21-F o di RF-17).
 - **RF-72** (UC-F) Dopo un rifiuto `hotel` sono esclusi dalle proposte dell'intento tutti i
-  prodotti con lo stesso hotel del prodotto rifiutato.
+  prodotti con lo stesso hotel del prodotto rifiutato (nome normalizzato); se il prodotto non ha
+  hotel, quelli con lo stesso titolo e la stessa destinazione (RF-61 senza il prezzo: il 78 e la
+  trappola 900078). Vale anche per un motivo con più tipi che parla dell'hotel, non per `other`.
+  Se non resta nulla, `failed_criterion` è `hotel`.
 - **RF-73** (UC-F) Un rifiuto `place` ("Estepona no, ma la Spagna va bene") aggiunge il luogo a
   `excluded_areas` e mantiene l'area dell'intento. Senza `area` il luogo escluso è quello del
   prodotto rifiutato; con `area` si cambia luogo come oggi. Nel testo un luogo negato ("X no",
-  "tranne X", "not X") è un'esclusione, non la nuova area.
+  "tranne X", "not X") è un'esclusione, non la nuova area. Un'area dell'intento dentro un'area
+  esclusa sale al primo luogo che la contiene e non è escluso. Se il filtro azzera i candidati,
+  `failed_criterion` è `place`.
 - **RF-74** (UC-F) Un rifiuto `dates` con `keep_product` (campo, o nel testo "questo mi piace
   ma", "quando altro è disponibile", "same trip", "when else") esclude solo la finestra
   proposta: la proposta successiva è lo stesso prodotto con la prima partenza valida diversa,
@@ -551,7 +562,10 @@ l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'in
   rifiuto, non cambia i criteri, non cancella un ordine `queued` (eccezione a RF-49) e
   restituisce una domanda chiusa con l'id della proposta, che resta aperta: "Cosa non ti
   convince: il posto, l'hotel, le date o il prezzo?". Con `reject_kind="other"` esplicito il
-  rifiuto si registra ed esclude solo il prodotto (RF-54). Eccezione dichiarata a RF-08.
+  rifiuto si registra ed esclude solo il prodotto (RF-54). Eccezione dichiarata a RF-08. Stessa
+  domanda chiusa, con l'id della proposta e senza rifiuto, per "In quante camere?" quando un
+  rifiuto porta le persone oltre 2 senza dire le camere (RF-65). Un secondo `reject_proposal`
+  su una proposta già rifiutata non chiede più il motivo.
 
 **Cambi di interfaccia pubblica di M21.** MCP e REST cambiano insieme, con gli stessi nomi.
 
@@ -574,9 +588,9 @@ l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'in
 **Cambio di schema** (da approvare all'inizio di ogni task, decisione 2026-09-26): una
 migrazione per task di M21. 0010 (M21-B): `products.featured`, `products.special_offer`. 0011
 (M21-D): `products.max_pax_per_room`, `orders.rooms` (intero, default 1). 0012 (M21-C):
-`products.levels`, `products.levels_exclusive`, `products.coaching`. 0013 (M21-F):
-`rejections.kind` (testo, nullo per i rifiuti di prima), `rejections.keep_product` (booleano,
-default falso).
+`products.levels`, `products.levels_exclusive`, `products.coaching`. 0016 (M21-F, dopo la 0015
+di M23; 0013 e 0014 restano numeri non usati): `rejections.kind` (testo, nullo per i rifiuti di
+prima), `rejections.keep_product` (booleano, default falso).
 
 ## 5. Requisiti non funzionali
 

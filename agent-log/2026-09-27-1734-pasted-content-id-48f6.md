@@ -427,3 +427,57 @@ Making sure the comparison isn't between two empty lists, and moving the inline 
 - 🔧 Bash: Add RF-84 rejection tests
 
 - 🔧 Bash: Full suite, lint, commit step 8
+
+Code is done and green. Now documentation: `docs/rest.md` first.
+
+- 🔧 Bash: Find reject-related parts of rest.md
+
+- 🔧 Bash: Read rest.md body
+
+- 🔧 Bash: Update docs/rest.md for M21-F
+
+Now `docs/decisions.md`, the spec, the use cases and the roadmap. The spec first: where it still marks M21 as not implemented:
+
+- 🔧 Bash: Find M21 markers in spec and roadmap
+
+- 🔧 Bash: Read spec passages to update
+
+- 🔧 Bash: Update spec for M21-F
+
+- 🔧 Bash: Update RF-65 and find use case passages
+
+- 🔧 Bash: Update scelta.md for M21-F
+
+Now the roadmap: M21-F status and the overall M21 state.
+
+- 🔧 Bash: Read roadmap overview and status lines
+
+- 🔧 Bash: Update roadmap M21 and M21-F status
+
+Docs are ready except `docs/decisions.md`. Writing the M21-F entry: decisions with the alternatives I rejected, the old tests I changed, and the open points.
+
+- 🔧 Bash: Append M21-F decisions entry
+
+Docs written. Before committing and updating the M21 status, the Postgres run: a throwaway `postgres:16` on a free port, with `DATABASE_URL` set only for that process.
+
+- 🔧 Bash: Check Docker and find a free port
+
+- 🔧 Bash: Start throwaway Postgres 16 container
+
+Upgrade from an empty database to 0016, then the full suite against it (the Postgres tests stop being skipped):
+
+- 🔧 Bash: Upgrade empty Postgres to head and inspect table
+
+- 🔧 Bash: Run full suite and migration tests against Postgres
+
+1622 tests, 0 skipped. Confirming the two Postgres migration tests ended `ok`, then an extra round trip down to base and back up:
+
+- 🔧 Bash: Confirm Postgres migration tests and full round trip
+
+The first `ERROR` is just the module not being importable outside `discover`. Rerunning the Postgres class through `discover`:
+
+- 🔧 Bash: Run Postgres migration tests verbosely
+
+Both Postgres migration tests ran and passed, with nothing skipped. Stopping the container, then committing the docs:
+
+- 🔧 Bash: Stop Postgres, verify, commit docs

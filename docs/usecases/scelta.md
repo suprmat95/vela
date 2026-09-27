@@ -254,7 +254,9 @@ Ogni rifiuto ha un tipo (`reject_kind`, RF-71): `price`, `place`, `hotel`, `date
 `duration`, `sport`, `pax`, `level`, `direction`, `other`. Il campo dell'agente vince sul testo;
 senza campo, `refine.py` classifica il motivo con regole it/en. Se il motivo tocca più tipi
 ("troppo caro e troppo lontano"), tutti i criteri cambiano come oggi e il tipo registrato è il
-primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 0013).
+primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 0016: 0013 e 0014
+restano numeri non usati, decisione M21-F). Stato: fatto in M21-F (2026-09-27), test in
+`tests/test_refine_kinds.py`, `tests/test_chooser_rejections.py`, `tests/test_usecases_rejections.py`.
 
 ### F1 — Hotel
 
@@ -266,7 +268,9 @@ primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 00
   del prodotto rifiutato (confronto sul nome normalizzato); criteri invariati. Esclusione
   ricavata dai rifiuti, come il tetto di prezzo (decisione M7). Prodotto senza hotel → si
   esclude solo il prodotto.
-- **Agente legge.** "Ho escluso i viaggi all'<hotel del prodotto rifiutato>. Ti propongo …"
+- **Agente legge.** "Ho escluso i viaggi con l'hotel <hotel del prodotto rifiutato>. Ho capito: …
+  Ti propongo …" (senza hotel: "Questo viaggio non indica l'hotel: ho escluso questo viaggio.";
+  frase allineata in M21-F, "all'<hotel>" non suona con nomi come "THB Lanzarote Beach")
 - **Test.** Dominio: tre prodotti, due con lo stesso hotel → dopo il rifiuto nessuno dei due;
   testo senza campo classificato `hotel`; `NoChoice` con `failed_criterion` `hotel` quando
   restano solo prodotti di quell'hotel. MCP / REST: `reject_kind` accettato.
@@ -285,7 +289,8 @@ primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 00
   candidati → `NoChoice("place")`. Solo testo: un luogo preceduto o seguito da negazione ("X
   no", "non a X", "tranne X", "not X", "but X") è un'esclusione; oggi invece diventa la nuova
   area (difetto corretto).
-- **Agente legge.** "Ho capito: un viaggio di padel in Spagna, esclusa Estepona … Ti propongo …"
+- **Agente legge.** "Ho capito: un viaggio di padel in Spagna, esclusi i viaggi a Estepona, …
+  Ti propongo …" (allineata in M21-F: "esclusa" non si accorda con regioni come "le Canarie")
 - **Test.** Dominio: negazione it/en → `excluded_areas`, area invariata; luogo senza negazione
   → nuova area (comportamento di oggi); esclusione di una regione esclude le sue città;
   `NoChoice("place")`. MCP / REST: `reject_kind="place"` senza `area`.
