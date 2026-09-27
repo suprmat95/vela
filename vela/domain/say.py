@@ -133,9 +133,32 @@ def _describe(c: Criteria) -> str:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if rooms_said(c.pax, c.rooms):
         parts.append("in " + fmt_rooms(c.rooms, lang))
+    play = _level_and_coaching(c)
+    if play:
+        # tra virgole come la durata: "…per 2 persone, livello principiante, con lezioni, con un budget…"
+        parts[-1] += ","
+        parts.append(", ".join(play) + ("," if c.budget is not None else ""))
     if c.budget is not None:
         parts.append(_budget_reading(c))
     return " ".join(parts)
+
+
+_LEVEL_NAMES = {"it": {"beginner": "principiante", "intermediate": "intermedio", "advanced": "avanzato"},
+                "en": {"beginner": "beginner", "intermediate": "intermediate", "advanced": "advanced"}}
+
+
+def _level_and_coaching(c: Criteria) -> list:
+    """M21-C (RF-54, RF-62): "livello principiante", "con lezioni" / "senza lezioni"."""
+    en = c.language == "en"
+    words = []
+    if c.level in _LEVEL_NAMES["it"]:
+        name = _LEVEL_NAMES["en" if en else "it"][c.level]
+        words.append(("%s level" if en else "livello %s") % name)
+    if c.wants_coaching is True:
+        words.append("with lessons" if en else "con lezioni")
+    elif c.wants_coaching is False:
+        words.append("without lessons" if en else "senza lezioni")
+    return words
 
 
 def _budget_reading(c: Criteria) -> str:
@@ -175,7 +198,9 @@ _DISCARDED = {
            "direction": "Non so spostare la ricerca verso %s.",
            "duration": "Non ho potuto usare %s come durata in notti.",
            "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto.",
-           "rooms": "Non ho potuto usare %s come numero di camere."},
+           "rooms": "Non ho potuto usare %s come numero di camere.",
+           "level": "Non ho potuto usare %s come livello di gioco: principiante, intermedio o avanzato.",
+           "wants_coaching": "Non ho potuto usare %s per sapere se vuoi lezioni: sì o no."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
@@ -184,7 +209,9 @@ _DISCARDED = {
            "direction": "I can't move the search %s.",
            "duration": "I couldn't use %s as the length in nights.",
            "budget_scope": "I couldn't use %s as the budget reading, per person or in total.",
-           "rooms": "I couldn't use %s as the number of rooms."},
+           "rooms": "I couldn't use %s as the number of rooms.",
+           "level": "I couldn't use %s as the playing level: beginner, intermediate or advanced.",
+           "wants_coaching": "I couldn't use %s to know whether you want lessons: yes or no."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 

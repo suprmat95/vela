@@ -3,7 +3,7 @@ opzionale (RF-03).
 
 Estrae sport, area (dizionario `geo`), periodo, durata in notti (M21, RF-58), numero di
 persone, numero di camere (M21-D, RF-65), budget con la sua lettura a persona o totale (M21-E,
-RF-69) e lingua. I campi strutturati passati dall'agente (RF-52) vincono sul parser, che vince
+RF-69), livello di gioco e desiderio di lezioni (M21-C, RF-62) e lingua. I campi strutturati passati dall'agente (RF-52) vincono sul parser, che vince
 sul fallback (RF-53). Se manca lo sport, oppure il numero di persone (e il profilo non lo dà),
 oppure le camere con più di `ROOMS_DEFAULT_MAX_PAX` persone, produce una sola domanda per
 l'agente, in quest'ordine (RF-04); con 1 o 2 persone la camera è una. `today` è iniettato per
@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import Callable, Optional, Tuple
 
 from vela.domain import geo
+from vela.domain.labels import LEVELS
 from vela.domain.models import Criteria, Period, StructuredFields, TravelerProfile
 from vela.ports.llm import IntentExtractor
 
@@ -97,6 +98,9 @@ _PAX_PATTERNS = [
     (re.compile(r"\b(?:per|for)\s+(\w+)\b" + _NOT_PEOPLE_AFTER), 1),
     (re.compile(r"\bx\s?(\d+)\b"), 1),
     (re.compile(r"\bin\s+(\d+)\b" + _NOT_PEOPLE_AFTER), 1),
+    # "…a ottobre, in due" (UC-C, M21-C): numeri in lettere da 2, mai "in una settimana"
+    (re.compile(r"\bin\s+(due|tre|quattro|cinque|sei|sette|otto|nove|dieci|two|three|four|five|"
+                r"six|seven|eight|nine|ten)\b" + _NOT_PEOPLE_AFTER), 1),
 ]
 _PAX_PHRASES = [
     (re.compile(r"\b(?:in coppia|una coppia|as a couple|a couple\b(?! of)|"
@@ -430,6 +434,53 @@ def parse_duration(text: str) -> Optional[Tuple[int, Optional[int]]]:
     return None
 
 
+# M21-C (UC-C, RF-62): livello e lezioni detti dal viaggiatore. Parole di UC-C più poche forme
+# vicine; una frase negata ("niente corsi per principianti", "non siamo esperti") non conta.
+_LEVEL_WORDS = (
+    ("beginner", r"principiant\w*|alle prime armi|mai giocato|beginners?|never played|novices?|"
+                 r"first[- ]timers?|neofit\w*"),
+    ("intermediate", r"intermedi\w*|intermediate|livello medio|medio livello|medium level|mid[- ]level"),
+    ("advanced", r"avanzat\w*|agonist\w*|espert[oiae]|advanced|competitive|experienced"),
+)
+_LEVEL_RE = re.compile(r"\b(?:%s)\b" % "|".join(w for _, w in _LEVEL_WORDS))
+_LEVEL_NEGATED = re.compile(
+    r"\b(?:non|not|no|niente|nessun[oa]?|senza|without|n't)\s+"
+    r"(?:(?:siamo|sono|è|are|am|is|really|very|molto|più|per|for|dei|degli|delle|corsi|corso|"
+    r"lezioni|lessons|courses?|classes|camp|viaggi|trips?|a|an|the)\s+){0,3}(?:%s)\b"
+    % "|".join(w for _, w in _LEVEL_WORDS))
+_COACH_NOUNS = re.compile(r"(?:maestr\w*|coach\w*|istruttor\w*|allenator\w*|guid[ae])\s+$")
+_COACHING_WORDS = (r"lezion\w*|maestr[oiae]|coach\w*|clinic\w*|cors[oi]|allenarci|allenarmi|"
+                   r"allenarsi|allenament\w*|istruttor\w*|allenator\w*|lessons?|coaching|training|"
+                   r"instructors?")
+_COACHING_RE = re.compile(r"\b(?:%s)\b" % _COACHING_WORDS)
+_COACHING_NEGATED = re.compile(
+    r"\b(?:niente|nessun[oa]?|senza|no|non|without|don't|dont|do not|not)\s+(?:[\w']+\s+){0,3}?"
+    r"(?:%s)\b" % _COACHING_WORDS)
+_DURING = re.compile(r"\b(?:nel|durante il)\s+corso\b")   # "nel corso di ottobre": un periodo
+
+
+def parse_level(text: str) -> Optional[str]:
+    """RF-62: `beginner`, `intermediate` o `advanced` dal testo; con più livelli il più basso,
+    così un viaggio va bene a tutti. "Esperto" detto di un maestro o di un coach non è un livello."""
+    low = _LEVEL_NEGATED.sub(" ", text.lower())
+    found = set()
+    for m in _LEVEL_RE.finditer(low):
+        word = m.group(0)
+        if word.startswith("espert") and _COACH_NOUNS.search(low[:m.start()]):
+            continue
+        found.update(level for level, pattern in _LEVEL_WORDS if re.fullmatch(pattern, word))
+    return next((level for level in LEVELS if level in found), None)
+
+
+def parse_wants_coaching(text: str) -> Optional[bool]:
+    """RF-62: False con una negazione ("niente corsi", "senza lezioni", "no coaching"), True con
+    una parola di lezioni o coach, altrimenti None (non detto)."""
+    low = _DURING.sub(" ", text.lower())
+    if _COACHING_NEGATED.search(low):
+        return False
+    return True if _COACHING_RE.search(low) else None
+
+
 def _to_money(token: str) -> Optional[Decimal]:
     token = re.sub(r"[.,](?=\d{3}\b)", "", token)   # separatori delle migliaia
     token = token.replace(",", ".").rstrip(".")
@@ -579,6 +630,18 @@ def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> 
             valid["budget_scope"] = scope.strip().lower()
         else:
             discarded.append(("budget_scope", scope))
+    level = raw.get("level")
+    if level is not None:
+        if isinstance(level, str) and level.strip().lower() in LEVELS:
+            valid["level"] = level.strip().lower()
+        else:
+            discarded.append(("level", level))
+    coaching = raw.get("wants_coaching")
+    if coaching is not None:
+        if isinstance(coaching, bool):
+            valid["wants_coaching"] = coaching
+        else:
+            discarded.append(("wants_coaching", coaching))
     rooms = raw.get("rooms")
     if rooms is not None:   # il tetto `pax` si conosce solo dopo la precedenza: `resolve_rooms`
         if isinstance(rooms, int) and not isinstance(rooms, bool) and rooms >= 1:
@@ -664,6 +727,8 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         duration_max_nights=nights[1],
         budget_scope=parse_budget_scope(text),
         rooms=parse_rooms(text),
+        level=parse_level(text),
+        wants_coaching=parse_wants_coaching(text),
     )
     criteria = replace(parsed, **given)
     if criteria.sport is None and extractor is not None:

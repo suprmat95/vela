@@ -28,7 +28,7 @@ class CriteriaRoundTripTest(unittest.TestCase):
         self.assertEqual(d, {"sport": None, "area": None, "period": None, "pax": None,
                              "budget": None, "duration_min_nights": None,
                              "duration_max_nights": None, "budget_scope": None, "rooms": None,
-                             "language": "it"})
+                             "level": None, "wants_coaching": None, "language": "it"})
         self.assertEqual(criteria_from_dict(d), c)
 
     def test_duration_round_trip(self):
