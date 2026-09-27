@@ -580,3 +580,66 @@ class RoomsContractTest(McpCase):
                           **self.FIVE_TRAVELERS)
         self.assertIn("order_id", d)
         self.assertEqual(self.vela.repos.orders.get_by_proposal(proposal["proposal_id"]).rooms, 4)
+
+
+class LevelContractTest(McpCase):
+    """M21-C (UC-C, RF-52, RF-62): `level` e `wants_coaching` opzionali su intento e rifiuto,
+    restituiti nei criteri; un valore invalido è scartato e detto, non un errore."""
+
+    UC_C = "Siamo principianti, vorremmo lezioni di padel in Spagna a ottobre, in due."
+
+    def setUp(self):
+        super().setUp()
+        self.vela = make_vela(products=[
+            replace(make_product(1, price=300), levels=frozenset({"intermediate", "advanced"})),
+            replace(make_product(2, price=400), levels=frozenset({"beginner"}), coaching=True),
+            replace(make_product(3, price=100), levels=frozenset({"advanced"}), levels_exclusive=True)])
+
+    async def test_level_and_wants_coaching_are_optional_arguments(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                for field in ("level", "wants_coaching"):
+                    self.assertIn(field, schema["properties"])
+                    self.assertNotIn(field, schema["required"])
+                self.assertIn("beginner", schema["properties"]["level"]["description"])
+                self.assertIn("lessons", schema["properties"]["wants_coaching"]["description"])
+                for descriptions in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+                    self.assertIn("`level`", descriptions[name])
+                    self.assertIn("`wants_coaching`", descriptions[name])
+
+    async def test_uc_c_agent_call(self):
+        d = await self.ok("create_intent", text=self.UC_C, sport="padel", area="Spagna",
+                          period_start="2026-10-01", period_end="2026-10-31", pax=2,
+                          level="beginner", wants_coaching=True)
+        c = d["criteria"]
+        self.assertEqual((c["level"], c["wants_coaching"]), ("beginner", True))
+        self.assertIn("livello principiante, con lezioni", d["say"])
+        p = await self.ok("get_proposal", intent_id=d["intent_id"])
+        self.assertEqual(p["product"]["product_id"], "2")
+        self.assertIn("Il programma è pensato per principianti e include lezioni o allenamenti.", p["say"])
+
+    async def test_invalid_level_is_declared_not_an_error(self):
+        d = await self.ok("create_intent", text="padel a ottobre in due", level="pro")
+        self.assertIsNone(d["criteria"]["level"])
+        self.assertTrue(d["say"].startswith("Non ho potuto usare pro come livello di gioco"))
+
+    async def test_reject_with_level(self):
+        intent = await self.ok("create_intent", text="padel a ottobre in due")
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(first["product"]["product_id"], "3")
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="troppo difficile",
+                          level="beginner")
+        self.assertEqual(d["product"]["product_id"], "2")
+        self.assertIn("livello principiante", d["say"])
+
+    async def test_nothing_but_reserved_trips_is_a_level_no_match(self):
+        self.vela = make_vela(products=[
+            replace(make_product(3, price=100), levels=frozenset({"advanced"}), levels_exclusive=True)])
+        intent = await self.ok("create_intent", text="padel a ottobre in due, siamo principianti")
+        d = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(d["failed_criterion"], "level")
+        self.assertEqual(d["say"], "I viaggi compatibili sono riservati a giocatori avanzati. "
+                                   "Vuoi cambiare qualcosa?")

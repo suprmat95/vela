@@ -85,11 +85,14 @@ class FieldsIn(BaseModel):
     duration_max_nights: Optional[int] = None
     budget_scope: Optional[str] = None
     rooms: Optional[int] = None
+    level: Optional[str] = None             # M21-C (RF-62): beginner | intermediate | advanced
+    wants_coaching: Optional[bool] = None   # M21-C (RF-62)
 
     def fields(self, direction: Optional[str] = None) -> StructuredFields:
         return StructuredFields(self.sport, self.area, self.period_start, self.period_end,
                                 self.pax, self.budget, direction, self.duration_min_nights,
-                                self.duration_max_nights, self.budget_scope, self.rooms)
+                                self.duration_max_nights, self.budget_scope, self.rooms,
+                                self.level, self.wants_coaching)
 
 
 class IntentIn(FieldsIn):
