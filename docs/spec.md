@@ -422,8 +422,9 @@ Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisio
 `docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
 (UC-A..UC-F), implementazione in roadmap M21. RF-58 e RF-59 (durata) sono implementati da
 M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E, RF-60 e RF-61 (ordinamento e prodotti
-equivalenti, con il livello "livello e lezioni" neutro fino a M21-C) da M21-B, RF-65..68 (persone
-e camere, con la migrazione 0011) da M21-D; gli altri non ancora.
+equivalenti; il livello "livello e lezioni" attivo da M21-C) da M21-B, RF-65..68 (persone
+e camere, con la migrazione 0011) da M21-D, RF-62..64 (livello e lezioni, con la migrazione 0012) da
+M21-C; gli altri non ancora.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).

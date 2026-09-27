@@ -146,10 +146,11 @@ Tempo di riferimento degli esempi: oggi 2026-09-26.
   penalizza nessuno: la descrizione non dice in modo affidabile che le lezioni sono
   obbligatorie.
 - **Agente legge.**
-  - Compatibile: "… Ti propongo …: il programma è pensato anche per principianti e include
-    lezioni con un coach."
+  - Compatibile: "… Ti propongo … Il programma è pensato anche per principianti e include
+    lezioni o allenamenti." (M21-C: "lezioni o allenamenti", perché l'etichetta si accende anche
+    su "allenamento"; con livello sconosciuto "Il programma non indica un livello di gioco…")
   - Non compatibile ma proposto: "Non ho trovato viaggi per principianti con lezioni: questo
-    è pensato per giocatori intermedi e avanzati."
+    è pensato per giocatori intermedi e avanzati e include lezioni o allenamenti."
   - Nessuno: `NoChoice("level")` → "I viaggi compatibili sono riservati a giocatori avanzati.
     Vuoi cambiare qualcosa?"
 - **Test.**
