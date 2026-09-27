@@ -380,8 +380,9 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 
 - **RF-52** `create_intent` e `reject_proposal` accettano, su MCP e REST con lo stesso
   contratto, campi strutturati opzionali: `sport` (`padel` | `tennis` | `any`), `area` (nome
-  di un luogo), `period_start` e `period_end` (date ISO), `pax` (intero), `budget` (totale in
-  EUR, o a persona con `budget_scope`). (M21) Inoltre: `duration_min_nights`,
+  di un luogo), `period_start` e `period_end` (date ISO), `pax` (intero), `budget` (cifra in
+  EUR come detta dal viaggiatore, mai moltiplicata o divisa per le persone; da M21-E letta a
+  persona o in totale come in RF-69). (M21) Inoltre: `duration_min_nights`,
   `duration_max_nights` (interi 1..30), `level` (`beginner` | `intermediate` | `advanced`),
   `wants_coaching` (booleano), `rooms` (intero 1..pax), `budget_scope` (`per_person` |
   `total`). `reject_proposal` accetta inoltre `direction` (`north` | `south`) e, (M21),
@@ -420,7 +421,7 @@ stessa proposta. "Più freddo" non era capito, e lo sport non era mai stato chie
 Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisioni in
 `docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
 (UC-A..UC-F), implementazione in roadmap M21. RF-58 e RF-59 (durata) sono implementati da
-M21-A; gli altri non ancora.
+M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E; gli altri non ancora.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).

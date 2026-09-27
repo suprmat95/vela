@@ -345,3 +345,23 @@ All red for the right reasons. Implementing the surfaces, with the `budget` desc
 `DESCRIPTIONS_SMS` inherits the two tool texts. Full suite and lint:
 
 - 🔧 Bash: Run full suite and lint
+
+- 🔧 Bash: Commit surface changes
+
+Commit 7: documentation. Checking how M21-A recorded its status in the spec and roadmap, to do the same:
+
+- 🔧 Bash: See how M21-A updated spec and roadmap
+
+M21-A only updated the §4.12 status line and left the roadmap alone. I'll do the same, plus the RF-52 wording, since the `budget` field now carries the figure as said. Editing the docs:
+
+- 🔧 Bash: Find doc lines to update
+
+- 🔧 Bash: Update use case example and spec status
+
+- 🔧 Bash: Update spec RF-52 and REST docs
+
+- 🔧 Bash: Check load test results and the M14 claim
+
+- 🔧 Bash: Find section containing the M14 claim
+
+- 🔧 Bash: Write decisions section and REST row
