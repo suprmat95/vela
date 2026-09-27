@@ -194,7 +194,8 @@ def build_vela(settings: Settings, engine: Engine,
     wait = 0 if settings.vela_upstream_mode == LOADTEST else settings.accept_wait_seconds
     vela = Vela(repos, upstream.router, build_payments(settings), DEFAULT_TRAVELER, extractor=extractor,
                 sms_enabled=isinstance(notifier, TwilioSms), accept_wait_seconds=wait,
-                accept_poll_seconds=settings.accept_poll_seconds)
+                accept_poll_seconds=settings.accept_poll_seconds,
+                price_quote_ttl_seconds=settings.price_quote_ttl_seconds)
     return vela, upstream
 
 
