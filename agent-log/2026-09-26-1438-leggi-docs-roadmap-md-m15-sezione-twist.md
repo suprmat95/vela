@@ -1327,3 +1327,25 @@ Ok in architecture riesci a fare un grafico di un funnel di acquisto spiegando c
 "Ok" vuol dire che procedo con il punto 1: aggiungo nella §3.6 la scelta di tenere la GET del totale. Poi ti propongo il grafico.
 
 - 🔧 Bash: Find the price cache block in section 3.6
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/doc-architecture/ARCHITECTURE.md
+
+- 🔧 Bash: Cite the source and commit the trade-off
+
+- 🔧 Bash: Confirm commit contains only my edits
+
+- 🔧 AskUserQuestion
+
+Prima di disegnarlo verifico nel codice un dettaglio che cambia il grafico: dove si spendono le 2 chiamate quando il prezzo arriva dalla cache.
+
+- 🔧 Bash: Check where cache hits create their cart
+
+- 🔧 Bash: Read current purchase path section
+
+- 🔧 Bash: Insert the Mermaid funnel and fix the path table
+
+Controllo che il Mermaid sia valido prima del commit.
+
+- 🔧 Bash: Look for a local Mermaid renderer
+
+- 🔧 Bash: Check npx cache for mermaid-cli

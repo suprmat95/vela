@@ -63,7 +63,60 @@ Two consequences shape everything else:
   host). Payments and SMS are chosen independently: a Stripe key gives a real Checkout Session,
   three Twilio variables give real SMS; otherwise both are fakes.
 
-### The path of a purchase
+### The purchase funnel: who serves each step
+
+Every step starts from the traveller's agent (Claude, the ElevenLabs agent, a REST client) calling
+one of Vela's tools. What differs is who does the work: Vela inside the request, Vela's worker
+through the queue in Postgres, or a service outside Vela. Each box shows the HofJ calls it spends.
+
+```mermaid
+flowchart TD
+    S1["<b>1 · Intent</b><br/>create_intent<br/>parser + agent's fields · 0 HofJ"]
+    S2["<b>2 · One proposal</b><br/>get_proposal<br/>chooser on the Postgres catalogue · 0 HofJ"]
+    DET["<b>What's included?</b><br/>get_proposal_details<br/>programme, hotel, club · 0 HofJ"]
+    REJ["<b>No, because…</b><br/>reject_proposal<br/>reason → criteria · 0 HofJ"]
+    S3["<b>3 · Actual price</b><br/>accept_proposal<br/>cache hit: at once · 0 HofJ<br/>miss: purchase job prices it · 2 HofJ"]
+    S4["<b>4 · Payment link</b><br/>second accept = confirmation<br/>purchase job: cart if the price came from the cache · 2 HofJ<br/>then Stripe Checkout Session + SMS job"]
+    PAY["<b>Traveller pays</b><br/>Stripe Checkout"]
+    S5["<b>5 · Payment seen</b><br/>payment_check job polls Stripe · 0 HofJ"]
+    S6["<b>6 · Booking</b><br/>booking job<br/>customer, pax, booking · 3 HofJ"]
+    S7["<b>Confirmed</b><br/>code via get_order_status + SMS"]
+
+    S1 --> S2
+    S2 -.->|"what's included?"| DET
+    DET -.-> S2
+    S2 -->|"no, because…"| REJ
+    REJ --> S2
+    S2 -->|"yes"| S3
+    S3 -->|"confirm the price"| S4
+    S4 -->|"opens the link"| PAY
+    PAY --> S5
+    S5 --> S6
+    S6 --> S7
+
+    classDef request fill:#dbeafe,stroke:#1d4ed8,color:#0f172a
+    classDef worker fill:#fef3c7,stroke:#b45309,color:#0f172a
+    classDef outside fill:#e5e7eb,stroke:#4b5563,color:#0f172a
+    class S1,S2,DET,REJ request
+    class S3,S4 worker
+    class S5,S6 worker
+    class PAY,S7 outside
+```
+
+Blue = answered by Vela inside the request (no queue, no HofJ). Amber = work done by Vela's
+worker threads, queued in Postgres and paced by the quota bucket. Grey = outside Vela (Stripe's
+page, and the code delivered to the traveller).
+
+| Stage | The traveller's agent asks | Who serves it | HofJ calls | What happens here under peak |
+|---|---|---|---|---|
+| 1 · Intent | `create_intent` | Vela, in the request: structured fields, then the it/en parser, then Haiku if configured | 0 | Nothing waits. A missing sport becomes one question |
+| 2 · Proposal, details, rejection | `get_proposal`, `get_proposal_details`, `reject_proposal` | Vela, in the request: chooser and details on the catalogue copy in Postgres | 0 | Nothing waits for HofJ. Most travellers stop here: browsing is free |
+| 3 · Actual price | `accept_proposal` | Cache hit: Vela in the request. Miss: the purchase job of the first order for that price key (the leader); identical orders attach to it | 0 on a hit, 2 per price key | Accept waits up to 100 s. With the queue full the traveller hears a position and a declared wait |
+| 4 · Link | `accept_proposal` again (the confirmation) | Purchase job: creates the cart if the price came from the cache and checks the total again; then Stripe Checkout Session, SMS job (Twilio) | 2 (0 for the leader, who already has the cart) | **The wait that grows**: FIFO under the token bucket, declared, no cap. Silent orders expire after 15 min. A changed total goes back to step 3 |
+| 5 · Payment | `get_order_status` (optional) | Stripe (payment page); `payment_check` job reads the session every 60 s or when asked | 0 | Up to 60 s unless the traveller asks |
+| 6 · Booking | `get_order_status` | Booking job, quota class `booking`: may drain the bucket, never queues behind purchases | 3 | Never sacrificed |
+
+### The path of a purchase, step by step
 
 | Step | What happens | HofJ calls |
 |---|---|---|
@@ -71,9 +124,9 @@ Two consequences shape everything else:
 | 2 | `get_proposal`: the chooser reads the catalogue **from Postgres** and returns one trip with a "from" price and its reasons | 0 |
 | 3 | `get_proposal_details` (optional, any time): "what's included?" → the day-by-day programme, hotel, club, playing hours, from the product details the sync already stored. Read-only: no state change, works on a rejected proposal too | 0 |
 | 4 | `reject_proposal`: the reason becomes criteria ("too expensive", "somewhere cooler" → north, "not that hotel"); a new single proposal | 0 |
-| 5 | `accept_proposal`: create a `queued` order, never call HofJ or Stripe. If the price for the same product, date and party is cached, answer at once; otherwise wait up to 100 s for the purchase job to price it | 0 |
-| 6 | Purchase job: `POST /v1/itineraries` (includes the default hotel, 2–6 s) and `GET` the total → `awaiting_confirmation`, "the actual price is 840 euro for two, confirm?" | 2 |
-| 7 | Second `accept_proposal` = confirmation → Stripe Checkout Session → `awaiting_payment`, link read via `get_order_status` (and by SMS) | 0 |
+| 5 | `accept_proposal`: create a `queued` order, never call HofJ or Stripe. If the price for the same product, date and party is cached, answer at once with `awaiting_confirmation`; otherwise wait up to 100 s for the purchase job to price it | 0 |
+| 6 | Purchase job, on a cache miss: `POST /v1/itineraries` (includes the default hotel, 2–6 s) and `GET` the total → `awaiting_confirmation`, "the actual price is 840 euro for two, confirm?" | 2 |
+| 7 | Second `accept_proposal` = confirmation. If the price came from the cache, the purchase job now creates the cart and reads the total (a different total goes back to step 6's question). Then Stripe Checkout Session → `awaiting_payment`, link read via `get_order_status` (and by SMS) | 2 on a cache hit, else 0 |
 | 8 | `payment_check` job reads the Checkout Session every 60 s and whenever the traveller asks | 0 |
 | 9 | Booking job: `PUT customer`, `PUT pax`, `POST /v1/bookings` with the PaymentIntent → `confirmed`, code by status and SMS | 3 |
 
