@@ -1105,3 +1105,226 @@ Ora `decisions.md` (esito del giro ed elenco dei test cambiati) e la roadmap M19
 - 🔧 Bash: cat >> docs/decisions.md <<'EOF'  ## 2026-09-27 — M19 passo 2: esecuzione e load…
 
 - 🔧 Bash: DATABASE_URL=postgresql+psycopg://postgres:m19@localhost:55432/vela_m19 uv run p…
+
+Suite verde anche su Postgres. Spengo il compose `m19` e il Postgres temporaneo: sono miei, `master-*` non lo tocco.
+
+- 🔧 Bash: docker compose -p m19 -f docker-compose.yml -f /private/tmp/claude-501/-Users-ma…
+
+M19 è completa su `task/m19` e non è mergiata: mi fermo qui per il tuo OK prima del merge su `master`. Il giro C-2500 con il 2% di paganti passa tutti e quattro i criteri e i link al minuto salgono da 17,8 a 47,4. La suite è verde anche su Postgres (1605 test) e ruff è pulito.
+
+## Il giro
+
+| | Con la cache (60% paga) | Dopo M19 (2% paga) |
+|---|---|---|
+| Link al minuto a regime | 17,8 | **47,4** |
+| Chiamate per link | 5 | **2,11** (18 carrelli ancora senza link alla fine) |
+| Chiamate per ordine prenotato | 1 | **3,00** (`get_pax` mai servito) |
+| 429 / massimo in 60 s | 0 / 106 | 0 / 104 |
+| In coda alla fine | 360 | **159** |
+| Marco confermato a | 160 s | **95 s** |
+| Anna | nessun link entro il giro | confermata a **337 s** |
+
+Il confronto non è a parità di scenario: cambiano insieme M19 e la quota di chi paga, perché il giro al 60% non l'abbiamo fatto. Con il 60% di paganti stimo circa 26 link al minuto.
+
+**Proiezione a 50.000:** smaltimento in 3,5 ore invece di 9,4, e l'ultimo aspetta 3,4 ore invece di 9,2. Il modello non tiene conto degli ordini silenziosi: senza SMS lo smaltimento reale sarebbe più corto.
+
+## Cosa ho deciso durante l'esecuzione
+
+- **Segni di vita:** `last_seen_at` ha una scrittura sua. I salvataggi normali non lo toccano, così una richiesta di stato non può cancellare un cambio di stato fatto nello stesso istante dal worker.
+- **Scadenza senza costi:** la scadenza avviene prima di prendere i gettoni, quindi un ordine silenzioso non consuma quota.
+- **Frase di scadenza:** la distinguo senza campi nuovi. Un ordine scaduto senza link è scaduto in coda per silenzio, uno con il link è scaduto a 24 h.
+- **Replay dopo un riavvio:** accetta cliente e passeggeri sui propri carrelli. Senza questo, su Render in modo replay un riavvio tra link e pagamento avrebbe mandato l'ordine pagato in `booking_failed`.
+- **Test cambiati:** l'elenco completo è in `decisions.md`, nessuna asserzione indebolita. `test_loadtest_journey` è rimasto invariato: il viaggiatore finto non dipende dai passi del job.
+
+## Cosa resta incerto
+
+- **Produzione:** se HofJ in produzione rifiutasse cliente e passeggeri dopo il pagamento, l'ordine pagato finirebbe in `booking_failed` e andrebbe rimborsato a mano. Va mandata la domanda 10 prima del primo giro `live`.
+- **Tempi di conferma:** da pagamento a conferma, fino a 56 s per i viaggiatori normali. Dipende dalla verifica del pagamento ogni 60 s, non dalle 3 chiamate di booking.
+- **Durante la misura** era acceso lo stack `master-*` di un'altra sessione, a circa il 22% di una CPU. Sul ritmo non conta, sui p95 può pesare un po'.
+- **Taglia:** più vicina a L che alla M della roadmap.
+
+Il compose `m19` e il Postgres temporaneo sono spenti. `master-*` e le cartelle delle sonde (`probe-m19/`, `probe-m19-paid/`) non li ho toccati.
+
+Per il merge, come da tue istruzioni: rebase su `master`, poi merge. Se `master` nel frattempo avrà un'altra migrazione 0016, riaggancio la catena. Procedo?
+
+## Utente 18:16
+
+perche  senza SMS lo smaltimento reale sarebbe più corto ?
+
+## Agente 18:16
+
+Perché la scadenza degli ordini silenziosi vale solo per chi **non** ha ricevuto la promessa dell'SMS.
+
+**La regola.** Un ordine in coda scade, senza spendere chiamate, se il viaggiatore non chiede lo stato da 15 minuti. C'è però un'eccezione: se Vela gli ha detto "ti mando il link per SMS", cioè dopo la conferma del prezzo, con gli SMS attivi e un numero valido, l'ordine non scade mai. Quel viaggiatore ha ragione di stare zitto e aspettare il messaggio.
+
+**Con gli SMS attivi.** Quasi tutti quelli in coda hanno confermato il prezzo e hanno sentito la promessa dell'SMS. Nessuno scade, e Vela deve preparare il link per tutti i 10.000: la coda si smaltisce al ritmo della quota, circa 3,5-3,9 ore. È il caso della proiezione.
+
+**Senza SMS.** Nessuno ha ricevuto la promessa, quindi la regola vale per tutti. Nel twist a 50.000 le attese dichiarate sono di ore, mentre una conversazione con Claude o una telefonata con l'agente vocale dura minuti: la maggior parte chiude la chat e non chiede più lo stato. Dopo 15 minuti di silenzio il loro ordine esce dalla coda prima di prendere gettoni. Restano da servire solo quelli che continuano a chiedere, e con meno link da preparare allo stesso ritmo la coda si svuota prima.
+
+Due precisazioni:
+- **Non è più veloce per nessuno.** La coda è più corta perché si smette di lavorare per chi se n'è andato, non perché i link escano più in fretta. Chi continua a chiedere lo stato riceve il link prima, perché ha meno persone davanti.
+- **Quanto più corta non lo so.** Dipende da quanti viaggiatori continuano davvero a chiedere lo stato, e non l'abbiamo misurato. Nel banco il viaggiatore finto chiede ogni 30-60 s e quindi nessuno scade. Per questo nei risultati ho scritto "più corto" senza un numero.
+
+Una conseguenza da tenere presente: senza SMS chi torna dopo un'ora trova l'ordine scaduto. Riceve la frase "Ho chiuso l'ordine perché mentre era in coda non ti ho sentito per un po'…" e deve ripartire da una nuova proposta.
+
+## Utente 18:18
+
+ok procedi con il merge
+
+## Agente 18:18
+
+- 🔧 Bash: git worktree list; git log --oneline -3 master | cat; git merge-base --is-ancest…
+
+`master` non si è mosso (`686001f` è antenato di `task/m19`), quindi il rebase non serve. Controllo che il worktree di `master` sia pulito prima di fare il merge lì.
+
+- 🔧 Bash: cd /Users/matteodospina/orca/workspaces/vela/master && git status --short | head…
+
+- 🔧 Bash: git merge --no-ff task/m19 -m "Merge branch 'task/m19'  Co-Authored-By: Claude O…
+
+Merge fatto. Rilancio suite e ruff su `master`, per verificare lo stato dopo il merge.
+
+- 🔧 Bash: uv run ruff check . && uv run python3 -m unittest discover -s tests 2>&1 | grep …
+
+M19 è su `master` in locale, con il merge commit `0fa06c7` (`Merge branch 'task/m19'`, stesso formato dei merge precedenti). Non ho fatto push.
+
+- **Rebase:** non è servito, perché `master` era ancora fermo a `686001f`.
+- **Verifiche su `master` dopo il merge:** 1605 test verdi (76 saltati senza `DATABASE_URL`; su Postgres erano già passati prima del merge), ruff pulito, Alembic con una sola testa, 0016.
+- **Worktree di `master`:** era pulito prima del merge e lo è ancora dopo. Lo stack Docker `master-*` di un'altra sessione non l'ho toccato; nota che gira ancora sul codice di prima del merge.
+
+Resta aperto:
+- Il push di `master` su `origin`: lo faccio solo se me lo chiedi.
+- La domanda 10 da mandare a HofJ prima del primo giro `live`.
+- Il giro del load test con il 60% di paganti, se un giorno servirà il confronto a parità di scenario.
+- Le cartelle `probe-m19/` e `probe-m19-paid/` nel worktree `task-m19`, fuori da git: puoi cancellarle quando vuoi.
+
+## Utente 18:29
+
+ma perche per arrivare al link di pagamento deve fare per forza anche la get?
+
+## Agente 18:29
+
+- 🔧 Bash: cat /Users/matteodospina/orca/workspaces/vela/task-m19/probe-m19/01-create.json …
+
+La GET serve perché la creazione dell'itinerario non restituisce il prezzo. Nella sonda di oggi `POST /v1/itineraries` ha risposto solo così:
+
+```json
+{"data": {"itineraryId": "deimmovsayfq"}, "meta": {"now": 1790521568010}}
+```
+
+L'importo da pagare (`checkout.openAmount`) si legge solo con `GET /v1/itineraries/{id}`. E il link deve portare esattamente quell'importo (RF-16), per due motivi:
+
+- **Il catalogo non basta.** Il prezzo del catalogo × persone non è il prezzo vero: c'è il caso del prodotto 163, stimato 656 € e con il carrello a 840 €. Il totale dipende da data, hotel e camere, e lo calcola HofJ solo quando crea il carrello.
+- **Il pagamento deve coincidere con il carrello.** Il booking chiude il pagamento su HofJ con `paymentType: "full"`, cioè l'intero `openAmount`. Un link con un'altra cifra farebbe pagare al viaggiatore meno o più di quanto HofJ si aspetta.
+
+**E se il prezzo è già in cache?** Si potrebbe pensare di saltare la GET e fare il link con il prezzo in cache, ma oggi non è sicuro. La cache vale 15 minuti ed è per chiave, non per carrello: il carrello creato dopo il sì può costare un'altra cifra. RF-84 prevede proprio questo caso, e la GET è il controllo che lo intercetta (se il prezzo è cambiato, l'ordine torna a `awaiting_confirmation`). Senza la GET, un cambio di prezzo nei 15 minuti diventerebbe un link sbagliato. Nella sonda l'importo era già definitivo subito dopo la creazione, ma su un solo prodotto.
+
+**Come si potrebbe scendere a 1 chiamata per link.** Con 1 chiamata il ritmo passerebbe da circa 47 a circa 90 link al minuto con il 2% di paganti. Due strade:
+
+1. **Chiedere a HofJ** se `POST /v1/itineraries` può restituire anche `checkout` (oppure se esiste un parametro per farlo). Nessun rischio, ma dipende da loro. La aggiungerei come domanda 14 in `docs/hofj-questions.md`.
+2. **Fidarsi della cache per gli hit:** link con il prezzo in cache, senza GET. Il rischio è un link con l'importo sbagliato quando HofJ cambia prezzo dentro i 15 minuti. Si potrebbe fare la GET dopo il pagamento, nel job di booking, ma a quel punto un prezzo diverso significa un rimborso o un'integrazione, cioè il problema che la conferma del prezzo è nata per evitare.
+
+Consiglio la 1 e di tenere la GET finché HofJ non risponde. Se vuoi aggiungo la domanda 14.
+
+## Utente 18:32
+
+ma in cache c'è il prezzo di esattamente quella configuranzione di viaggio vero?
+
+## Agente 18:32
+
+Sì. La chiave della cache è (prodotto, data di inizio, adulti, camere, valuta), cioè esattamente i parametri con cui Vela crea il carrello: `POST /v1/itineraries` riceve proprio questi. Il resto o non cambia il prezzo o discende da questi:
+
+- **Data di fine e durata:** vengono dal prodotto e dalla data di inizio.
+- **Brand e lingua:** vengono dal prodotto.
+- **Hotel:** Vela accetta sempre quello di default, senza scegliere né aggiungere nulla (RF-15).
+- **Cliente e passeggeri:** non cambiano il totale, come misurato dalle sonde di oggi.
+
+Quindi il carrello che nasce dopo il sì ha gli stessi input di quello del leader. Il rischio non è una configurazione diversa, ma **il tempo**: il prezzo in cache può avere fino a 15 minuti, e in quel tempo HofJ può cambiare il prezzo di quella stessa configurazione. Per esempio perché cambiano la disponibilità o le tariffe, o perché l'hotel di default si esaurisce e ne subentra un altro. Nel banco questo non succede mai, perché il finto HofJ ha prezzi fissi.
+
+Quanto sia frequente non lo sappiamo. Si può misurare senza cambiare niente: quando il carrello dopo il sì costa diversamente dal prezzo confermato, il job d'acquisto scrive nel log `quote_price_changed`, che Vela già emette. Contando quelle righe in rapporto ai carrelli creati dopo un sì al prezzo in cache, sui primi giri `live`, avremmo la frequenza reale.
+
+Da lì la scelta diventa concreta:
+- **Se il prezzo non cambia praticamente mai** nei 15 minuti, saltare la GET per chi ha il prezzo dalla cache è ragionevole: si scende a 1 chiamata per link. Il raro caso diverso resta un'integrazione o un rimborso gestito a mano, oppure si accorcia la vita della cache per stringere la finestra.
+- **Se cambia spesso**, la GET resta: è l'unico punto in cui ce ne accorgiamo prima che il viaggiatore paghi.
+
+In entrambi i casi la domanda a HofJ ("`POST /v1/itineraries` può restituire anche `checkout`?") resta la strada senza rischi. Vuoi che la aggiunga a `docs/hofj-questions.md` insieme a questa misura da fare sui giri `live`?
+
+## Utente 18:33
+
+quanto sarebbe difficile scendere ad una chiamata?
+
+## Agente 18:33
+
+Tecnicamente è poco lavoro. Il problema è un vincolo che hai fissato tu, non il codice.
+
+## Il vincolo
+
+La task dice "il link porta sempre il totale del carrello (RF-16)". Saltare la GET vuol dire fare il link con il prezzo in cache, senza averlo letto dal carrello. Quindi va cambiata RF-16, e va deciso cosa succede quando il carrello costa diversamente da quanto il viaggiatore ha già pagato: rimborso, integrazione, oppure booking comunque.
+
+## Cosa cambierebbe nel codice (se accetti di cambiare RF-16)
+
+- **Job d'acquisto.** Per un ordine confermato sul prezzo in cache, un passo nuovo: crea l'itinerario e va dritto al link con `confirmed_total`, cioè 1 chiamata. Il leader resta a 2, perché la GET gli serve per conoscere il prezzo.
+- **Job di prenotazione.** La GET si sposta dopo il pagamento: rilegge il totale del carrello prima di cliente, passeggeri e booking, e se è diverso da quanto pagato applica la regola scelta sopra. Diventano 4 chiamate per ordine pagato invece di 3.
+- **Quota.** Il costo dei passi nuovi (1 e 4) in `calls_needed`, più l'attesa dichiarata ricalcolata.
+- **Test.** Acquisto, prenotazione, cache, processore dei job e un caso nuovo nel finto HofJ: il prezzo cambia tra il sì e il pagamento.
+- **Documenti e banco.** Spec (RF-16, RF-23, RF-46, RF-84), `decisions.md`, un nuovo giro del load test.
+- **Niente migrazione.** Taglia M, circa mezza giornata.
+
+## Cosa si guadagna
+
+Con 100 chiamate al minuto:
+
+| Paga | Oggi (2 per link + 3 per pagato) | Con 1 chiamata (1 per link + 4 per pagato) |
+|---|---|---|
+| 2% | ~47 link/min | ~90 link/min |
+| 60% | ~26 link/min | ~29 link/min |
+
+A 50.000 con il 2% lo smaltimento passerebbe da circa 3,5 a circa 1,8 ore. Con molti paganti il guadagno quasi sparisce, perché la chiamata risparmiata prima del link si paga dopo il pagamento.
+
+## Il rischio
+
+Se HofJ cambia il prezzo di quella configurazione nei 15 minuti di vita della cache, il viaggiatore paga una cifra diversa da quella che HofJ si aspetta, e lo scopriamo solo dopo il pagamento. È esattamente il caso che la conferma del prezzo era nata per evitare. Oggi non sappiamo quanto sia frequente.
+
+## Cosa consiglio
+
+1. **Adesso, a costo zero:** aggiungo la domanda a HofJ ("`POST /v1/itineraries` può restituire `checkout`?"). Se la risposta è sì, si scende a 1 chiamata senza rischi e senza toccare RF-16, con meno di un'ora di lavoro sull'adapter.
+2. **Sui primi giri `live`:** contiamo le righe `quote_price_changed` nei log, cioè quante volte il carrello costa diversamente dal prezzo confermato.
+3. **Solo se quella frequenza è praticamente zero** e HofJ non offre il prezzo nella creazione: facciamo la versione con la cache, cambiando RF-16 e decidendo la regola per il prezzo diverso dopo il pagamento.
+
+Vuoi che intanto aggiunga la domanda a HofJ e la misura da fare sui giri `live` in `docs/hofj-questions.md` e in `decisions.md`?
+
+## Utente 18:34
+
+tu in quanto lo faresti?
+
+## Agente 18:34
+
+Io, in questa sessione, circa **un'ora e mezza** dal tuo OK al branch pronto per il merge:
+
+| Parte | Tempo |
+|---|---|
+| Codice e test (acquisto a 1 chiamata, GET nel job di prenotazione, quota, caso "prezzo cambiato" nel finto HofJ) | ~45-60 min |
+| Suite completa, anche su Postgres, e ruff | ~5 min |
+| Giro C-2500 al 2% | ~15 min, quasi tutto di attesa |
+| Spec, `decisions.md`, `RESULTS.md`, roadmap | ~15 min |
+
+La "mezza giornata" che ti ho detto prima era la taglia della roadmap, cioè il tempo di una persona. Per riferimento, il passo 2 di M19, più grande di questo, qui ha richiesto circa due ore compreso il load test.
+
+Prima di scrivere codice però mi serve una decisione tua, che nessun documento copre: cosa fare quando, dopo il pagamento, il carrello costa diversamente da quanto il viaggiatore ha pagato.
+
+- **Booking comunque e segnalazione nel log, differenza gestita a mano.** È la più semplice. Il rischio: se HofJ si aspetta `openAmount` intero, il booking potrebbe essere rifiutato o risultare pagato in parte.
+- **Nessun booking, ordine in `booking_failed` con il motivo e rimborso a mano.** È la più prudente e usa uno stato che esiste già.
+- **Nuovo link per la differenza.** È la migliore per il viaggiatore, ma è una funzione nuova, più lunga e da concordare.
+
+Io consiglio la seconda: nessun rischio di prenotazioni pagate male, e quanto spesso succede lo misuriamo contando i `quote_price_changed` sui giri `live`. Ricordo però che significa cambiare RF-16, che nella task avevi messo come vincolo.
+
+Vuoi che proceda con la seconda opzione, o preferisci prima mandare la domanda a HofJ e aspettare la risposta?
+
+## Utente 18:35
+
+Ok teniamola cosi però lo scriveremo nelle scelte deliberate che abbiamo fatto
+
+## Agente 18:35
+
+Scrivo la scelta in `decisions.md` sul branch `task/m19`, con l'alternativa scartata e le condizioni per riaprirla.
+
+- 🔧 Bash: cd /Users/matteodospina/orca/workspaces/vela/task-m19 && git log --oneline -1 | …
