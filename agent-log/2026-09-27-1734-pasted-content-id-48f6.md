@@ -253,3 +253,17 @@ Failing as expected. Implementation: model, migration 0016, table, repositories 
 - 🔧 Bash: Show the remaining error
 
 - 🔧 Bash: Run memory repo tests and full suite
+
+Step 1 is green. Committing it.
+
+- 🔧 Bash: Commit step 1
+
+Step 2: geo. Tests first for Marbella and negated places.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/tests/test_geo_negation.py
+
+- 🔧 Bash: Add Marbella and negated place search to geo
+
+The rank dictionary keeps each area's *last* alias; `find_area` uses the first. Fixing it to mirror `find_area` exactly:
+
+- 🔧 Bash: Fix area ranking, test, commit step 2
