@@ -75,10 +75,11 @@ class RepositoryContract:
         p = make_product(7, min_pax=2, max_pax=0, hotel=None, windows=(("2026-10-01", "2026-10-04"),
                                                                         ("2026-11-05", "2026-11-08")))
         p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW,
-                    brand="terrarossa.com")
+                    brand="terrarossa.com", featured=True, special_offer=True)
         self.repos.products.upsert_many([p])
         got = self.repos.products.get("7")
         self.assertEqual(got, p)
+        self.assertEqual((got.featured, got.special_offer), (True, True))   # M21-B, migrazione 0010
 
     def test_products_empty(self):
         self.assertEqual(self.repos.products.count(), 0)

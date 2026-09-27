@@ -53,6 +53,16 @@ class ProductFromEntryTest(unittest.TestCase):
         self.assertEqual(p.raw, {"k": 1})
         self.assertTrue(p.bookable)
         self.assertFalse(p.archived)
+        self.assertEqual((p.featured, p.special_offer), (False, False))   # assenti nell'entry
+
+    def test_featured_and_special_offer_are_read_from_the_entry(self):
+        """M21-B (RF-60): `featured` e `isSpecialOffer` dell'API, falsi se assenti o nulli."""
+        p = product_from_entry(dict(ENTRY, featured=True, isSpecialOffer=True), archived=False,
+                               raw={}, fetched_at=NOW)
+        self.assertEqual((p.featured, p.special_offer), (True, True))
+        p = product_from_entry(dict(ENTRY, featured=None, isSpecialOffer=False), archived=False,
+                               raw={}, fetched_at=NOW)
+        self.assertEqual((p.featured, p.special_offer), (False, False))
 
     def test_missing_destination_venue_hotel(self):
         entry = dict(ENTRY, destination=None, venue=None, hotels={"data": []}, minPax=2, maxPax=0)
@@ -83,6 +93,17 @@ class LoadFixtureTest(unittest.TestCase):
         self.assertTrue(all(p.fetched_at == NOW for p in products))
         by_id = {p.id: p for p in products}
         self.assertEqual(by_id["181"].hotel, "THB Lanzarote Beach")
+
+    def test_featured_flags_come_from_the_fixture(self):
+        """M21-B: 11 prodotti attivi `featured` e nessuna offerta speciale (contati il 2026-09-27),
+        letti dalla proiezione `catalog` dei dettagli e dagli item di lista per gli archiviati."""
+        products = load_fixture(FIXTURE, fetched_at=NOW)
+        by_id = {p.id: p for p in products}
+        self.assertTrue(by_id["181"].featured)
+        self.assertFalse(by_id["1023"].featured)
+        self.assertEqual(sum(1 for p in products if p.featured and not p.archived), 11)
+        self.assertEqual(sum(1 for p in products if p.featured), 18)   # anche gli archiviati
+        self.assertFalse(any(p.special_offer for p in products))
 
 
 class IsTripTest(unittest.TestCase):

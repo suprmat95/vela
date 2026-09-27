@@ -19,7 +19,7 @@ MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media", "travelP
 # campi di RF-28 presi pari pari dal dettaglio (category, venue, destination, hotels a parte)
 CATALOG_FIELDS = ("id", "title", "slug", "shortDescription", "price", "currency", "minPax",
                   "maxPax", "minDate", "maxDate", "availabilities", "defaultDurationInDays",
-                  "updatedAt")
+                  "updatedAt", "featured", "isSpecialOffer")
 
 
 def strip_media(value):
@@ -102,6 +102,8 @@ def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datet
         archived=archived,
         provider_id=entry.get("providerID"),
         brand=brand,
+        featured=bool(entry.get("featured")),            # M21-B (RF-60): assente o nullo = falso
+        special_offer=bool(entry.get("isSpecialOffer")),
     )
 
 

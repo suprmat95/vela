@@ -38,6 +38,8 @@ products_t = Table(
     Column("archived", Boolean, nullable=False, default=False),
     Column("provider_id", String(32)),
     Column("brand", String(64)),
+    Column("featured", Boolean, nullable=False, default=False),        # 0010 (M21-B)
+    Column("special_offer", Boolean, nullable=False, default=False),   # 0010 (M21-B)
 )
 
 intents_t = Table(

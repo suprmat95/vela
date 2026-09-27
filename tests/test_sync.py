@@ -126,6 +126,14 @@ class SyncTest(unittest.TestCase):
         self.assertEqual((p.destination, p.hotel, p.fetched_at), ("Sinalunga", "Hotel Uno", T0))
         self.assertNotIn("gallery", p.raw)
 
+    def test_featured_and_special_offer_are_written_from_the_detail(self):
+        """M21-B (RF-60): le due etichette arrivano dal dettaglio esteso, non indovinate."""
+        source = FakeSource({"weebora.com": [[item(1, featured=True), item(2, isSpecialOffer=True),
+                                              item(3)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        flags = {pid: (p.featured, p.special_offer) for pid, p in self.products().items()}
+        self.assertEqual(flags, {"1": (True, False), "2": (False, True), "3": (False, False)})
+
     def test_follows_the_cursor_across_pages(self):
         source = FakeSource({"weebora.com": [[item(1)], [item(2)], [item(3)]]})
         report = self.sync(source, {"padel": "weebora.com"}).run()

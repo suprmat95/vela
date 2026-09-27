@@ -12,6 +12,7 @@ def item(pid, archived=False, **over):
         "providerID": "t%07d" % pid, "price": 340, "currency": "EUR", "minPax": 2,
         "maxPax": None, "minDate": "2026-09-25", "maxDate": "2027-01-07",
         "defaultDurationInDays": 3, "hotelSelection": False, "locale": "it",
+        "featured": False, "isSpecialOffer": False,
         "availabilities": [] if archived else [
             {"status": "Bookable", "startDate": "2026-09-28", "endDate": "2026-10-01",
              "serviceLevels": []}],

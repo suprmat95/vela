@@ -55,10 +55,14 @@ class CatalogFixtureTest(unittest.TestCase):
         for pid, detail in self.details.items():
             catalog, raw = detail["catalog"], detail["raw"]
             for key in ("category", "venue", "destination", "hotels", "price", "minDate",
-                        "maxDate", "availabilities", "defaultDurationInDays", "updatedAt"):
+                        "maxDate", "availabilities", "defaultDurationInDays", "updatedAt",
+                        "featured", "isSpecialOffer"):
                 self.assertIn(key, catalog, pid)
             self.assertIsInstance(catalog["category"], dict, pid)
             self.assertEqual(catalog["id"], pid)
+            # M21-B: la proiezione riporta le etichette del dettaglio così come sono
+            self.assertEqual((catalog["featured"], catalog["isSpecialOffer"]),
+                             (raw["featured"], raw["isSpecialOffer"]), pid)
             self.assertIn("hotels", raw.get("rawAttributes") or {}, pid)
             for key in MEDIA_KEYS:
                 self.assertFalse(has_key(raw, key), "%s contiene %s" % (pid, key))
@@ -99,6 +103,9 @@ class EveryFixtureTest(unittest.TestCase):
                     self.assertFalse(has_key(catalog["details"], key), key)
                 active = sorted(str(p["id"]) for p in catalog["products"] if not p.get("archived"))
                 self.assertEqual(active, sorted(catalog["details"]))
+                for pid, detail in catalog["details"].items():   # M21-B: etichette in `catalog`
+                    self.assertEqual((detail["catalog"]["featured"], detail["catalog"]["isSpecialOffer"]),
+                                     (detail["raw"]["featured"], detail["raw"]["isSpecialOffer"]), pid)
 
 
 if __name__ == "__main__":
