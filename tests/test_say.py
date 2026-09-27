@@ -412,6 +412,27 @@ class AgentToolSayTest(unittest.TestCase):
                          "Got it: a padel trip in Spain between 1 October 2026 and "
                          "31 October 2026, 1 to 3 nights, for 2 people.")
 
+    def test_understood_says_the_excluded_places_after_the_area(self):
+        """M21-F (RF-54, RF-73): "…in Spagna, esclusi i viaggi a Estepona, a ottobre…"."""
+        c = Criteria("padel", Area("country", "Spagna", "ES"),
+                     Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"), 2,
+                     excluded_areas=(Area("city", "Estepona", "ES"),))
+        self.assertEqual(say.say_understood(c), "Ho capito: un viaggio di padel in Spagna, esclusi i "
+                                                "viaggi a Estepona, tra il 1 ottobre 2026 e il 31 ottobre 2026 per 2 persone.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip in Spain, excluding Estepona, between 1 October 2026 and "
+                         "31 October 2026 for 2 people.")
+        two = replace(c, area=None, period=None, excluded_areas=(Area("city", "Estepona", "ES"),
+                                                               Area("region", "Canarie", "ES")))
+        self.assertEqual(say.say_understood(two), "Ho capito: un viaggio di padel, esclusi i viaggi a "
+                                                  "Estepona e alle Canarie, per 2 persone.")
+        self.assertEqual(say.say_understood(replace(two, period=None, pax=None, duration_min_nights=1,
+                                                    duration_max_nights=3)),
+                         "Ho capito: un viaggio di padel, esclusi i viaggi a Estepona e alle Canarie, "
+                         "da 1 a 3 notti.")
+        self.assertEqual(say.say_understood(replace(two, pax=None)),
+                         "Ho capito: un viaggio di padel, esclusi i viaggi a Estepona e alle Canarie.")
+
     def test_understood_duration_forms(self):
         cases = [((4, 4), "4 notti", "4 nights"), ((1, 1), "1 notte", "1 night"),
                  ((3, None), "almeno 3 notti", "at least 3 nights"),

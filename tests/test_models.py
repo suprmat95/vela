@@ -28,8 +28,21 @@ class CriteriaRoundTripTest(unittest.TestCase):
         self.assertEqual(d, {"sport": None, "area": None, "period": None, "pax": None,
                              "budget": None, "duration_min_nights": None,
                              "duration_max_nights": None, "budget_scope": None, "rooms": None,
-                             "level": None, "wants_coaching": None, "language": "it"})
+                             "level": None, "wants_coaching": None, "excluded_areas": [],
+                             "language": "it"})
         self.assertEqual(criteria_from_dict(d), c)
+
+    def test_excluded_areas_round_trip(self):
+        """M21-F (RF-73): i luoghi esclusi stanno nel JSON dei criteri, in ordine."""
+        c = Criteria(sport="padel", area=Area("country", "Spagna", "ES"),
+                     excluded_areas=(Area("city", "Estepona", "ES"), Area("city", "Marbella", "ES")))
+        d = criteria_to_dict(c)
+        self.assertEqual(d["excluded_areas"], [{"kind": "city", "name": "Estepona", "country_code": "ES"},
+                                               {"kind": "city", "name": "Marbella", "country_code": "ES"}])
+        self.assertEqual(criteria_from_dict(d), c)
+
+    def test_intent_saved_before_m21f_has_no_excluded_areas(self):
+        self.assertEqual(criteria_from_dict({"sport": "padel", "language": "it"}).excluded_areas, ())
 
     def test_duration_round_trip(self):
         c = Criteria(sport="padel", duration_min_nights=1, duration_max_nights=3)

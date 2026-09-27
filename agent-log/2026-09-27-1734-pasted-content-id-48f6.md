@@ -267,3 +267,19 @@ Step 2: geo. Tests first for Marbella and negated places.
 The rank dictionary keeps each area's *last* alias; `find_area` uses the first. Fixing it to mirror `find_area` exactly:
 
 - 🔧 Bash: Fix area ranking, test, commit step 2
+
+Step 3: `excluded_areas` in the criteria and in the "Ho capito" line. Tests first.
+
+- 🔧 Bash: Find criteria round-trip and say tests
+
+- 🔧 Bash: Add criteria and say tests for excluded areas
+
+Periods print with the year and no comma before the people. Aligning the expected strings:
+
+- 🔧 Bash: Implement excluded_areas in criteria and say
+
+The duration and level clauses would add a second comma after an exclusion. Guarding that and covering it with a test:
+
+- 🔧 Bash: Guard against double commas and test it
+
+- 🔧 Bash: Run full suite after step 3

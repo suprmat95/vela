@@ -47,6 +47,7 @@ class Criteria:
     rooms: Optional[int] = None   # M21-D, RF-65: 1..pax; None solo negli intenti salvati prima di M21-D
     level: Optional[str] = None   # M21-C, RF-62: `beginner` | `intermediate` | `advanced`; morbido
     wants_coaching: Optional[bool] = None   # M21-C, RF-62: None = non detto; False non penalizza
+    excluded_areas: tuple = ()   # M21-F, RF-73: tuple[Area, ...] dai rifiuti `place`; filtro duro
 
 
 @dataclass(frozen=True)
@@ -79,8 +80,7 @@ class StructuredFields:
 def criteria_to_dict(c: Criteria) -> dict:
     return {
         "sport": c.sport,
-        "area": None if c.area is None else {"kind": c.area.kind, "name": c.area.name,
-                                             "country_code": c.area.country_code},
+        "area": None if c.area is None else _area_dict(c.area),
         "period": None if c.period is None else {"start": c.period.start.isoformat(),
                                                  "end": c.period.end.isoformat(),
                                                  "label": c.period.label},
@@ -92,8 +92,17 @@ def criteria_to_dict(c: Criteria) -> dict:
         "rooms": c.rooms,
         "level": c.level,
         "wants_coaching": c.wants_coaching,
+        "excluded_areas": [_area_dict(a) for a in c.excluded_areas],
         "language": c.language,
     }
+
+
+def _area_dict(a: Area) -> dict:
+    return {"kind": a.kind, "name": a.name, "country_code": a.country_code}
+
+
+def _area(d: dict) -> Area:
+    return Area(d["kind"], d["name"], d["country_code"])
 
 
 def criteria_from_dict(d: dict) -> Criteria:
@@ -102,7 +111,7 @@ def criteria_from_dict(d: dict) -> Criteria:
     budget = d.get("budget")
     return Criteria(
         sport=d.get("sport"),
-        area=None if area is None else Area(area["kind"], area["name"], area["country_code"]),
+        area=None if area is None else _area(area),
         period=None if period is None else Period(date.fromisoformat(period["start"]),
                                                   date.fromisoformat(period["end"]),
                                                   period["label"]),
@@ -114,6 +123,7 @@ def criteria_from_dict(d: dict) -> Criteria:
         rooms=d.get("rooms"),
         level=d.get("level"),
         wants_coaching=d.get("wants_coaching"),
+        excluded_areas=tuple(_area(a) for a in d.get("excluded_areas") or ()),
         language=d.get("language") or "it",
     )
 

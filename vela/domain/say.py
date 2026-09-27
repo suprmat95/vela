@@ -111,6 +111,10 @@ def _when(period: Period, lang: str = "it") -> str:
 _ANY_SPORT = {"it": "padel o tennis", "en": "padel or tennis"}
 
 
+def _comma(part: str) -> str:
+    return part if part.endswith(",") else part + ","
+
+
 def _describe(c: Criteria) -> str:
     """I criteri capiti come frase: "un viaggio di padel in Spagna … per 2 persone …"."""
     lang = c.language
@@ -122,11 +126,19 @@ def _describe(c: Criteria) -> str:
         parts = ["un viaggio di %s" % sport if sport else "un viaggio"]
     if c.area:
         parts.append(geo.where(c.area, lang))
+    if c.excluded_areas:
+        # tra virgole come la durata: "…in Spagna, esclusi i viaggi a Estepona, a ottobre…" (RF-73)
+        parts[-1] = _comma(parts[-1])
+        places = [geo.display_name(a, lang) if en else geo.where(a, lang) for a in c.excluded_areas]
+        more = (c.period or c.duration_min_nights is not None or c.duration_max_nights is not None
+                or c.pax or rooms_said(c.pax, c.rooms) or _level_and_coaching(c) or c.budget is not None)
+        parts.append(("excluding %s" if en else "esclusi i viaggi %s") % _join(places, lang)
+                     + ("," if more else ""))
     if c.period:
         parts.append(_when(c.period, lang))
     if c.duration_min_nights is not None or c.duration_max_nights is not None:
         # tra virgole: "…a ottobre, da 1 a 3 notti, per 2 persone" (M21, RF-58)
-        parts[-1] += ","
+        parts[-1] = _comma(parts[-1])
         parts.append(nights_range(c.duration_min_nights, c.duration_max_nights, lang)
                      + ("," if c.pax or c.budget is not None else ""))
     if c.pax:
@@ -136,7 +148,7 @@ def _describe(c: Criteria) -> str:
     play = _level_and_coaching(c)
     if play:
         # tra virgole come la durata: "…per 2 persone, livello principiante, con lezioni, con un budget…"
-        parts[-1] += ","
+        parts[-1] = _comma(parts[-1])
         parts.append(", ".join(play) + ("," if c.budget is not None else ""))
     if c.budget is not None:
         parts.append(_budget_reading(c))
