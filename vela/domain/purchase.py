@@ -9,6 +9,7 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
     → l'ordine passa a `awaiting_confirmation` e il job si chiude qui (decisione 2026-09-26):
       il viaggiatore sente il prezzo effettivo e solo la sua conferma accoda un nuovo job
       d'acquisto che riparte dal passo 4
+      (RF-84: se l'ordine ha già un `confirmed_total` uguale, si prosegue al link senza fermarsi)
   4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
 
@@ -121,8 +122,14 @@ class PurchaseJob:
         elif job.step == STEP_TOTAL:
             itinerary = hofj.get_itinerary(order.itinerary_id)
             self._publish(order, itinerary.total)   # RF-84: prima che l'ordine lasci `queued`
-            self._save_order(replace(order, total=itinerary.total, currency=itinerary.currency,
-                                     status=OrderStatus.AWAITING_CONFIRMATION))
+            priced = replace(order, total=itinerary.total, currency=itinerary.currency)
+            if order.confirmed_total == itinerary.total and order.currency == itinerary.currency:
+                self._save_order(priced)   # RF-84: il viaggiatore ha già detto sì a questo importo
+            else:
+                if order.confirmed_total is not None:
+                    log.info("quote_price_changed order_id=%s confirmed=%s total=%s",
+                             order.id, order.confirmed_total, itinerary.total)
+                self._save_order(replace(priced, status=OrderStatus.AWAITING_CONFIRMATION))
         elif job.step == STEP_LINK:
             link = self.payments.create_payment_link(order, product.title)
             self._save_order(replace(order, status=OrderStatus.AWAITING_PAYMENT,

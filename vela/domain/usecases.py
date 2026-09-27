@@ -22,7 +22,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
                                 ProposalDetails, ProposalMade, QuoteKey, QuoteStatus, Rejection,
                                 StructuredFields, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
-from vela.domain.purchase import STEP_LINK
+from vela.domain.purchase import STEP_ITINERARY, STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
 from vela.domain.quotes import quote_key
 from vela.domain.refine import Refinement, is_price_reason, refine
@@ -330,12 +330,16 @@ class Vela:
         return False
 
     def _confirm(self, order: Order) -> Union[OrderQueued, OrderStatusResponse]:
-        """Il sì al prezzo effettivo: l'ordine torna in coda e il job riparte dal link."""
+        """Il sì al prezzo effettivo: l'ordine torna in coda. Con il carrello il job riparte dal
+        link; senza (RF-84, prezzo dalla cache) riparte dal carrello e al passo 3 confronta il
+        totale con quello confermato qui."""
         now = self.now()
-        self.repos.orders.save(replace(order, status=OrderStatus.QUEUED, updated_at=now))
+        cart = order.itinerary_id is not None
+        confirmed = order if cart else replace(order, confirmed_total=order.total)
+        self.repos.orders.save(replace(confirmed, status=OrderStatus.QUEUED, updated_at=now))
         if self.repos.jobs.active_for_order(order.id, JobKind.PURCHASE) is None:
             self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
-                                        now, now, step=STEP_LINK))
+                                        now, now, step=STEP_LINK if cart else STEP_ITINERARY))
         return self._await_progress(order.id)
 
     def _await_progress(self, order_id: str) -> Union[OrderQueued, OrderStatusResponse]:
@@ -405,10 +409,13 @@ class Vela:
         if payable:
             self._check_payment_now(order.id)
         differs = None if order.total is None else order.total != estimate
+        sentence = say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
+                                  price_from_total=estimate, phone_tail=tail, pax=order.pax)
+        if (status == OrderStatus.AWAITING_CONFIRMATION and order.confirmed_total is not None
+                and order.total != order.confirmed_total):   # RF-84
+            sentence = say.say_price_changed_since(order.total, order.confirmed_total, lang)
         return OrderStatusResponse(
-            order.id, status,
-            say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
-                           price_from_total=estimate, phone_tail=tail, pax=order.pax),
+            order.id, status, sentence,
             total=order.total, currency=order.currency if order.total is not None else None,
             price_from_total=estimate if order.total is not None else None, total_differs=differs,
             payment_url=order.payment_url if payable else None, booking_code=order.booking_code,

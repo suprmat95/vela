@@ -192,6 +192,59 @@ class LeaderAndFollowersTest(unittest.TestCase):
         self.assertEqual(seen, [OrderStatus.QUEUED])
 
 
+class ConfirmWithoutCartTest(unittest.TestCase):
+    def hit(self, w):
+        w.accept(w.traveler())
+        w.settle()
+        pid = w.traveler()
+        w.accept(pid)
+        return pid
+
+    def test_confirm_without_cart_goes_to_the_link_when_the_price_matches(self):
+        w = World()
+        pid = self.hit(w)
+        w.accept(pid)                                        # il sì
+        o = w.order(pid)
+        self.assertEqual((o.status, o.confirmed_total), (OrderStatus.QUEUED, Decimal("700")))
+        self.assertEqual(w.job(pid).step, 0)                 # il carrello non c'è ancora
+        w.settle()
+        o = w.order(pid)
+        self.assertEqual((o.status, o.total), (OrderStatus.AWAITING_PAYMENT, Decimal("700")))
+        self.assertIsNotNone(o.itinerary_id)
+        self.assertEqual(w.carts(), 2)
+
+    def test_confirm_without_cart_asks_again_when_price_changed(self):
+        w = World()
+        pid = self.hit(w)
+        w.accept(pid)
+        w.hofj.total = Decimal("768")
+        w.settle()
+        o = w.order(pid)
+        self.assertEqual((o.status, o.total, o.confirmed_total),
+                         (OrderStatus.AWAITING_CONFIRMATION, Decimal("768"), Decimal("700")))
+        self.assertEqual(w.payments.links, [])
+        status = w.vela.get_order_status(o.id)
+        self.assertIn("768", status.say)
+        self.assertIn("700", status.say)
+        self.assertEqual(w.repos.quotes.get(KEY).total, Decimal("768"))
+        carts = w.carts()
+        w.accept(pid)                                        # il secondo sì
+        self.assertEqual(w.job(pid).step, 4)                 # dal link: il carrello c'è
+        w.settle()
+        self.assertEqual(w.order(pid).status, OrderStatus.AWAITING_PAYMENT)
+        self.assertTrue(w.payments.links[-1].url.endswith(o.id))
+        self.assertEqual(w.carts(), carts)
+
+    def test_leader_confirm_still_starts_from_the_link(self):
+        w = World()
+        pid = w.traveler()
+        w.accept(pid)
+        w.settle()
+        w.accept(pid)
+        self.assertEqual(w.job(pid).step, 4)
+        self.assertIsNone(w.order(pid).confirmed_total)
+
+
 class SettingsTest(unittest.TestCase):
     def test_default_ttl_is_fifteen_minutes(self):
         self.assertEqual(Settings().price_quote_ttl_seconds, 900)
