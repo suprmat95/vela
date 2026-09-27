@@ -1,7 +1,8 @@
 """Interpretazione di un rifiuto (RF-08, RF-53): criteri aggiornati, funzione pura.
 
 Prima il motivo in testo libero, con regole it/en che si combinano: budget (una cifra nel motivo,
-altrimenti "troppo caro" porta il budget all'80% del totale proposto, senza mai alzarlo),
+letta a persona o in totale come in `create_intent`, M21-E; altrimenti "troppo caro" porta il
+budget all'80% del totale proposto, senza mai alzarlo, e lo legge in totale),
 direzione ("più a sud"/"più a nord", "più fresco"/"più caldo" con le tabelle di `geo`), luogo
 esplicito, periodo, sport, persone e durata con gli stessi parser dell'intento, "troppo
 lungo"/"troppo corto" che spostano la durata rispetto alla proposta (M21-A). Poi i campi strutturati
@@ -16,8 +17,9 @@ from decimal import Decimal
 from typing import Optional
 
 from vela.domain import geo
-from vela.domain.intent import (MAX_NIGHTS, conflicts_between, parse_budget, parse_duration,
-                                parse_pax, parse_period, parse_sport, validate_fields)
+from vela.domain.intent import (MAX_NIGHTS, CheapestTotal, conflicts_between, parse_budget,
+                                parse_budget_scope, parse_duration, parse_pax, parse_period,
+                                parse_sport, read_budget, validate_fields)
 from vela.domain.models import Area, Criteria, Proposal, StructuredFields
 
 PRICE_FACTOR = Decimal("0.8")
@@ -58,12 +60,6 @@ def is_price_reason(reason: Optional[str]) -> bool:
 def _text_changes(criteria: Criteria, low: str, proposal: Proposal,
                   product_area: Optional[Area], today: date) -> dict:
     changes = {}
-    budget = parse_budget(low)
-    if budget is not None:
-        changes["budget"] = budget
-    elif _PRICE.search(low):
-        lowered = (proposal.price_from * proposal.pax * PRICE_FACTOR).quantize(Decimal("0.01"))
-        changes["budget"] = lowered if criteria.budget is None else min(lowered, criteria.budget)
     direction = "south" if _SOUTH.search(low) else "north" if _NORTH.search(low) else None
     if direction is not None:
         moved = geo.move(product_area, direction)
@@ -99,11 +95,49 @@ def _duration_changes(criteria: Criteria, low: str, proposal: Proposal) -> dict:
     return {"duration_min_nights": shortest, "duration_max_nights": longest}
 
 
+def _lowered(criteria: Criteria, low: str, proposal: Proposal) -> Optional[Decimal]:
+    """"Troppo caro" senza cifra: l'80% del totale proposto, senza mai alzare il budget."""
+    if not _PRICE.search(low):
+        return None
+    lowered = (proposal.price_from * proposal.pax * PRICE_FACTOR).quantize(Decimal("0.01"))
+    return lowered if criteria.budget is None else min(lowered, criteria.budget)
+
+
+def _said_figure(criteria: Criteria) -> Decimal:
+    """La cifra detta dal viaggiatore, dal tetto sul totale e dalla lettura (RF-69)."""
+    if criteria.budget_scope == "per_person" and criteria.pax:
+        return criteria.budget / criteria.pax
+    return criteria.budget
+
+
+def _budget_changes(before: Criteria, after: Criteria, figure: Optional[Decimal],
+                    stated: Optional[str], lowered: Optional[Decimal],
+                    cheapest_total: Optional[CheapestTotal]) -> dict:
+    """RF-69 sul rifiuto (decisioni M21-E): una cifra nuova passa dalle regole 1-5 con i criteri
+    già aggiornati; "troppo caro" dà un totale; altrimenti la cifra già detta si rilegge con la
+    lettura nuova (campo o parole) o con quella di prima, per il numero di persone aggiornato."""
+    if figure is not None:
+        read = read_budget(replace(after, budget=figure, budget_scope=stated), cheapest_total)
+    elif lowered is not None:
+        return {"budget": lowered, "budget_scope": "total"}
+    elif before.budget is not None and (stated is not None or after.pax != before.pax):
+        read = read_budget(replace(after, budget=_said_figure(before),
+                                   budget_scope=stated or before.budget_scope or "total"))
+    else:
+        return {}
+    return {"budget": read.budget, "budget_scope": read.budget_scope}
+
+
 def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
            product_area: Optional[Area], today: date,
-           fields: Optional[StructuredFields] = None) -> Refinement:
+           fields: Optional[StructuredFields] = None,
+           cheapest_total: Optional[CheapestTotal] = None) -> Refinement:
+    """`cheapest_total`: la regola 4 di RF-69 per una cifra nuova senza lettura detta."""
     fields = fields or StructuredFields()
-    changes = _text_changes(criteria, (reason or "").lower(), proposal, product_area, today)
+    low = (reason or "").lower()
+    changes = _text_changes(criteria, low, proposal, product_area, today)
+    said = {k: v for k, v in (("budget", parse_budget(low)), ("budget_scope", parse_budget_scope(low)))
+            if v is not None}
     given, discarded = validate_fields(fields.as_dict(), today)
     discarded = list(discarded)
     if fields.direction is not None:
@@ -116,7 +150,16 @@ def refine(criteria: Criteria, reason: Optional[str], proposal: Proposal,
             changes["area"] = moved
         else:
             changes.setdefault("area", moved)   # vince `area`: la direzione resta nei conflitti
-    conflicts = conflicts_between(changes, given)
+    conflicts = conflicts_between({**changes, **said}, given)
+    figure = given.pop("budget", said.get("budget"))
+    stated = given.pop("budget_scope", said.get("budget_scope"))
+    lowered = _lowered(criteria, low, proposal)
     changes.update(given)
     refined = replace(criteria, **changes) if changes else criteria
-    return Refinement(refined, tuple(discarded), conflicts, understood=bool(changes))
+    budget = _budget_changes(criteria, refined, figure, stated, lowered, cheapest_total)
+    # la lettura conta come capita solo se c'è un budget da leggere (decisione M21-E 3)
+    touched = figure is not None or lowered is not None or (
+        criteria.budget is not None and stated is not None)
+    if budget:
+        refined = replace(refined, **budget)
+    return Refinement(refined, tuple(discarded), conflicts, understood=bool(changes) or touched)

@@ -285,3 +285,29 @@ Green. I'd added a `products` parameter to `_cheapest_total` that only the rejec
 Green, and no existing test changed. Commit 3b:
 
 - 🔧 Bash: Commit rule 4 in create_intent
+
+Commit 4: the rejection. Tests on `refine` first (the pure function), then the single shared catalogue read in `reject_proposal`. Checking how the refine tests build a proposal:
+
+- 🔧 Bash: Read refine test setup
+
+- 🔧 Bash: Add failing rejection tests
+
+- 🔧 Bash: Summarize failure reasons
+
+- 🔧 Bash: Fix rejection single-read test expectation
+
+Now the implementation in `refine.py` and `usecases.py`:
+
+- 🔧 Bash: Implement budget reading on rejection with shared catalog read
+
+Green. Full suite and lint:
+
+- 🔧 Bash: Run full suite and lint
+
+- 🔧 Bash: Inspect a refine test failure
+
+- 🔧 Bash: Re-read budget only when needed and rerun suite
+
+Green, with all 11 tests unchanged. I'll add a test that pins this case explicitly in the UC-E file, then commit:
+
+- 🔧 Bash: Add regression test and commit rejection changes

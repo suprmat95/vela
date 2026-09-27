@@ -1,14 +1,17 @@
 """M21-E (UC-E, RF-69, RF-70): budget a testa o totale."""
 import unittest
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
-from support import FakeHofJ, StubPayments, make_product
+from support import NOW, FakeHofJ, StubPayments, make_product
 from test_usecases import Clock
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.domain.intent import (QUESTION_SPORT, parse_budget, parse_budget_scope, parse_intent,
                                 read_budget, validate_fields)
-from vela.domain.models import Criteria, IntentCreated, IntentQuestion, StructuredFields
+from vela.domain.models import (Criteria, IntentCreated, IntentQuestion, Proposal,
+                                StructuredFields)
+from vela.domain.refine import refine
 from vela.domain.usecases import Vela
 
 TODAY = date(2026, 9, 25)   # venerdì
@@ -248,3 +251,114 @@ class CreateIntentRuleFourTest(unittest.TestCase):
                 r = vela.create_intent(text)
                 self.assertIsInstance(r, (IntentCreated, IntentQuestion))
                 self.assertEqual(vela.repos.products.list_calls, 0)
+
+
+THREE = Criteria("padel", pax=3, budget=Decimal("600"), budget_scope="total")
+EACH = Criteria("padel", pax=3, budget=Decimal("1800"), budget_scope="per_person")
+PROPOSAL = Proposal("p1", "i1", "1", date(2026, 10, 1), date(2026, 10, 4), 3, Decimal("250"),
+                    "EUR", "Motivo.", NOW)   # totale 750 → 80% = 600
+
+
+def rejected(criteria, reason="", cheapest=None, **fields):
+    return refine(criteria, reason, PROPOSAL, None, TODAY, StructuredFields(**fields),
+                  cheapest_total=cheapest)
+
+
+class RejectBudgetTest(unittest.TestCase):
+    """UC-E sul rifiuto: stesse regole per una cifra nuova; `budget_scope` o persone cambiate
+    rileggono la cifra già detta (decisioni M21-E 1 e 3); "troppo caro" legge in totale (2)."""
+
+    def reading(self, r):
+        return (r.criteria.budget, r.criteria.budget_scope)
+
+    def test_scope_field_rereads_the_figure(self):
+        self.assertEqual(self.reading(rejected(THREE, budget_scope="per_person")),
+                         (Decimal("1800"), "per_person"))
+        self.assertEqual(self.reading(rejected(EACH, budget_scope="total")), (Decimal("600"), "total"))
+
+    def test_scope_words_reread_the_figure(self):
+        r = rejected(THREE, "intendevo a testa")
+        self.assertEqual(self.reading(r), (Decimal("1800"), "per_person"))
+        self.assertTrue(r.understood)
+
+    def test_intent_saved_before_m21e_reads_as_total(self):
+        old = replace(THREE, budget_scope=None)
+        self.assertEqual(self.reading(rejected(old, budget_scope="per_person")),
+                         (Decimal("1800"), "per_person"))
+
+    def test_new_figure_goes_through_rule_four(self):
+        r = rejected(THREE, "massimo 500 euro", Cheapest(Decimal("1200")))
+        self.assertEqual(self.reading(r), (Decimal("1500"), "per_person"))
+        r = rejected(THREE, "massimo 500 euro", Cheapest(Decimal("450")))
+        self.assertEqual(self.reading(r), (Decimal("500"), "total"))
+
+    def test_rule_four_uses_the_refined_criteria(self):
+        cheapest = Cheapest(Decimal("1200"))
+        rejected(THREE, "a novembre, massimo 500 euro, siamo in 4", cheapest)
+        (asked,) = cheapest.calls
+        self.assertEqual((asked.pax, asked.period.start), (4, date(2026, 11, 1)))
+
+    def test_new_figure_with_words_or_field(self):
+        cheapest = Cheapest(Decimal("450"))
+        self.assertEqual(self.reading(rejected(THREE, "700 a testa", cheapest)),
+                         (Decimal("2100"), "per_person"))
+        self.assertEqual(self.reading(rejected(EACH, "", cheapest, budget=500, budget_scope="total")),
+                         (Decimal("500.00"), "total"))
+        self.assertEqual(cheapest.calls, [])
+
+    def test_scope_field_beats_the_words_with_conflict(self):
+        r = rejected(THREE, "700 a testa", budget_scope="total")
+        self.assertEqual(self.reading(r), (Decimal("700"), "total"))
+        self.assertIn(("budget_scope", "per_person", "total"), r.conflicts)
+
+    def test_more_people_per_person_raises_the_cap(self):
+        """Decisione 1: 600 a testa in 3, poi "siamo in 4" → 2400."""
+        self.assertEqual(self.reading(rejected(EACH, "siamo in 4")), (Decimal("2400"), "per_person"))
+        self.assertEqual(self.reading(rejected(EACH, pax=2)), (Decimal("1200"), "per_person"))
+
+    def test_more_people_total_keeps_the_cap(self):
+        self.assertEqual(self.reading(rejected(THREE, "siamo in 4")), (Decimal("600"), "total"))
+
+    def test_too_expensive_reads_as_total(self):
+        """Decisione 2: il budget abbassato all'80% è un totale."""
+        r = rejected(EACH, "troppo caro")
+        self.assertEqual(self.reading(r), (Decimal("600.00"), "total"))
+
+    def test_scope_without_budget_has_no_effect(self):
+        """Decisione 3: nessun budget da rileggere, nessun cambiamento, nessun criterio capito."""
+        r = rejected(replace(THREE, budget=None, budget_scope=None), "non mi convince",
+                     budget_scope="per_person")
+        self.assertEqual(self.reading(r), (None, None))
+        self.assertEqual(r.discarded, ())
+        self.assertFalse(r.understood)
+
+    def test_unrelated_reason_keeps_the_reading(self):
+        r = rejected(EACH, "a novembre")
+        self.assertEqual(self.reading(r), (Decimal("1800"), "per_person"))
+
+    def test_unrelated_reason_leaves_an_old_intent_alone(self):
+        old = replace(THREE, budget_scope=None)
+        self.assertEqual(self.reading(rejected(old, "a novembre")), (Decimal("600"), None))
+
+
+class RejectReadsTheCatalogOnceTest(unittest.TestCase):
+    """Decisione M21-E: nel rifiuto regola 4 e `choose` condividono una sola lettura."""
+
+    def test_one_read_with_rule_four(self):
+        vela = make_vela(400)
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, 1800 euro in tutto")
+        proposal = vela.get_proposal(intent.intent_id)
+        vela.repos.products.list_calls = 0
+        r = vela.reject_proposal(proposal.proposal.id, "massimo 500 euro")
+        self.assertEqual(r.failed_criterion, "price")   # tetto M7: il rifiutato costava 1200
+        c = vela.repos.intents.get(intent.intent_id).criteria
+        self.assertEqual((c.budget, c.budget_scope), (Decimal("1500"), "per_person"))
+        self.assertEqual(vela.repos.products.list_calls, 1)
+
+    def test_one_read_without_rule_four(self):
+        vela = make_vela(400)
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre")
+        proposal = vela.get_proposal(intent.intent_id)
+        vela.repos.products.list_calls = 0
+        vela.reject_proposal(proposal.proposal.id, "a novembre")
+        self.assertEqual(vela.repos.products.list_calls, 1)

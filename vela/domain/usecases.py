@@ -3,6 +3,7 @@
 Dipende solo dalle porte: repository, HofJ e pagamenti sono iniettati. `now` e `new_id` sono
 iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodotto (RF-10).
 """
+import functools
 import logging
 import time
 import uuid
@@ -89,11 +90,14 @@ class Vela:
         return IntentCreated(intent.id, intent.criteria,
                              say.say_intent_created(intent.criteria, result.discarded))
 
-    def _cheapest_total(self, now: datetime):
+    def _cheapest_total(self, now: datetime, products: Optional[Callable[[], list]] = None):
         """RF-69, regola 4: il catalogo si legge solo se la regola serve (decisione M21-E:
-        nessuna query in più per gli altri intenti)."""
+        nessuna query in più per gli altri intenti); `products` è la lettura condivisa del
+        rifiuto."""
+        read = products or self.repos.products.list_all
+
         def cheapest(criteria):
-            return cheapest_total(self.repos.products.list_all(), criteria, now.date(), now)
+            return cheapest_total(read(), criteria, now.date(), now)
         return cheapest
 
     # --- RF-06..11 -----------------------------------------------------------
@@ -116,9 +120,11 @@ class Vela:
         cancelled = self._cancel_unpaid_order(proposal.id)
         self.repos.rejections.add(Rejection(intent.id, proposal.id, proposal.product_id,
                                             reason or "", self.now()))
-        intent, refinement = self._refined(intent, proposal, reason or "", fields)
+        # una sola lettura del catalogo per regola 4 e scelta (decisione M21-E)
+        products = functools.cache(self.repos.products.list_all)
+        intent, refinement = self._refined(intent, proposal, reason or "", fields, products)
         _log_conflicts(intent.id, refinement.conflicts)
-        result = self._propose(intent)
+        result = self._propose(intent, products)
         if isinstance(result, NoMatch):
             result = replace(result, rejected_proposal_id=proposal.id)
         lang = intent.criteria.language
@@ -142,18 +148,22 @@ class Vela:
         return True
 
     def _refined(self, intent: Intent, proposal: Proposal, reason: str,
-                 fields: Optional[StructuredFields]) -> Tuple[Intent, Refinement]:
+                 fields: Optional[StructuredFields], products: Callable[[], list]
+                 ) -> Tuple[Intent, Refinement]:
         """RF-08: motivo e campi aggiornano i criteri dell'intento, persistiti prima della nuova
         scelta."""
         product = self.repos.products.get(proposal.product_id)
         area = geo.area_of_destination(product.destination, product.country) if product else None
-        refinement = refine(intent.criteria, reason, proposal, area, self.now().date(), fields)
+        now = self.now()
+        refinement = refine(intent.criteria, reason, proposal, area, now.date(), fields,
+                            cheapest_total=self._cheapest_total(now, products))
         if refinement.criteria == intent.criteria:
             return intent, refinement
         self.repos.intents.update_criteria(intent.id, refinement.criteria)
         return replace(intent, criteria=refinement.criteria), refinement
 
-    def _propose(self, intent: Intent) -> Union[ProposalMade, NoMatch]:
+    def _propose(self, intent: Intent, products: Optional[Callable[[], list]] = None
+                 ) -> Union[ProposalMade, NoMatch]:
         lang = intent.criteria.language
         rejected_proposals = self.repos.rejections.proposal_ids_for_intent(intent.id)
         open_proposals = [p for p in self.repos.proposals.list_for_intent(intent.id)
@@ -162,7 +172,7 @@ class Vela:
             return self._made(open_proposals[-1], lang=lang)
         rejected_products = self.repos.rejections.product_ids_for_intent(intent.id)
         now = self.now()
-        result = choose(self.repos.products.list_all(), intent.criteria, rejected_products,
+        result = choose((products or self.repos.products.list_all)(), intent.criteria, rejected_products,
                         today=now.date(), now=now, max_total=self._price_ceiling(intent.id))
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
