@@ -405,6 +405,39 @@ class AgentToolSayTest(unittest.TestCase):
                          "Got it: a tennis trip in Spain for 3 people with a budget of 600 euros "
                          "in total.")
 
+    def test_understood_says_the_rooms_with_more_than_two_people(self):
+        """M21-D (RF-54, RF-65): le camere dopo le persone; con 1 o 2 persone in 1 camera (il
+        default) non si dicono (decisione M21-D)."""
+        c = Criteria("padel", SPAIN, pax=5, rooms=3, budget=Decimal("3000"), budget_scope="total")
+        self.assertEqual(say.say_understood(c),
+                         "Ho capito: un viaggio di padel in Spagna per 5 persone in 3 camere con un "
+                         "budget di 3000 euro in tutto.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip in Spain for 5 people in 3 rooms with a budget of "
+                         "3000 euros in total.")
+
+    def test_understood_says_one_room_for_a_group(self):
+        c = Criteria("padel", pax=5, rooms=1)
+        self.assertEqual(say.say_understood(c), "Ho capito: un viaggio di padel per 5 persone in 1 camera.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip for 5 people in 1 room.")
+
+    def test_understood_says_two_rooms_for_two_people(self):
+        self.assertEqual(say.say_understood(Criteria("padel", pax=2, rooms=2)),
+                         "Ho capito: un viaggio di padel per 2 persone in 2 camere.")
+
+    def test_understood_is_silent_on_the_default_room(self):
+        for c in (Criteria("padel", pax=2, rooms=1), Criteria("padel", pax=1, rooms=1),
+                  Criteria("padel", pax=4)):   # intento salvato prima di M21-D: nessuna camera
+            with self.subTest(c=c):
+                self.assertNotIn("camer", say.say_understood(c))
+                self.assertNotIn("room", say.say_understood(replace(c, language="en")))
+
+    def test_discarded_rooms(self):
+        self.assertEqual(say.say_discarded((("rooms", 6),)), "Non ho potuto usare 6 come numero di camere.")
+        self.assertEqual(say.say_discarded((("rooms", "tre"),), "en"),
+                         "I couldn't use tre as the number of rooms.")
+
     def test_understood_budget_saved_before_m21e_is_a_total(self):
         c = Criteria("padel", pax=2, budget=Decimal("800"))
         self.assertTrue(say.say_understood(c).endswith("con un budget di 800 euro in tutto."))

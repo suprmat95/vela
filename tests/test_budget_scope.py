@@ -43,12 +43,12 @@ class BudgetScopeFieldTest(unittest.TestCase):
 
 # UC-E, regole 2-3: testo con tre persone → (tetto sul totale, lettura)
 TABLE = [
-    ("tennis in Spagna a maggio, siamo in tre, 600 euro a testa", (Decimal("1800"), "per_person")),
-    ("tennis in Spagna a maggio, siamo in tre, 1.800 euro in tutto", (Decimal("1800"), "total")),
-    ("tennis in Spagna a maggio, siamo in tre, non più di 600 a persona", (Decimal("1800"), "per_person")),
-    ("tennis in Spagna a maggio, siamo in tre, budget totale 1.500", (Decimal("1500"), "total")),
-    ("tennis in Spagna a maggio, siamo in tre, 1.500 euro complessivi", (Decimal("1500"), "total")),
-    ("tennis in Spagna a maggio, siamo in tre, in totale 1500 euro", (Decimal("1500"), "total")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, 600 euro a testa", (Decimal("1800"), "per_person")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, 1.800 euro in tutto", (Decimal("1800"), "total")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, non più di 600 a persona", (Decimal("1800"), "per_person")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, budget totale 1.500", (Decimal("1500"), "total")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, 1.500 euro complessivi", (Decimal("1500"), "total")),
+    ("tennis in Spagna a maggio, siamo in tre, due camere, in totale 1500 euro", (Decimal("1500"), "total")),
     ("tennis in Spain in May, three of us, 600 euros each", (Decimal("1800"), "per_person")),
     ("tennis in Spain in May, three of us, 1,800 in total", (Decimal("1800"), "total")),
     ("tennis in Spain in May, three of us, up to 600 per person", (Decimal("1800"), "per_person")),
@@ -92,11 +92,11 @@ class BudgetWordsTest(unittest.TestCase):
         self.assertEqual((c.pax, c.budget, c.budget_scope), (1, Decimal("600"), "total"))
 
     def test_bare_figure_with_a_group_and_no_catalog_is_total(self):
-        c = parse_intent("padel a ottobre, siamo in tre, massimo 600 euro", today=TODAY).criteria
+        c = parse_intent("padel a ottobre, siamo in tre, due camere, massimo 600 euro", today=TODAY).criteria
         self.assertEqual((c.budget, c.budget_scope), (Decimal("600"), "total"))
 
     def test_no_budget_no_scope(self):
-        c = parse_intent("padel a ottobre, siamo in tre, a testa", today=TODAY).criteria
+        c = parse_intent("padel a ottobre, siamo in tre, due camere, a testa", today=TODAY).criteria
         self.assertEqual((c.budget, c.budget_scope), (None, None))
 
 
@@ -107,30 +107,30 @@ class BudgetScopeFieldPrecedenceTest(unittest.TestCase):
         return parse_intent(text, today=TODAY, fields=StructuredFields(**fields))
 
     def test_field_beats_the_words(self):
-        r = self.parse("padel, siamo in tre, 600 euro a testa", budget_scope="total")
+        r = self.parse("padel, siamo in tre, due camere, 600 euro a testa", budget_scope="total")
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope), (Decimal("600"), "total"))
         self.assertIn(("budget_scope", "per_person", "total"), r.conflicts)
 
     def test_field_figure_and_field_scope(self):
-        r = self.parse("padel a maggio", pax=3, budget=600, budget_scope="per_person")
+        r = self.parse("padel a maggio", pax=3, rooms=2, budget=600, budget_scope="per_person")
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope),
                          (Decimal("1800.00"), "per_person"))
         self.assertEqual(r.conflicts, ())
 
     def test_field_figure_read_with_the_words(self):
         """L'agente passa la cifra detta; "a testa" nel testo la moltiplica."""
-        r = self.parse("padel, siamo in tre, 600 euro a testa", pax=3, budget=600)
+        r = self.parse("padel, siamo in tre, due camere, 600 euro a testa", pax=3, rooms=2, budget=600)
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope),
                          (Decimal("1800.00"), "per_person"))
         self.assertEqual(r.conflicts, ())
 
     def test_scope_without_budget_has_no_effect(self):
-        r = self.parse("padel a maggio, siamo in tre", budget_scope="per_person")
+        r = self.parse("padel a maggio, siamo in tre, due camere", budget_scope="per_person")
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope), (None, None))
         self.assertEqual(r.discarded, ())
 
     def test_invalid_scope_is_discarded_and_the_words_decide(self):
-        r = self.parse("padel, siamo in tre, 600 euro a testa", budget_scope="each")
+        r = self.parse("padel, siamo in tre, due camere, 600 euro a testa", budget_scope="each")
         self.assertEqual(r.discarded, (("budget_scope", "each"),))
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope),
                          (Decimal("1800"), "per_person"))
@@ -181,7 +181,7 @@ class RuleFourTest(unittest.TestCase):
 
     def test_parse_intent_passes_the_criteria(self):
         cheapest = Cheapest(Decimal("1200"))
-        r = parse_intent("padel in Spagna a ottobre, siamo in tre, massimo 600 euro", today=TODAY,
+        r = parse_intent("padel in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro", today=TODAY,
                          cheapest_total=cheapest)
         self.assertEqual((r.criteria.budget, r.criteria.budget_scope), (Decimal("1800"), "per_person"))
         (asked,) = cheapest.calls
@@ -189,7 +189,7 @@ class RuleFourTest(unittest.TestCase):
 
     def test_no_catalog_read_when_a_question_is_asked(self):
         cheapest = Cheapest(Decimal("1200"))
-        r = parse_intent("in Spagna a ottobre, siamo in tre, massimo 600 euro", today=TODAY,
+        r = parse_intent("in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro", today=TODAY,
                          cheapest_total=cheapest)
         self.assertEqual(r.question, QUESTION_SPORT)
         self.assertEqual(cheapest.calls, [])
@@ -219,7 +219,7 @@ def make_vela(price):
 
 
 class CreateIntentRuleFourTest(unittest.TestCase):
-    TEXT = "Padel in Spagna a ottobre, siamo in tre, massimo 600 euro"
+    TEXT = "Padel in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro"
 
     def test_per_person_when_the_total_cannot_cover_the_cheapest(self):
         vela = make_vela(400)
@@ -237,15 +237,15 @@ class CreateIntentRuleFourTest(unittest.TestCase):
     def test_field_budget_goes_through_the_rule(self):
         vela = make_vela(400)
         c = vela.create_intent("Padel in Spagna a ottobre", fields=StructuredFields(
-            sport="padel", pax=3, budget=600)).criteria
+            sport="padel", pax=3, rooms=2, budget=600)).criteria
         self.assertEqual((c.budget, c.budget_scope), (Decimal("1800.00"), "per_person"))
 
     def test_catalog_read_only_for_rule_four(self):
-        for text in ("Padel in Spagna a ottobre, siamo in tre",                     # senza budget
+        for text in ("Padel in Spagna a ottobre, siamo in tre, due camere",                     # senza budget
                      "Padel in Spagna a ottobre, da solo, massimo 600 euro",        # una persona
-                     "Padel in Spagna a ottobre, siamo in tre, 600 euro a testa",   # parole
-                     "Padel in Spagna a ottobre, siamo in tre, 1800 euro in tutto",
-                     "In Spagna a ottobre, siamo in tre, massimo 600 euro"):         # domanda
+                     "Padel in Spagna a ottobre, siamo in tre, due camere, 600 euro a testa",   # parole
+                     "Padel in Spagna a ottobre, siamo in tre, due camere, 1800 euro in tutto",
+                     "In Spagna a ottobre, siamo in tre, due camere, massimo 600 euro"):         # domanda
             with self.subTest(text=text):
                 vela = make_vela(400)
                 r = vela.create_intent(text)
@@ -346,7 +346,7 @@ class RejectReadsTheCatalogOnceTest(unittest.TestCase):
 
     def test_one_read_with_rule_four(self):
         vela = make_vela(400)
-        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, 1800 euro in tutto")
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, due camere, 1800 euro in tutto")
         proposal = vela.get_proposal(intent.intent_id)
         vela.repos.products.list_calls = 0
         r = vela.reject_proposal(proposal.proposal.id, "massimo 500 euro")
@@ -357,7 +357,7 @@ class RejectReadsTheCatalogOnceTest(unittest.TestCase):
 
     def test_one_read_without_rule_four(self):
         vela = make_vela(400)
-        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre")
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, due camere")
         proposal = vela.get_proposal(intent.intent_id)
         vela.repos.products.list_calls = 0
         vela.reject_proposal(proposal.proposal.id, "a novembre")
@@ -368,13 +368,13 @@ class SayTest(unittest.TestCase):
     """RF-70: `create_intent` e `reject_proposal` dichiarano sempre la lettura del budget."""
 
     def test_create_intent_says_the_reading_whatever_the_rule(self):
-        cases = [("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro", 400,       # regola 4
+        cases = [("Padel in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro", 400,       # regola 4
                   "600 euro a persona, 1800 in tutto"),
-                 ("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro", 150,
+                 ("Padel in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro", 150,
                   "600 euro in tutto"),
-                 ("Padel in Spagna a ottobre, siamo in tre, 600 euro a testa", 150,       # regola 2
+                 ("Padel in Spagna a ottobre, siamo in tre, due camere, 600 euro a testa", 150,       # regola 2
                   "600 euro a persona, 1800 in tutto"),
-                 ("Padel in Spagna a ottobre, siamo in tre, 1800 euro in tutto", 400,     # regola 3
+                 ("Padel in Spagna a ottobre, siamo in tre, due camere, 1800 euro in tutto", 400,     # regola 3
                   "1800 euro in tutto"),
                  ("Padel in Spagna a ottobre, da solo, massimo 600 euro", 400,            # regola 5
                   "600 euro in tutto")]
@@ -385,18 +385,18 @@ class SayTest(unittest.TestCase):
 
     def test_field_scope_is_said(self):
         r = make_vela(150).create_intent("Padel in Spagna a ottobre", fields=StructuredFields(
-            sport="padel", pax=3, budget=600, budget_scope="per_person"))
+            sport="padel", pax=3, rooms=2, budget=600, budget_scope="per_person"))
         self.assertIn("con un budget di 600 euro a persona, 1800 in tutto.", r.say)
 
     def test_reject_says_the_new_reading(self):
         vela = make_vela(150)
-        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro")
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, due camere, massimo 600 euro")
         proposal = vela.get_proposal(intent.intent_id)
         r = vela.reject_proposal(proposal.proposal.id, "intendevo a testa",
                                  StructuredFields(budget_scope="per_person"))
         self.assertIn("con un budget di 600 euro a persona, 1800 in tutto.", r.say)
 
     def test_scope_without_budget_is_not_said(self):
-        r = make_vela(150).create_intent("Padel in Spagna a ottobre, siamo in tre",
+        r = make_vela(150).create_intent("Padel in Spagna a ottobre, siamo in tre, due camere",
                                          fields=StructuredFields(budget_scope="per_person"))
         self.assertNotIn("budget", r.say)

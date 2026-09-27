@@ -2,10 +2,12 @@
 opzionale (RF-03).
 
 Estrae sport, area (dizionario `geo`), periodo, durata in notti (M21, RF-58), numero di
-persone, budget con la sua lettura a persona o totale (M21-E, RF-69) e lingua. I campi
-strutturati passati dall'agente (RF-52) vincono sul parser, che vince sul fallback (RF-53). Se
-manca lo sport, oppure il numero di persone (e il profilo non lo dà), produce una sola domanda
-per l'agente, prima lo sport (RF-04). `today` è iniettato per rendere i periodi deterministici.
+persone, numero di camere (M21-D, RF-65), budget con la sua lettura a persona o totale (M21-E,
+RF-69) e lingua. I campi strutturati passati dall'agente (RF-52) vincono sul parser, che vince
+sul fallback (RF-53). Se manca lo sport, oppure il numero di persone (e il profilo non lo dà),
+oppure le camere con più di `ROOMS_DEFAULT_MAX_PAX` persone, produce una sola domanda per
+l'agente, in quest'ordine (RF-04); con 1 o 2 persone la camera è una. `today` è iniettato per
+rendere i periodi deterministici.
 """
 import calendar
 import logging
@@ -23,10 +25,13 @@ log = logging.getLogger(__name__)
 
 QUESTION_SPORT = "Padel o tennis?"
 QUESTION_PAX = "In quante persone siete?"
+QUESTION_ROOMS = "In quante camere?"
 QUESTION_SPORT_EN = "Padel or tennis?"
 QUESTION_PAX_EN = "How many people are travelling?"
-_QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX),
-              "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN)}
+QUESTION_ROOMS_EN = "How many rooms?"
+_QUESTIONS = {"it": (QUESTION_SPORT, QUESTION_PAX, QUESTION_ROOMS),
+              "en": (QUESTION_SPORT_EN, QUESTION_PAX_EN, QUESTION_ROOMS_EN)}
+ROOMS_DEFAULT_MAX_PAX = 2   # RF-65: fino a 2 persone una camera senza chiedere
 
 MONTHS = {
     "gennaio": 1, "january": 1, "febbraio": 2, "february": 2, "marzo": 3, "march": 3,
@@ -570,7 +575,32 @@ def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> 
             valid["budget_scope"] = scope.strip().lower()
         else:
             discarded.append(("budget_scope", scope))
+    rooms = raw.get("rooms")
+    if rooms is not None:   # il tetto `pax` si conosce solo dopo la precedenza: `resolve_rooms`
+        if isinstance(rooms, int) and not isinstance(rooms, bool) and rooms >= 1:
+            valid["rooms"] = rooms
+        else:
+            discarded.append(("rooms", rooms))
     return valid, tuple(discarded)
+
+
+def resolve_rooms(criteria: Criteria, given: dict, parsed_rooms: Optional[int],
+                  discarded: tuple) -> Tuple[Criteria, dict, tuple]:
+    """RF-53, RF-65: le camere valgono 1..pax. Un campo oltre le persone è scartato e detto, e
+    al suo posto valgono le camere del testo se stanno nel tetto; un testo oltre le persone è
+    ignorato. Senza camere, con 1 o 2 persone la camera è una; con più persone resta None (la
+    domanda). `given` è restituito senza il campo scartato, così non conta come conflitto."""
+    pax, rooms = criteria.pax, criteria.rooms
+    if rooms is not None and pax is not None and rooms > pax:
+        if "rooms" in given:
+            given = dict(given)
+            discarded += (("rooms", given.pop("rooms")),)
+            rooms = parsed_rooms if parsed_rooms is not None and parsed_rooms <= pax else None
+        else:
+            rooms = None
+    if rooms is None and pax is not None and pax <= ROOMS_DEFAULT_MAX_PAX:
+        rooms = 1
+    return replace(criteria, rooms=rooms), given, discarded
 
 
 def _plain(value):
@@ -629,18 +659,22 @@ def parse_intent(text: str, profile: Optional[TravelerProfile] = None,
         duration_min_nights=nights[0],
         duration_max_nights=nights[1],
         budget_scope=parse_budget_scope(text),
+        rooms=parse_rooms(text),
     )
     criteria = replace(parsed, **given)
     if criteria.sport is None and extractor is not None:
         criteria = _with_fallback(criteria, text, today, extractor)
     if criteria.pax is None and profile.pax:
         criteria = replace(criteria, pax=profile.pax)
-    ask_sport, ask_pax = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
+    criteria, given, discarded = resolve_rooms(criteria, given, parsed.rooms, discarded)
+    ask_sport, ask_pax, ask_rooms = _QUESTIONS.get(criteria.language, _QUESTIONS["it"])
     question = None
     if criteria.sport is None:
         question = ask_sport
     elif criteria.pax is None:
         question = ask_pax
+    elif criteria.rooms is None:
+        question = ask_rooms
     criteria = read_budget(criteria, cheapest_total if question is None else None)
     return ParseResult(criteria, question, discarded,
                        conflicts_between(vars(parsed), given))

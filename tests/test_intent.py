@@ -2,8 +2,9 @@ import unittest
 from datetime import date
 from decimal import Decimal
 
-from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT,
-                                QUESTION_SPORT_EN, detect_language,
+from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_ROOMS,
+                                QUESTION_ROOMS_EN, QUESTION_SPORT, QUESTION_SPORT_EN,
+                                detect_language,
                                 is_per_person, parse_budget, parse_intent, parse_pax,
                                 parse_period, parse_rooms, parse_sport)
 from vela.domain.models import Area, Period, StructuredFields, TravelerProfile
@@ -99,7 +100,15 @@ class TableTest(unittest.TestCase):
                 self.assertEqual(c.pax, pax)
                 self.assertEqual(c.budget, budget)
                 self.assertEqual(c.language, lang)
-                self.assertIsNone(r.question)
+                # M21-D (RF-65): con più di 2 persone e nessuna camera nel testo la domanda;
+                # altrimenti le camere dette ("due coppie" = 2) o una camera, senza domanda
+                said = parse_rooms(text)
+                if pax > 2 and said is None:
+                    self.assertEqual(r.question, QUESTION_ROOMS_EN if lang == "en" else QUESTION_ROOMS)
+                    self.assertIsNone(c.rooms)
+                else:
+                    self.assertIsNone(r.question)
+                    self.assertEqual(c.rooms, said or 1)
 
 
 # M17: esclusioni, poi "any", poi sinonimi, poi padel/tennis
@@ -415,6 +424,107 @@ class QuestionTest(unittest.TestCase):
         c = parse_intent("padel in Spagna a ottobre per due", today=TODAY).criteria
         self.assertEqual(c.area, Area("country", "Spagna", "ES"))
         self.assertEqual(c.period, Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"))
+
+
+class RoomsQuestionTest(unittest.TestCase):
+    """M21-D (RF-04, RF-65): con più di 2 persone senza camere la terza domanda; con 1 o 2
+    persone il default è 1 camera."""
+
+    def test_more_than_two_without_rooms_asks(self):
+        r = parse_intent("padel in Portogallo a novembre, siamo in cinque", today=TODAY)
+        self.assertEqual(r.question, QUESTION_ROOMS)
+        self.assertEqual(r.question, "In quante camere?")
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (5, None))
+
+    def test_question_in_english(self):
+        r = parse_intent("five of us, padel in Portugal in November", today=TODAY)
+        self.assertEqual(r.question, QUESTION_ROOMS_EN)
+        self.assertEqual(r.question, "How many rooms?")
+
+    def test_three_with_rooms_in_the_text(self):
+        r = parse_intent("Siamo tre amici, tennis a Maiorca, due camere", today=TODAY)
+        self.assertIsNone(r.question)
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (3, 2))
+
+    def test_two_couples(self):
+        r = parse_intent("padel a Valencia, in quattro, due coppie", today=TODAY)
+        self.assertIsNone(r.question)
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (4, 2))
+
+    def test_one_or_two_default_to_one_room(self):
+        for text, pax in (("vado da solo, padel a Valencia", 1), ("padel a Valencia, siamo in due", 2)):
+            with self.subTest(text=text):
+                r = parse_intent(text, today=TODAY)
+                self.assertIsNone(r.question)
+                self.assertEqual((r.criteria.pax, r.criteria.rooms), (pax, 1))
+
+    def test_two_people_two_rooms_from_the_text(self):
+        r = parse_intent("padel a Valencia, siamo in due, due camere", today=TODAY)
+        self.assertEqual(r.criteria.rooms, 2)
+
+    def test_text_rooms_above_pax_are_ignored(self):
+        r = parse_intent("padel a Valencia, siamo in due, tre camere", today=TODAY)
+        self.assertIsNone(r.question)
+        self.assertEqual(r.criteria.rooms, 1)
+        self.assertEqual(r.discarded, ())
+
+    def test_sport_then_pax_then_rooms(self):
+        self.assertEqual(parse_intent("in Portogallo, siamo in cinque", today=TODAY).question,
+                         QUESTION_SPORT)
+        self.assertEqual(parse_intent("padel in Portogallo", today=TODAY).question, QUESTION_PAX)
+
+    def test_pax_from_profile_counts(self):
+        r = parse_intent("padel a ottobre", profile=TravelerProfile(pax=4), today=TODAY)
+        self.assertEqual(r.question, QUESTION_ROOMS)
+
+    def test_field_rooms_answers_the_question(self):
+        r = parse_intent("padel in Portogallo, siamo in cinque", today=TODAY,
+                         fields=StructuredFields(rooms=3))
+        self.assertIsNone(r.question)
+        self.assertEqual(r.criteria.rooms, 3)
+
+    def test_field_beats_text_and_is_a_conflict(self):
+        r = parse_intent("padel per cinque in due camere", today=TODAY, fields=StructuredFields(rooms=3))
+        self.assertEqual(r.criteria.rooms, 3)
+        self.assertEqual(r.conflicts, (("rooms", 2, 3),))
+
+    def test_field_rooms_above_pax_is_discarded_then_asked(self):
+        r = parse_intent("padel per cinque", today=TODAY, fields=StructuredFields(rooms=6))
+        self.assertEqual(r.discarded, (("rooms", 6),))
+        self.assertEqual(r.question, QUESTION_ROOMS)
+
+    def test_field_rooms_above_pax_with_two_people_defaults(self):
+        r = parse_intent("padel per due", today=TODAY, fields=StructuredFields(rooms=3))
+        self.assertEqual(r.discarded, (("rooms", 3),))
+        self.assertIsNone(r.question)
+        self.assertEqual(r.criteria.rooms, 1)
+
+    def test_invalid_field_rooms(self):
+        for rooms in (0, -1, True, "tre", 2.5):
+            with self.subTest(rooms=rooms):
+                r = parse_intent("padel per due", today=TODAY, fields=StructuredFields(rooms=rooms))
+                self.assertEqual(r.discarded, (("rooms", rooms),))
+                self.assertEqual(r.criteria.rooms, 1)
+
+    def test_no_rule_4_while_the_rooms_question_is_open(self):
+        calls = []
+
+        def cheapest(criteria):
+            calls.append(criteria)
+            return Decimal("300")
+        r = parse_intent("padel per cinque, 600 euro", today=TODAY, cheapest_total=cheapest)
+        self.assertEqual(r.question, QUESTION_ROOMS)
+        self.assertEqual(calls, [])
+
+    def test_rule_4_sees_the_rooms(self):
+        calls = []
+
+        def cheapest(criteria):
+            calls.append(criteria.rooms)
+            return Decimal("3000")
+        r = parse_intent("padel per cinque in tre camere, 800 euro", today=TODAY, cheapest_total=cheapest)
+        self.assertEqual(calls, [3])
+        self.assertEqual((r.criteria.budget, r.criteria.budget_scope), (Decimal("4000"), "per_person"))
 
 
 class FakeExtractor:

@@ -123,7 +123,7 @@ class IntentEndpointsTest(unittest.TestCase):
         self.assertEqual(body["say"], body["question"])
 
     def test_profile_is_passed_to_the_domain(self):
-        body = new_intent(self.c, text="padel a ottobre", profile={"pax": 3})
+        body = new_intent(self.c, text="padel a ottobre, due camere", profile={"pax": 3})
         self.assertEqual(body["criteria"]["pax"], 3)
 
     def test_blank_text_is_422(self):
@@ -413,7 +413,7 @@ class AgentToolContractTest(unittest.TestCase):
         c, _ = make_client(products=SIVIGLIA_MADRID)
         r = c.post("/v1/intents", headers=AUTH, json={
             "text": "Padel a Atlantide, siamo in tre.", "sport": "padel", "area": "Atlantide",
-            "pax": 30, "budget": 1000})
+            "pax": 30, "rooms": 2, "budget": 1000})
         self.assertEqual(r.status_code, 201, r.text)
         d = r.json()
         self.assertIsNone(d["criteria"]["area"])
@@ -436,7 +436,7 @@ class AgentToolContractTest(unittest.TestCase):
     def test_profile_pax_stays_the_default(self):
         c, _ = make_client(products=SIVIGLIA_MADRID)
         r = c.post("/v1/intents", headers=AUTH,
-                   json={"text": "padel a ottobre", "pax": 3, "profile": {"pax": 2}})
+                   json={"text": "padel a ottobre", "pax": 3, "rooms": 2, "profile": {"pax": 2}})
         self.assertEqual(r.json()["criteria"]["pax"], 3)
 
     def test_no_match_after_reject_carries_rejected_proposal_id(self):
@@ -511,7 +511,7 @@ class BudgetScopeContractTest(unittest.TestCase):
 
     # il più economico costa 450 in tre: senza campo 600 si leggerebbe in tutto (regola 4)
     PRODUCTS = [make_product(1, price=150), make_product(2, price=250)]
-    THREE = "padel in Spagna a ottobre, siamo in tre"
+    THREE = "padel in Spagna a ottobre, siamo in tre, due camere"
 
     def test_field_reaches_the_intent(self):
         c, _ = make_client(products=self.PRODUCTS)
@@ -541,3 +541,43 @@ class BudgetScopeContractTest(unittest.TestCase):
                    json={"reason": "no", "budget_scope": "per_person"})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertIn("1800 euro a persona, 5400 in tutto", r.json()["say"])
+
+
+class RoomsContractTest(unittest.TestCase):
+    """M21-D (UC-D, RF-65): `rooms` nel corpo di `POST /v1/intents` e del rifiuto; con più di 2
+    persone senza camere la risposta è `question` e nessun intento viene salvato."""
+
+    FIVE = "padel in Portogallo a novembre, siamo in cinque"
+
+    def test_five_without_rooms_is_a_question(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE, "pax": 5})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual((body["outcome"], body["question"]), ("question", "In quante camere?"))
+        self.assertNotIn("intent_id", body)
+
+    def test_five_with_rooms_is_created(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.FIVE, "pax": 5, "rooms": 3})
+        self.assertEqual(r.status_code, 201, r.text)
+        body = r.json()
+        self.assertEqual((body["criteria"]["pax"], body["criteria"]["rooms"]), (5, 3))
+        self.assertIn("per 5 persone in 3 camere", body["say"])
+
+    def test_two_without_rooms_default_to_one(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        body = new_intent(c)
+        self.assertEqual(body["criteria"]["rooms"], 1)
+        self.assertNotIn("camer", body["say"])
+
+    def test_invalid_rooms_is_declared_not_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "rooms": 0})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare 0 come numero di camere."))
+
+    def test_wrong_type_is_422(self):
+        c, _ = make_client(products=SIVIGLIA_MADRID)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "rooms": "tre"})
+        self.assertEqual(r.status_code, 422)

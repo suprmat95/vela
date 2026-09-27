@@ -169,6 +169,11 @@ DurationMax = Annotated[Optional[int], Field(
                 "nights'.")]
 Direction = Annotated[Optional[str], Field(
     description="north when the user wants somewhere cooler, south when somewhere warmer.")]
+Rooms = Annotated[Optional[int], Field(
+    description="Number of hotel rooms, 1 to the number of people, only if the user said it. "
+                "With more than 2 people ask \"In quante camere?\" / \"How many rooms?\" before "
+                "calling if they have not said it; with 1 or 2 people leave it out, Vela assumes "
+                "one room.")]
 Participants = Annotated[Optional[List[ParticipantArg]],
                          Field(description="First and last name of each traveler other than the main one.")]
 IntentId = Annotated[str, Field(description="The intent_id returned by create_intent.")]
@@ -224,14 +229,15 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                       pax: Pax = None, budget: Budget = None,
                       duration_min_nights: DurationMin = None,
                       duration_max_nights: DurationMax = None,
-                      budget_scope: BudgetScope = None, first_name: FirstName = None,
-                      last_name: LastName = None, email: Email = None, phone: Phone = None,
+                      budget_scope: BudgetScope = None, rooms: Rooms = None,
+                      first_name: FirstName = None, last_name: LastName = None,
+                      email: Email = None, phone: Phone = None,
                       participants: Participants = None) -> CallToolResult:
         profile = traveler_profile(first_name, last_name, email, phone, pax, participants)
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget,
                                   duration_min_nights=duration_min_nights,
                                   duration_max_nights=duration_max_nights,
-                                  budget_scope=budget_scope)
+                                  budget_scope=budget_scope, rooms=rooms)
         return run("create_intent", lambda v: v.create_intent(text, profile, fields))
 
     @server.tool(description=descriptions["get_proposal"])
@@ -244,9 +250,9 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                         period_end: PeriodEnd = None, pax: Pax = None, budget: Budget = None,
                         direction: Direction = None, duration_min_nights: DurationMin = None,
                         duration_max_nights: DurationMax = None,
-                        budget_scope: BudgetScope = None) -> CallToolResult:
+                        budget_scope: BudgetScope = None, rooms: Rooms = None) -> CallToolResult:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction,
-                                  duration_min_nights, duration_max_nights, budget_scope)
+                                  duration_min_nights, duration_max_nights, budget_scope, rooms)
         return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
     @server.tool(description=descriptions["accept_proposal"])
