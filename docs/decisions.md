@@ -1142,3 +1142,18 @@ passo: opzione, cache, TTL, ripiego, migrazione, rebase. Design in
 | Finestra di crash | Tra `release` (gli agganciati perdono `follows_quote`) e l'accodamento dei loro job un crash lascia ordini `queued` senza job | Pochi millisecondi; un job accodato "per sicurezza" altrove rischierebbe due job d'acquisto, cioè due carrelli, sullo stesso ordine |
 | Load test | `journey.py` tratta `200 awaiting_confirmation` all'accettazione come un prezzo arrivato; i giri di `RESULTS.md` si rifanno in una task separata | Con la cache in modalità `loadtest` un hit risponde subito 200 e il viaggiatore finto sarebbe finito come fallito |
 
+## 2026-09-27 — Load test dopo la cache del prezzo (RF-84)
+
+Rilancio del banco previsto dalla decisione "Cache del prezzo con fanout" ("i giri di `RESULTS.md`
+si rifanno in una task separata"). Proposta con quattro giri e un controllo a cache spenta;
+l'utente ha scelto un solo giro con la cache. Numeri in `loadtest/RESULTS.md` ("Dopo la cache del
+prezzo"). Nessuna chiamata a HofJ né a Stripe: tutto nel compose locale.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Quale giro | Uno solo, C-2500 con i parametri di `RESULTS.md` (8 minuti, 5 di arrivi e 3 di coda, seme 13), sul commit `526459e` da compose ricostruito | Scelta dell'utente. C è il giro più carico e quello con la tabella dei p95 |
+| Nessun controllo a cache spenta | Confronto con "C dopo M18 (fix)" di `49cc1cb`, dichiarando che nel mezzo c'è altro codice (conferma del prezzo, M20, M21, RF-83): solo hit e prezzo sentito sono attribuibili alla cache da sola | Le tuning non sono variabili d'ambiente (§6): un giro a cache spenta avrebbe richiesto una modifica locale a `config.py`; l'utente ha preferito non farlo |
+| Scenario invariato | Nessuna quota di rifiuti del prezzo: il risparmio di chiamate della cache non è esercitato, e i numeri lo dicono (chiamate per ordine confermato invariate) | Comparabilità con i giri precedenti; un giro con rifiuti del prezzo resta possibile in futuro |
+| Hit contati a posteriori | Da `travelers.jsonl`: accettazione senza `position` né `wait_seconds` = hit (200 `order_status`); `t_priced` = polling in cui il viaggiatore vede il prezzo. `report.py` non li calcola | Nessuna modifica al banco per un solo giro; la regola è scritta in `RESULTS.md` e riproducibile |
+| Aperto | Per un hit non esiste un'attesa dichiarata (`position` e `wait_seconds` nulli): la misura "scarto attesa reale − dichiarata" del report non vale più e RF-48 non dice cosa dichiarare a chi ha già il prezzo e aspetta il link | Da decidere se e cosa dichiarare; `report.py` da adeguare quando si rifanno gli altri giri |
+

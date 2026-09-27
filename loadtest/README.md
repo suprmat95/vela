@@ -40,7 +40,8 @@ Opzioni di `run.py`: `--travelers`, `--label`, `--duration` (minuti dell'intero 
 I giri di `RESULTS.md` (colonne "prima", M13a, e "dopo", M13b) sono cinque, tutti con
 `--duration 8 --arrival-minutes 5 --tail-minutes 3` e un `docker compose down -v` tra l'uno e
 l'altro: A-500, B-1000, C-2500 (`--travelers` 500, 1000, 2500), D-1000-guasti (sotto) ed
-E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Dopo una modifica a `vela/` serve
+E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Il giro con la cache del prezzo (RF-84, 2026-09-27) è C-2500 con gli stessi parametri e
+`--label 2500-cache`. Dopo una modifica a `vela/` serve
 `docker compose --profile loadtest build`. Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
 
 ## Scenario (modello aperto)
