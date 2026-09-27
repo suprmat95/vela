@@ -1292,3 +1292,57 @@ prime quattro righe sono scelte dell'utente.
 | Porte del banco | Il giro è stato lanciato con `docker compose -p lastload` e un override locale senza `ports:`, perché lo stack `master-*` occupava 8000/8001 | Nessun file del repository cambiato per questo; il README spiega come farlo |
 | Tempi per pagare (richiesta dell'utente) | Nel report, per gruppo: dall'arrivo al link e dall'arrivo al pagamento, mediana / p95 / max in minuti, solo per chi ci è arrivato entro il giro. Nella proiezione: accettazione → link per Marco, la mediana e l'ultimo, e la quota dei paganti che possono pagare entro 5, 15, 30, 60, 120, 240 minuti dall'arrivo | Il numero che conta per chi paga è quanto aspetta; i conteggi da soli non lo dicono |
 | Errori del giro | 3 errori 500 su 26.408 richieste, dal pool di SQLAlchemy di default (5 + 10, timeout 3 s) esaurito al picco di 87 req/s. Riportati in RESULTS.md senza toccare il codice | Cambiare il pool è una scelta di architettura e di configurazione da proporre a parte |
+
+## 2026-09-26 — Bozza di `ARCHITECTURE.md` (M15)
+
+Origine: richiesta dell'utente di scrivere la bozza di `ARCHITECTURE.md` da roadmap M15 (sezione
+twist) e da `docs/plans/2026-09-26-twist-seconda-lettura.md` (sezioni 3-7), senza i numeri del
+load test. Approccio approvato dall'utente.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Numeri del load test | Segnaposto "[numeri da M13a]" per la colonna "prima" e "[numeri da M13b]" per la colonna "dopo"; comandi di lancio "[comandi da `loadtest/README.md`, M13a]" | `loadtest/RESULTS.md` non esiste ancora: niente numeri inventati |
+| Merge | Il branch `doc/architecture` non si mergia su `master` finché M13b non è su `master` | Indicazione dell'utente; M15 dipende da M13b |
+| Allineamento del branch | `doc/architecture` portato a `master` con un fast-forward | Il piano e la sezione twist di M15 erano solo su `master`; nessun commit proprio sul branch, nessuna riscrittura della storia |
+| Portata | Documento completo secondo M15 (panoramica, decisioni e compromessi, vincoli RF-13, twist con le 5 richieste e i precedenti, prossimi passi); README, video e checklist restano per dopo | Scelta dell'utente tra "tutto lo scheletro" e "solo twist" |
+| Etichette | Mantenute [misurato] / [previsto] / [proposta] del piano; le correzioni di M18 e M19 restano proposte | Il piano (sezione 9) vieta di scrivere le previsioni come fatti |
+| Doppio job di prenotazione | Il punto 3 della sezione 3.3 del piano ("da verificare nel codice") è scritto come letto nel codice: `_enqueue_booking` controlla e poi accoda senza lock né vincolo unico, quindi due job concorrenti sono possibili; non riprodotto | Verificato leggendo `vela/domain/orders.py` e `vela/adapters/schema.py`; la correzione, se serve, è di M18 |
+| Mapping A2A | Stati del task A2A ↔ stati dell'ordine scritti come proposta da confermare | Non era nei documenti; va confermato dall'utente o da M16 |
+
+## 2026-09-27 — `ARCHITECTURE.md` riscritto (M15)
+
+Origine: richiesta dell'utente di rileggere tutte le note dello sviluppo e riscrivere da capo
+`ARCHITECTURE.md` mostrando scelte architetturali e compromessi. Supera la bozza del 2026-09-26
+(voce "Bozza di `ARCHITECTURE.md` (M15)"), scritta prima di M13b, M18, M19, della cache del prezzo
+e di M21.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Lingua | Inglese; nomi del codice e titoli delle voci di questo file invariati, note italiane linkate | Il documento è per i valutatori, anglofoni. Scelta dell'utente |
+| Struttura | Per tema: panoramica, percorso di un acquisto, 13 decisioni (scelta / scartato / compromesso / prove), twist con le 5 richieste del brief, cambi di idea in ordine, vincoli e lacune, prossimi passi, dove stanno le prove | Scelta dell'utente tra per tema, cronologico e ADR numerati |
+| Numeri | Solo da `loadtest/RESULTS.md`, `vela/config.py` e questo file, con etichette measured / projected / predicted; confronti non omogenei dichiarati (M19 al 2% di paganti, cache senza giro di controllo) | Nessun numero inventato; i segnaposto della bozza sono sostituiti dai numeri misurati |
+| Lacune dichiarate | `/mcp` senza autenticazione (M8 non fatta), niente log JSON né comando di cancellazione (M14), niente catalogo in memoria per istanza (RNF-12), criterio vocale da eseguire, A2A non fatto | Il documento descrive il sistema com'è, non la spec |
+| Mapping A2A | Resta una proposta non validata nei prossimi passi | Come nella bozza; non confermato |
+| Fuori portata | Testo superato altrove, da correggere in un'altra task: tabella Settings del README, stato di M19 e M23 in roadmap, riferimenti al webhook e RNF-10 in spec, Anna "minuto 6" e timeout 15 s in `loadtest/README.md`, "~43 link/min" in `RESULTS.md`, criterio 5 in `acceptance.md` | Una task alla volta |
+
+## 2026-09-27 — Carico della conversazione a 50.000: dichiarato, non misurato
+
+Origine: in `ARCHITECTURE.md` "la conversazione non degrada mai" poggiava su 34 req/s misurati,
+mentre la proiezione a 50.000 viaggiatori arriva a ~420 req/s.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Come trattarlo | Solo testo (opzione 1): `ARCHITECTURE.md` §4.1, §4.3, §4.5 dicono che il tempo di risposta è misurato fino a 34 req/s su un'istanza, scompongono i ~420 req/s (≈208 arrivi + ≈212 polling della coda) e stimano al massimo ~13 istanze (predicted, scala lineare e Postgres non verificati) | Scelta dell'utente. Scartati per ora: un giro a gradini per trovare il limite di un'istanza (opzione 2, avviata e poi fermata dall'utente) e la riduzione del carico con codice nuovo (opzione 3) |
+| Limiti del banco dichiarati | In `loadtest` l'attesa di `accept_proposal` è 0 (in `live` fino a 100 s su un pool di 40); `get_proposal` legge tutto il catalogo senza cache per istanza | Il banco sottostima il carico reale della conversazione |
+
+## 2026-09-27 — `ARCHITECTURE.md` completato con il load test a 10.000
+
+Origine: merge su `master` di `suprmat95/last-load-test` (giro da 10.000 a quattro gruppi,
+`RESULTS.md` riscritto) e richiesta dell'utente di completare `ARCHITECTURE.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Fonte dei numeri | Il giro da 10.000 come "ultimo giro" (§2 funnel con i conteggi, §4.3, §4.5); i giri M13a…M19 restano come "giri che hanno formato il design", citati da `git show 5ec87aa:loadtest/RESULTS.md` | `RESULTS.md` ora contiene solo il giro da 10.000; i giri precedenti spiegano le scelte (token bucket, fix della corsa, cache, M19) |
+| Finestra della proiezione | Quella di `RESULTS.md`: 50.000 in 5 minuti, dichiarata più severa dei 10 minuti del twist; la proiezione precedente a 10 minuti citata in una riga | Un solo modello, quello del file versionato |
+| Conversazione | Misurata a 34 req/s (p95 200-220 ms, 0 errori) e a 86,8 req/s (p95 0,8-1,1 s, 3 errori per il pool esaurito); a 454 req/s stimate 6-14 istanze (454 ÷ 87 e 454 ÷ 34), non verificate | Supera la stima di "circa 13 istanze" della voce "Carico della conversazione a 50.000" |
+| Pool del database | Dichiarato come primo limite di Vela prima della quota (§3.2, §6) e tra i prossimi passi (§7) | Misurato nel giro da 10.000; non cambiato |
