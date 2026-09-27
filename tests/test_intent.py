@@ -5,7 +5,7 @@ from decimal import Decimal
 from vela.domain.intent import (QUESTION_PAX, QUESTION_PAX_EN, QUESTION_SPORT,
                                 QUESTION_SPORT_EN, detect_language,
                                 is_per_person, parse_budget, parse_intent, parse_pax,
-                                parse_period, parse_sport)
+                                parse_period, parse_rooms, parse_sport)
 from vela.domain.models import Area, Period, StructuredFields, TravelerProfile
 
 TODAY = date(2026, 9, 25)   # venerdì
@@ -269,6 +269,46 @@ class PaxTest(unittest.TestCase):
 
     def test_couple_of_days_is_not_pax(self):
         self.assertIsNone(parse_pax("a couple of days of padel"))
+
+
+class RoomsTest(unittest.TestCase):
+    """M21-D (UC-D, RF-65): numero di camere dal testo."""
+
+    def test_forms(self):
+        for text, rooms in [("tre camere", 3), ("3 camere", 3), ("due stanze", 2), ("una camera", 1),
+                            ("in 2 camere", 2), ("two rooms", 2), ("2 bedrooms", 2),
+                            ("two double rooms", 2), ("a single room", 1), ("a room", 1),
+                            ("due coppie", 2), ("three couples", 3),
+                            ("una matrimoniale e una doppia", 2), ("camera doppia", 1),
+                            ("due doppie", 2), ("una singola e due doppie", 3),
+                            ("una camera matrimoniale e una doppia", 2),
+                            ("Siamo in cinque. Tre camere.", 3)]:
+            with self.subTest(text=text):
+                self.assertEqual(parse_rooms(text), rooms)
+
+    def test_not_rooms(self):
+        for text in ("padel in Spagna per 4", "siamo in due", "in 2", "a couple of days of padel",
+                     "in coppia", "camera", "the rooms"):
+            with self.subTest(text=text):
+                self.assertIsNone(parse_rooms(text))
+
+    def test_explicit_count_beats_couples(self):
+        self.assertEqual(parse_rooms("due coppie in una camera"), 1)
+
+    def test_count_and_types_take_the_larger(self):
+        # "3 camere, una doppia": la doppia è una delle tre
+        self.assertEqual(parse_rooms("3 camere, una doppia"), 3)
+        self.assertEqual(parse_rooms("3 camere: una matrimoniale e due doppie"), 3)
+
+    def test_out_of_range_is_not_rooms(self):
+        self.assertIsNone(parse_rooms("0 camere"))
+        self.assertIsNone(parse_rooms("40 camere"))
+
+    def test_rooms_are_not_people_nor_money(self):
+        self.assertIsNone(parse_pax("padel in 2 camere"))
+        self.assertEqual(parse_pax("padel per 4 in 2 camere"), 4)
+        self.assertIsNone(parse_pax("padel per tre camere"))
+        self.assertIsNone(parse_budget("massimo 2 camere"))
 
 
 class BudgetTest(unittest.TestCase):

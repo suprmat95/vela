@@ -71,8 +71,10 @@ EN_MARKERS = {"the", "of", "for", "we", "are", "with", "max", "want", "would", "
               "each", "just", "early", "late", "mid", "family", "group", "alone", "players",
               "adults", "wife", "husband", "friends", "below"}
 
-# "per 4 notti", "in 5 giorni": una durata, non un numero di persone (M21-A)
-_NOT_PEOPLE_AFTER = r"(?!\s*(?:notti|notte|nights?|giorni|giorno|days?|settimane|weeks?)\b)"
+# "per 4 notti", "in 5 giorni": una durata (M21-A); "in 2 camere": camere (M21-D), non persone
+_ROOM_WORDS = r"(?:camere|camera|stanze|stanza|rooms?|bedrooms?)"
+_NOT_PEOPLE_AFTER = (r"(?!\s*(?:notti|notte|nights?|giorni|giorno|days?|settimane|weeks?|%s)\b)"
+                     % _ROOM_WORDS)
 
 # (pattern, moltiplicatore): il numero catturato × moltiplicatore; i numeri espliciti vincono
 _PAX_PATTERNS = [
@@ -94,7 +96,8 @@ _PAX_PHRASES = [
     (re.compile(r"\b(?:da sol[oa]|solo io|io solo|just me|only me|on my own|by myself|alone)\b"), 1),
 ]
 _NOT_MONEY_AFTER = (r"(?!\s*(?:persone|persona|adulti|giocatori|amici|people|persons|adults|"
-                    r"players|friends|pax|notti|nights|giorni|days|stelle|stars))")
+                    r"players|friends|pax|notti|nights|giorni|days|stelle|stars|"
+                    r"camere|camera|stanze|stanza|rooms?|bedrooms?))")
 _PER_PERSON_WORDS = r"(?:a testa|a persona|per persona|each|per person|per head|pp)"
 _TOTAL_WORDS = r"(?:in tutto|in totale|totale|complessiv[oaie]|in total|total|altogether)"
 _BUDGET_PATTERNS = [
@@ -348,6 +351,13 @@ def parse_pax(text: str) -> Optional[int]:
 
 
 _NUM = r"(\d+|%s)" % "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+# camere (M21-D, RF-65): "tre camere", "in 2 camere", "two double rooms", "a room"
+_ROOM_NUM = r"(\d+|%s|a|an)" % "|".join(sorted(NUMBER_WORDS, key=len, reverse=True))
+_ROOMS_COUNT = re.compile(r"\b%s\s+(?:\w+\s+)?%s\b" % (_ROOM_NUM, _ROOM_WORDS))
+# tipi di camera sommati: "una matrimoniale e una doppia" = 2, "camera doppia" = 1, "due doppie" = 2
+_ROOM_TYPES = re.compile(r"\b(?:%s\s+)?(?:camer[ae]\s+)?(?:matrimonial[ei]|doppi[ae]|singol[ae]|"
+                         r"tripl[ae]|quadrupl[ae]|(?:double|twin|single|triple)\s+rooms?)\b" % _ROOM_NUM)
+_ROOMS_COUPLES = re.compile(r"\b%s\s+(?:coppie|couples)\b" % _ROOM_NUM)
 _NIGHTS = r"(?:notti|notte|nights?)\b"
 _DURATION_RANGE = re.compile(r"\b(?:da\s+)?%s\s*(?:-|–|o|a|or|to)\s*%s\s+%s" % (_NUM, _NUM, _NIGHTS))
 _DURATION_AT_LEAST = re.compile(r"\b(?:almeno|at least)\s+%s\s+%s" % (_NUM, _NIGHTS))
@@ -365,6 +375,26 @@ _DURATION_WORDS = [
 
 def _nights_ok(*values) -> bool:
     return all(v is None or 1 <= v <= MAX_NIGHTS for v in values)
+
+
+def _room_number(token: Optional[str]) -> int:
+    """"a", "an" e nessun numero valgono 1."""
+    return 1 if token in (None, "a", "an") else (_to_int(token) or 0)
+
+
+def parse_rooms(text: str) -> Optional[int]:
+    """RF-65: numero di camere dal testo. Il conteggio esplicito ("tre camere") e la somma dei
+    tipi ("una matrimoniale e una doppia") si combinano col massimo, così "3 camere, una doppia"
+    resta 3; senza nessuno dei due, "due coppie" sono 2 camere. Fuori da 1..MAX_PAX non è un
+    numero di camere."""
+    low = text.lower()
+    count = max((_room_number(m.group(1)) for m in _ROOMS_COUNT.finditer(low)), default=0)
+    types = sum(_room_number(m.group(1)) for m in _ROOM_TYPES.finditer(low))
+    rooms = max(count, types)
+    if rooms == 0:
+        m = _ROOMS_COUPLES.search(low)
+        rooms = _room_number(m.group(1)) if m else 0
+    return rooms if 1 <= rooms <= MAX_PAX else None
 
 
 def parse_duration(text: str) -> Optional[Tuple[int, Optional[int]]]:
