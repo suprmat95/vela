@@ -322,3 +322,39 @@ Seven RED for the right reasons. Now the GREEN implementation in `chooser.py`: t
 - 🔧 Bash: Show the lint findings
 
 - 🔧 Bash: Remove the unused imports, re-check lint and tests, commit RF-61
+
+Commit 3 now: RF-60 ordering plus the motivation. I'll write the failing tests first (level table, departure and featured precedence, determinism, id tie-break, reason wording it/en), then implement.
+
+- 🔧 Bash: Check the default products of the use case tests
+
+- 🔧 Bash: Add the RF-60 ordering and reason tests and confirm they fail
+
+All 16 fail for the right reason (v2 still sorts by price and string id). Now the GREEN implementation: the v3 sort key, the "why" flags, and the new sentence forms.
+
+- 🔧 Bash: List the chooser's top-level definitions and current docstring
+
+- 🔧 Bash: Implement the RF-60 sort key, the Why flags and the new motivation sentences, then run the chooser tests
+
+- 🔧 Bash: Summarise which chooser tests still fail
+
+- 🔧 Bash: Compare the first three v2 and v3 choices on the production fixture for every pinned intent
+
+- 🔧 Bash: Re-record the v3 sequences on the fixtures and check they contain the same products as the v2 ones
+
+- 🔧 Bash: Run the staging scenario tests and list every failing test in the whole suite
+
+- 🔧 Bash: Print the v3 first-three-choice tuples for the fixture table
+
+- 🔧 Bash: Re-record the v3 sequences and docstrings in the filters test and run it
+
+The filters test is green. Now the fixture table: I'll replace the eight changed rows, the monotonicity key and the docstring, and tidy the blank lines my regex left in the sequences file.
+
+- 🔧 Bash: Update the fixture table and property key, then run the chooser tests, the full suite and lint
+
+Suite green (1306 tests) and lint clean. A quick review of the chooser diff before committing commit 3.
+
+- 🔧 Bash: Review the chooser diff for commit 3
+
+The diff reads right. Committing commit 3.
+
+- 🔧 Bash: Commit the RF-60 ordering and motivation

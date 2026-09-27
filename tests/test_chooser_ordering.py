@@ -1,7 +1,9 @@
 """M21-B (UC-B): ordinamento di RF-60 e prodotti equivalenti di RF-61 in `chooser.choose`."""
+import random
 import unittest
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 
 from support import TODAY, make_product
 from vela.domain.chooser import FILTERS, Choice, NoChoice, choose
@@ -100,6 +102,165 @@ class EquivalentProductsTest(unittest.TestCase):
         self.assertEqual(chosen([twin("t:7", 500), twin(78, 500)]), "78")
         self.assertEqual(chosen([twin("t:b", 500), twin("t:a", 500)]), "t:a")
         self.assertEqual(chosen([twin("p:9", 500), twin("t:10", 500)]), "p:9")
+
+
+def prod(pid, start="2026-10-01", nights=3, featured=False, special_offer=False, **kw):
+    """Prodotto a finestra fissa: parte `start`, dura `nights` notti; Lanzarote (ES) di default."""
+    first = date.fromisoformat(start)
+    end = date.fromordinal(first.toordinal() + nights).isoformat()
+    p = make_product(pid, windows=((start, end),), **kw)
+    return replace(p, duration_days=nights + 1, featured=featured, special_offer=special_offer)
+
+
+WEEKEND = dict(duration_min_nights=1, duration_max_nights=3)
+
+
+class OrderingLevelsTest(unittest.TestCase):
+    """RF-60: coppie di prodotti che differiscono per un solo livello dell'ordine; il perdente
+    è migliore su tutti i livelli successivi, così il test prova la precedenza."""
+
+    LEVELS = [
+        ("1 area", crit(),
+         prod(1, start="2026-10-10"),
+         prod(2, start="2026-10-01", price=100, featured=True, country="IT", destination="Riccione")),
+        ("2 entro budget", crit(budget=Decimal("1000")),
+         prod(1, start="2026-10-10", price=450),                      # 900 entro
+         prod(2, start="2026-10-01", price=600, featured=True)),      # 1200 oltre
+        ("3 durata", crit(**WEEKEND),
+         prod(1, start="2026-10-10"),
+         prod(2, start="2026-10-01", nights=7, price=100, featured=True)),
+        # 4 livello e lezioni: neutro fino a M21-C (RF-62..64)
+        ("5 partenza", crit(),
+         prod(1, start="2026-10-05"),
+         prod(2, start="2026-10-20", price=100, featured=True)),
+        ("6 featured", crit(),
+         prod(1, featured=True),
+         prod(2, price=100)),
+        ("6 offerta speciale", crit(),
+         prod(1, special_offer=True),
+         prod(2, price=100)),
+        ("7 prezzo", crit(),
+         prod(2, price=300),
+         prod(1, price=500)),
+        ("8 id numerico", crit(),
+         prod(78, hotel="Hotel A"),
+         prod(100, hotel="Hotel B")),
+        ("8 id non numerico dopo", crit(),
+         prod(9, hotel="Hotel A"),
+         prod("t:1", hotel="Hotel B")),
+    ]
+
+    def test_each_level_beats_the_next_ones(self):
+        for name, criteria, winner, loser in self.LEVELS:
+            with self.subTest(name):
+                self.assertEqual(chosen([loser, winner], criteria), winner.id)
+                self.assertEqual(chosen([winner, loser], criteria), winner.id)
+                self.assertEqual(chosen([loser, winner], criteria, rejected={winner.id}), loser.id)
+
+    def test_without_budget_the_closest_departure_beats_a_cheaper_later_one(self):
+        """UC-B: parte il 2 novembre batte parte il 25 anche se costa di più."""
+        november = Period(date(2026, 11, 1), date(2026, 11, 30), "novembre")
+        early = prod(1, start="2026-11-02", price=400)
+        late = prod(2, start="2026-11-25", price=250)
+        r = choose([late, early], crit(period=november), set(), TODAY)
+        self.assertEqual((r.product.id, r.start_date), ("1", date(2026, 11, 2)))
+
+    def test_without_period_the_departure_closest_to_today_wins(self):
+        fixed = prod(1, start="2026-10-10", price=100)
+        open_window = replace(make_product(2, price=500, windows=(("2026-09-20", "2026-12-31"),)),
+                              duration_days=4)
+        r = choose([fixed, open_window], crit(period=None), set(), TODAY)
+        self.assertEqual((r.product.id, r.start_date), ("2", TODAY))
+
+    def test_featured_beats_a_lower_price_only_when_levels_one_to_five_tie(self):
+        self.assertEqual(chosen([prod(1, featured=True), prod(2, price=100)]), "1")
+        self.assertEqual(chosen([prod(1, featured=True, start="2026-10-02"), prod(2, price=100)]), "2")
+
+    def test_same_inputs_always_give_the_same_choice(self):
+        products = [prod(1, start="2026-10-05"), prod(2, price=100, featured=True, start="2026-10-05"),
+                    prod(3, price=100, start="2026-10-05", hotel="Hotel B"), prod(4, start="2026-10-20"),
+                    prod(5, price=90, country="IT", destination="Firenze"), prod(6, price=100)]
+        first = choose(products, crit(), set(), TODAY)
+        for seed in range(20):
+            shuffled = list(products)
+            random.Random(seed).shuffle(shuffled)
+            r = choose(shuffled, crit(), set(), TODAY)
+            self.assertEqual((r.product.id, r.start_date, r.reason),
+                             (first.product.id, first.start_date, first.reason), seed)
+        self.assertEqual(first.product.id, "6")   # 1 ottobre, prezzo 100: batte il 2 (5 ottobre, featured)
+
+
+class ReasonTest(unittest.TestCase):
+    """RF-06: la motivazione spiega il livello che ha deciso e non dice più "la più economica"
+    quando un prodotto più economico ha perso sulla partenza o su `featured`."""
+
+    def reason(self, products, criteria=None):
+        return choose(products, criteria or crit(), set(), TODAY).reason
+
+    def test_first_departure_in_the_period_over_a_cheaper_later_one(self):
+        r = self.reason([prod(1, start="2026-10-05"), prod(2, start="2026-10-20", price=100)])
+        self.assertEqual(r, "È a Lanzarote, in Spagna come hai chiesto. Parte il 5 ottobre 2026, la prima "
+                            "partenza nel periodo che hai chiesto, con un totale a partire da 1000 euro.")
+
+    def test_first_departure_in_english(self):
+        r = self.reason([prod(1, start="2026-10-05"), prod(2, start="2026-10-20", price=100)],
+                        crit(language="en"))
+        self.assertEqual(r, "It's in Lanzarote, in Spain as you asked. It leaves on 5 October 2026, the "
+                            "first departure in the period you asked for, with a total starting at "
+                            "1000 euros.")
+
+    def test_earliest_departure_without_a_period(self):
+        products = [prod(1, start="2026-10-05"), prod(2, start="2026-10-20", price=100)]
+        self.assertIn("Parte il 5 ottobre 2026, la prima partenza disponibile, con un totale",
+                      self.reason(products, crit(period=None)))
+        self.assertIn("It leaves on 5 October 2026, the earliest departure available, with a total",
+                      self.reason(products, crit(period=None, language="en")))
+
+    def test_first_departure_with_a_budget(self):
+        products = [prod(1, start="2026-10-05"), prod(2, start="2026-10-20", price=100)]
+        self.assertTrue(self.reason(products, crit(budget=Decimal("1500"))).endswith(
+            "la prima partenza nel periodo che hai chiesto, con un totale a partire da 1000 euro, "
+            "dentro il tuo budget di 1500 euro."))
+        over = self.reason(products, crit(budget=Decimal("100")))
+        self.assertTrue(over.endswith("con un totale a partire da 1000 euro, oltre il tuo budget di 100 euro."), over)
+        self.assertNotIn("più economica", over)
+
+    def test_no_cheapest_claim_without_area_when_departure_decided(self):
+        r = self.reason([prod(1, start="2026-10-05"), prod(2, start="2026-10-20", price=100)],
+                        crit(area=None))
+        self.assertEqual(r, "È a Lanzarote. Parte il 5 ottobre 2026, la prima partenza nel periodo che "
+                            "hai chiesto, con un totale a partire da 1000 euro.")
+
+    def test_featured_over_a_cheaper_product_with_the_same_departure(self):
+        products = [prod(1, featured=True), prod(2, price=100)]
+        self.assertEqual(self.reason(products),
+                         "È a Lanzarote, in Spagna come hai chiesto. Parte il 1 ottobre 2026, nel periodo "
+                         "che hai chiesto, con un totale a partire da 1000 euro, ed è tra i viaggi in "
+                         "evidenza del catalogo.")
+        self.assertTrue(self.reason(products, crit(language="en")).endswith(
+            "with a total starting at 1000 euros, and it's one of the catalogue's featured trips."))
+        self.assertTrue(self.reason(products, crit(budget=Decimal("100"))).endswith(
+            "oltre il tuo budget di 100 euro, ma è tra i viaggi in evidenza del catalogo."))
+        self.assertTrue(self.reason(products, crit(area=None)).endswith(
+            "con un totale a partire da 1000 euro, ed è tra i viaggi in evidenza del catalogo."))
+
+    def test_cheapest_claim_stays_when_it_is_true(self):
+        products = [prod(1, price=300), prod(2, price=320), prod(3, start="2026-10-05", price=350)]
+        self.assertEqual(self.reason(products, crit(area=None)),
+                         "È a Lanzarote. Parte il 1 ottobre 2026, nel periodo che hai chiesto, ed è la più "
+                         "economica compatibile.")
+
+    def test_departure_and_featured_together(self):
+        """Un più economico perso sulla partenza e uno su `featured`: la frase dice tutti e due."""
+        products = [prod(1, featured=True), prod(2, price=100), prod(3, start="2026-10-20", price=100)]
+        self.assertTrue(self.reason(products, crit(area=None)).endswith(
+            "Parte il 1 ottobre 2026, la prima partenza nel periodo che hai chiesto, con un totale a "
+            "partire da 1000 euro, ed è tra i viaggi in evidenza del catalogo."))
+
+    def test_duration_sentence_keeps_its_place(self):
+        long = prod(1, nights=7, start="2026-10-05")
+        r = self.reason([long, prod(2, nights=7, start="2026-10-20", price=100)], crit(**WEEKEND))
+        self.assertLess(r.index("Non ho weekend compatibili"), r.index("Parte il 5 ottobre 2026, la prima partenza"))
 
 
 if __name__ == "__main__":
