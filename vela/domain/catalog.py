@@ -14,8 +14,8 @@ from typing import List, Optional
 from vela.domain.models import Availability, Product
 
 SPORTS = ("padel", "tennis")
-# chiavi scartate a ogni profondità del dettaglio: immagini e programma di viaggio
-MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media", "travelProgram"])
+# chiavi scartate a ogni profondità del dettaglio: le immagini. `travelProgram` resta (RF-83)
+MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media"])
 # campi di RF-28 presi pari pari dal dettaglio (category, venue, destination, hotels a parte)
 CATALOG_FIELDS = ("id", "title", "slug", "shortDescription", "price", "currency", "minPax",
                   "maxPax", "minDate", "maxDate", "availabilities", "defaultDurationInDays",

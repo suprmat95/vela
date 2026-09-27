@@ -1,6 +1,6 @@
 # Superficie REST
 
-La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni endpoint richiede
+La superficie REST (RF-40) espone i casi d'uso di RF-39 e RF-83 sotto `/v1`. Ogni endpoint richiede
 `Authorization: Bearer <VELA_API_TOKEN>` (RF-43); senza la variabile impostata sul server ogni
 `/v1/*` risponde 503. Codice: `vela/surfaces/rest.py`, errori in `vela/surfaces/problems.py`.
 `GET /health`, `/docs` e `/openapi.json` sono pubblici.
@@ -11,6 +11,7 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 |---|---|---|
 | `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
+| `GET /v1/proposals/{proposal_id}/details` | — | 200 `proposal_details` (RF-83) |
 | `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
 | `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile, "rooms"?: int}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data`, 200 `question` (M21-D: `rooms` sotto il minimo del prodotto, nessun ordine) |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
@@ -105,6 +106,7 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 | `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`) |
 | `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto: leggere `say`, nulla è stato salvato |
 | `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A); `rooms` = camere dell'intento (M21-D) |
+| `proposal_details` | 200 | dettagli del prodotto proposto (RF-83): `proposal_id`, `product`, `description`, `why_this_trip`, `program` (`{description, sections: [{title, days: [{title, description, events: [{time, text}]}]}]}` o `null`), `hotel` (`{name, stars, description, address}` o `null`), `venue` (`{name, description}` o `null`), `playing_hours`, `style`, `goal`, `best_for_level`, `accepts_companions`. Testi nella lingua del catalogo; nessun cambio di stato |
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |

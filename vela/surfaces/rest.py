@@ -1,4 +1,4 @@
-"""Superficie REST (RF-40, RF-43): i cinque casi d'uso di RF-39 sotto ``/v1``.
+"""Superficie REST (RF-40, RF-43): i casi d'uso di RF-39 e RF-83 sotto ``/v1``.
 
 Bearer statico ``VELA_API_TOKEN``; senza token configurato ogni endpoint risponde 503. Ogni
 risposta di successo è ``{"outcome": ..., **to_dict()}``: gli esiti previsti (domanda, niente di
@@ -16,16 +16,17 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, StringConstraints
 
 from vela.domain.models import (IntentCreated, IntentQuestion, MissingTravelerData, NoMatch,
-                                OrderQueued, OrderStatusResponse, ProposalMade, StructuredFields,
-                                TravelerProfile, profile_from_dict)
+                                OrderQueued, OrderStatusResponse, ProposalDetails, ProposalMade,
+                                StructuredFields, TravelerProfile, profile_from_dict)
 from vela.domain.usecases import Vela
 from vela.surfaces.problems import domain_unavailable, rest_not_configured, unauthorized
 
 bearer = HTTPBearer(auto_error=False)
 
 OUTCOMES = {IntentCreated: "intent_created", IntentQuestion: "question",
-            ProposalMade: "proposal", NoMatch: "no_match", OrderQueued: "order_queued",
-            MissingTravelerData: "missing_traveler_data", OrderStatusResponse: "order_status"}
+            ProposalMade: "proposal", ProposalDetails: "proposal_details", NoMatch: "no_match",
+            OrderQueued: "order_queued", MissingTravelerData: "missing_traveler_data",
+            OrderStatusResponse: "order_status"}
 
 
 def require_token(request: Request,
@@ -118,6 +119,11 @@ def create_intent(body: IntentIn, vela: Vela = Depends(get_vela)) -> JSONRespons
 @router.get("/intents/{intent_id}/proposal")
 def get_proposal(intent_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse:
     return reply(vela.get_proposal(intent_id))
+
+
+@router.get("/proposals/{proposal_id}/details")
+def get_proposal_details(proposal_id: str, vela: Vela = Depends(get_vela)) -> JSONResponse:
+    return reply(vela.get_proposal_details(proposal_id))
 
 
 @router.post("/proposals/{proposal_id}/reject")

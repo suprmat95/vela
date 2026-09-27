@@ -47,6 +47,7 @@ Sync a mano (stampa prima le chiamate previste; `--dry-run` si ferma lì):
 ```bash
 uv run python -m vela.sync --dry-run      # piano, nessuna chiamata
 uv run python -m vela.sync                # un giro su tutti i brand, nel DB di DATABASE_URL
+uv run python -m vela.sync --full         # come sopra, ma riscarica anche i dettagli invariati (RF-83)
 uv run python -m vela.sync --record --sport tennis   # rigenera una fixture (docs/fixtures.md)
 ```
 

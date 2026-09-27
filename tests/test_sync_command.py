@@ -105,6 +105,15 @@ class RunTest(unittest.TestCase):
         self.assertIn("chiamate HofJ: 5", text)          # quota + 2 liste + 2 dettagli
         self.assertNotIn(KEY, text)
 
+    def test_full_downloads_details_already_in_the_database(self):
+        repos = MemoryRepositories()
+        run_main([], repos=repos)
+        _, text, source, _ = run_main(["--full"], repos=repos)
+        self.assertIn(("detail", "weebora.com", "1"), source.calls)
+        self.assertIn("scritti 1, invariati 0", text)
+        _, text, source, _ = run_main([], repos=repos)
+        self.assertNotIn(("detail", "weebora.com", "1"), source.calls)
+
     def test_failed_brand_exits_with_an_error(self):
         source = QuotaSource({"weebora.com": [[item(1)]], "terrarossa.com": [[item(11)]]})
         from vela.ports.hofj import UpstreamError

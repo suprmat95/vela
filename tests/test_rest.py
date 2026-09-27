@@ -309,10 +309,10 @@ class ProposalEndpointsTest(unittest.TestCase):
         assert_problem(self, r, 500, "internal-error")
         self.assertNotIn("segreto", r.text)
 
-    def test_openapi_lists_the_five_endpoints(self):
+    def test_openapi_lists_the_endpoints(self):
         paths = self.c.get("/openapi.json").json()["paths"]
         for path in ("/v1/intents", "/v1/intents/{intent_id}/proposal",
-                     "/v1/proposals/{proposal_id}/reject", "/v1/proposals/{proposal_id}/accept",
+                     "/v1/proposals/{proposal_id}/details", "/v1/proposals/{proposal_id}/reject", "/v1/proposals/{proposal_id}/accept",
                      "/v1/orders/{order_id}"):
             self.assertIn(path, paths)
 

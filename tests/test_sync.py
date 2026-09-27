@@ -171,6 +171,18 @@ class SyncTest(unittest.TestCase):
         self.assertEqual({pid: p.fetched_at for pid, p in self.products().items()},
                          {"1": self.clock.t, "2": self.clock.t, "4": self.clock.t})
 
+    def test_full_run_downloads_unchanged_products_too(self):
+        """RF-83: `--full` riscarica anche i dettagli con `updatedAt` invariato."""
+        self.sync(FakeSource({"weebora.com": [[item(1), item(2)]]}), {"padel": "weebora.com"}).run()
+        second = FakeSource({"weebora.com": [[item(1), item(2)]]})
+        report = self.sync(second, {"padel": "weebora.com"}, full=True).run()
+        self.assertEqual(second.detail_calls(), ["1", "2"])
+        self.assertEqual((report.brands[0].written, report.brands[0].unchanged), (2, 0))
+
+    def test_travel_program_is_kept_in_raw(self):
+        self.sync(two_brands()).run()
+        self.assertEqual(self.products()["1"].raw["travelProgram"]["id"], "733")
+
     def test_pre_m10_row_is_relabelled_without_a_detail(self):
         self.repos.products.upsert_many([make_product(11, sport="padel",
                                                       updated_at="2026-09-25T09:20:18.757Z")])
