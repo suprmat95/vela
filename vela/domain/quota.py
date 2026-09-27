@@ -10,6 +10,11 @@ bucket ne restano almeno `floor`, `booking` può arrivare a zero. Le prenotazion
 pagati passano quindi sempre per prime. L'attesa stimata (RF-48) conta per gli acquisti solo
 la quota `1 − reserve` del ritmo.
 
+M19: un acquisto costa 2 chiamate (itinerario, totale) e una prenotazione 3 (cliente,
+passeggeri, booking). La riserva non è più una percentuale fissa: è la parte del ritmo che
+va ai booking se paga una quota `p` di chi riceve il link, 3p / (2 + 3p). La soglia è un
+booking intero.
+
 Le percentuali passano da Decimal perché il floor su float sbaglia (100 × 0,29 = 28,999…).
 """
 import math
@@ -20,9 +25,11 @@ from typing import Optional
 
 from vela.domain.models import QuotaClass
 
-CALLS_PER_PURCHASE = 5   # RF-46: itinerario, customer, lettura pax, scrittura pax, totale
+CALLS_PER_PURCHASE = 2   # RF-46, M19: itinerario, totale
+CALLS_PER_BOOKING = 3    # RF-51, M19: customer, pax, booking
 DEFAULT_BURST = 8        # B: con 108 effettive, r = 100/60 ≈ 1,67 chiamate/s
-DEFAULT_FLOOR = 2        # gettoni che `purchase` e `sync` lasciano alle prenotazioni
+DEFAULT_FLOOR = 3        # gettoni che `purchase` e `sync` lasciano alle prenotazioni: un booking
+DEFAULT_PAY_SHARE = 0.05  # M19: quota attesa di chi paga il link (scenario del 2%, con margine)
 WINDOW = timedelta(seconds=60)
 _EPSILON = 1e-9          # tolleranza dei float del refill
 
@@ -35,10 +42,23 @@ def effective_limit(limit_per_minute: int, margin: float) -> int:
     return _floor_share(limit_per_minute, 1 - Decimal(str(margin)))
 
 
+def booking_reserve(pay_share: float) -> float:
+    """M19, RF-48: parte del ritmo delle prenotazioni se paga `pay_share` di chi riceve il link.
+    Ogni link costa CALLS_PER_PURCHASE, ogni link pagato CALLS_PER_BOOKING in più."""
+    p = Decimal(str(pay_share))
+    if not 0 <= p <= 1:
+        raise ValueError("quota di chi paga fuori da 0..1: %s" % pay_share)
+    booking = CALLS_PER_BOOKING * p
+    return float(booking / (CALLS_PER_PURCHASE + booking))
+
+
+DEFAULT_RESERVE = booking_reserve(DEFAULT_PAY_SHARE)
+
+
 @dataclass(frozen=True)
 class BucketRules:
     margin: float = 0.10     # limite effettivo = limitPerMinute × 0,9
-    reserve: float = 0.20    # quota del ritmo che l'attesa stimata (RF-48) lascia alle prenotazioni
+    reserve: float = DEFAULT_RESERVE   # quota del ritmo che l'attesa stimata (RF-48) lascia alle prenotazioni
     burst: int = DEFAULT_BURST
     floor: int = DEFAULT_FLOOR
 
@@ -46,6 +66,8 @@ class BucketRules:
         if self.floor + CALLS_PER_PURCHASE > self.burst:
             raise ValueError("capienza %d: non contiene un acquisto (%d) più la soglia %d"
                              % (self.burst, CALLS_PER_PURCHASE, self.floor))
+        if CALLS_PER_BOOKING > self.burst:
+            raise ValueError("capienza %d: non contiene una prenotazione (%d)" % (self.burst, CALLS_PER_BOOKING))
 
     def rate(self, limit_per_minute: int) -> float:
         """Gettoni al secondo: (limite effettivo − B) / 60, così B + 60·r = limite effettivo."""

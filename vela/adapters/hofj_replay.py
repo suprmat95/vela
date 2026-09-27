@@ -99,9 +99,17 @@ class ReplayHofJ:
         except KeyError:
             raise UpstreamError("itinerario sconosciuto: %s" % itinerary_id)
 
+    def _adopt(self, itinerary_id: str) -> dict:
+        """M19: cliente e pax arrivano dopo il pagamento, anche dopo un riavvio che ha svuotato i
+        carrelli in memoria. Come `create_booking`, un id del replay si accetta anche se non è di
+        questo processo; gli altri restano un errore."""
+        if itinerary_id not in self._itineraries and itinerary_id.startswith(ITINERARY_PREFIX):
+            self._itineraries[itinerary_id] = {"customer": None, "pax": []}
+        return self._get(itinerary_id)
+
     def set_customer(self, itinerary_id: str, customer: Customer) -> None:
         self._call()
-        self._get(itinerary_id)["customer"] = customer
+        self._adopt(itinerary_id)["customer"] = customer
 
     def get_pax(self, itinerary_id: str) -> List[Pax]:
         self._call()
@@ -109,7 +117,7 @@ class ReplayHofJ:
 
     def set_pax(self, itinerary_id: str, pax: List[Pax]) -> None:
         self._call()
-        self._get(itinerary_id)["pax"] = list(pax)
+        self._adopt(itinerary_id)["pax"] = list(pax)
 
     def create_booking(self, itinerary_id: str, proof: PaymentProof) -> str:
         self._call()

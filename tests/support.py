@@ -5,7 +5,7 @@ from decimal import Decimal
 from decimal import Decimal as _Decimal
 
 from vela.domain.models import Availability, Product
-from vela.ports.hofj import Itinerary, Pax, QuotaSnapshot
+from vela.ports.hofj import Itinerary, Pax, ProductError, QuotaSnapshot
 from vela.ports.payments import LinkStatus, PaymentLink, PaymentsError
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
@@ -85,7 +85,7 @@ class FakeHofJ:
             raise self.fail_itinerary
         self._maybe_fail("create_itinerary")
         iid = "it-%s" % product.id
-        self.pax[iid] = [Pax("ref-%d" % i) for i in range(adults)]
+        self.pax[iid] = [Pax("pax-%d" % (i + 1)) for i in range(adults)]   # come HofJ (differenza #36)
         total = self.total if self.total is not None else product.price * adults
         self.totals[iid] = (_Decimal(total), currency)
         return iid
@@ -103,6 +103,9 @@ class FakeHofJ:
     def set_pax(self, itinerary_id, pax):
         self.calls.append(("set_pax", itinerary_id, pax))
         self._maybe_fail("set_pax")
+        known = self.pax.get(itinerary_id)
+        if known is not None and {p.ref_id for p in pax} - {p.ref_id for p in known}:
+            raise ProductError("refId sconosciuto")   # M19: il ripiego del job di prenotazione
         self.pax[itinerary_id] = list(pax)
 
     def get_itinerary(self, itinerary_id):

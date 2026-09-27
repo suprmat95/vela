@@ -96,6 +96,7 @@ orders_t = Table(
     Column("rooms", Integer, nullable=False, server_default="1"),                # 0011 (M21-D)
     Column("follows_quote", Boolean, nullable=False, server_default=text("false")),   # 0015 (RF-84)
     Column("confirmed_total", Numeric(12, 2)),                                         # 0015 (RF-84)
+    Column("last_seen_at", DateTime(timezone=True)),                                   # 0016 (M19)
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
@@ -107,8 +108,8 @@ rejections_t = Table(
     Column("product_id", String(32), ForeignKey("products.id"), nullable=False),
     Column("reason", Text, nullable=False, default=""),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("kind", String(16)),                                                  # 0016 (M21-F)
-    Column("keep_product", Boolean, nullable=False, server_default=text("false")),   # 0016 (M21-F)
+    Column("kind", String(16)),                                                  # 0017 (M21-F)
+    Column("keep_product", Boolean, nullable=False, server_default=text("false")),   # 0017 (M21-F)
     UniqueConstraint("proposal_id", name="uq_rejections_proposal_id"),
 )
 

@@ -216,6 +216,16 @@ class ConfirmWithoutCartTest(unittest.TestCase):
         self.assertIsNotNone(o.itinerary_id)
         self.assertEqual(w.carts(), 2)
 
+    def test_confirm_without_cart_costs_two_calls(self):
+        """M19: la conferma di un hit accoda un job da 2 chiamate, itinerario e totale."""
+        w = World()
+        pid = self.hit(w)
+        w.accept(pid)
+        before = len(w.hofj.calls)
+        w.settle()
+        self.assertEqual([c[0] for c in w.hofj.calls[before:]], ["create_itinerary", "get_itinerary"])
+        self.assertEqual(w.order(pid).status, OrderStatus.AWAITING_PAYMENT)
+
     def test_confirm_without_cart_asks_again_when_price_changed(self):
         w = World()
         pid = self.hit(w)
@@ -288,6 +298,19 @@ class FallbackTest(unittest.TestCase):
             job = w.repos.jobs.active_for_order(o.id, JobKind.PURCHASE)
             self.assertEqual(job.enqueued_at, o.enqueued_at)
         self.assert_released(w, pids[1:])
+
+    def test_silent_leader_hands_followers_their_own_jobs(self):
+        """M19: il leader scade in coda senza chiamate; il ripiego dà agli agganciati il loro job,
+        che scade allo stesso modo se anche loro tacciono. Nessun carrello."""
+        w = World()
+        pids = [w.traveler() for _ in range(3)]
+        for pid in pids:
+            w.accept(pid)
+        w.clock.advance(16 * 60)
+        w.settle()
+        self.assertEqual([w.order(pid).status for pid in pids], [OrderStatus.EXPIRED] * 3)
+        self.assertEqual(w.carts(), 0)
+        self.assertIsNone(w.repos.quotes.get(KEY))
 
     def test_follower_unsticks_when_leader_left_without_release(self):
         w, pids = self.three()

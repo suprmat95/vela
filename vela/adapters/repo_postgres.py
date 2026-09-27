@@ -18,7 +18,7 @@ from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, Jo
                                 OrderStatus, PriceQuote, Product, Proposal, QuotaClass, QuoteKey,
                                 QuoteStatus, Rejection, criteria_from_dict, criteria_to_dict,
                                 profile_from_dict, profile_to_dict)
-from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
@@ -201,7 +201,13 @@ def _order_row(o: Order) -> dict:
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
         "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
         "follows_quote": o.follows_quote, "confirmed_total": o.confirmed_total,
+        "last_seen_at": o.last_seen_at,
     }
+
+
+def _order_update(o: Order) -> dict:
+    """M19: i `save` non scrivono `last_seen_at`, che si muove solo con `touch`."""
+    return {k: v for k, v in _order_row(o).items() if k not in ("id", "last_seen_at")}
 
 
 def _order(m) -> Order:
@@ -213,7 +219,8 @@ def _order(m) -> Order:
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
                  enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
                  orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"],
-                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"])
+                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"],
+                 last_seen_at=m["last_seen_at"])
 
 
 class PostgresOrders:
@@ -245,13 +252,21 @@ class PostgresOrders:
         return None if m is None else _order(m)
 
     def save(self, order: Order) -> None:
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             conn.execute(update(orders_t).where(orders_t.c.id == order.id).values(**values))
 
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order_id,
+                or_(orders_t.c.last_seen_at.is_(None), orders_t.c.last_seen_at <= at - min_interval))
+                .values(last_seen_at=at))
+        return res.rowcount == 1
+
     def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
         """Un solo `UPDATE ... WHERE status = expected`: tra due scritture concorrenti vince una."""
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             res = conn.execute(update(orders_t).where(orders_t.c.id == order.id,
                                                       orders_t.c.status == expected.value).values(**values))
@@ -401,7 +416,7 @@ class PostgresQuotes:
         return sorted((_order(m) for m in rows), key=lambda o: o.id)
 
     def detach(self, order: Order) -> bool:
-        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        values = _order_update(order)
         with self.engine.begin() as conn:
             res = conn.execute(update(orders_t).where(
                 orders_t.c.id == order.id, orders_t.c.status == OrderStatus.QUEUED.value,
@@ -519,7 +534,7 @@ class PostgresQuota:
     `SELECT ... FOR UPDATE` per tutta la decisione, così due worker non prendono gli stessi
     gettoni. Le regole sono quelle pure di `vela.domain.quota`."""
 
-    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = 0.20,
+    def __init__(self, engine: Engine, margin: float = 0.10, reserve: float = DEFAULT_RESERVE,
                  rules: Optional[BucketRules] = None):
         self.engine = engine
         self.rules = rules or BucketRules(margin, reserve)
@@ -581,7 +596,7 @@ CATALOG_LOCK_KEY = 7_646_512_010
 
 
 class PostgresRepositories:
-    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = 0.20,
+    def __init__(self, engine: Engine, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
                  quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.engine = engine
         self._local_lock = threading.Lock()   # SQLite dei test: nessun advisory lock

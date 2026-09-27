@@ -304,6 +304,7 @@ class Order:
     rooms: int = 1                                    # M21-D (RF-67): camere mandate a HofJ
     follows_quote: bool = False                       # RF-84: agganciato a un prezzo in volo, senza job
     confirmed_total: Optional[Decimal] = None         # RF-84: totale confermato prima del carrello
+    last_seen_at: Optional[datetime] = None           # M19: ultimo segno di vita del viaggiatore (0016)
 
 
 class QuoteStatus(str, Enum):

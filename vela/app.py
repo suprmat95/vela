@@ -21,6 +21,7 @@ Gli SMS al viaggiatore sono Twilio se le tre variabili ``TWILIO_*`` sono imposta
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -214,12 +215,15 @@ def build_worker(vela: Vela, settings: Settings, router: Optional[HofJRouter] = 
     Senza `router` (test con un client finto) tutti i brand usano `vela.hofj`."""
     router = router or SingleClientRouter(vela.hofj)
     notifier = notifier or build_notifier(settings)
-    purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose, vela.defaults,
+    purchase = PurchaseJob(vela.repos, router, vela.payments, vela._propose,
                            now=vela.now, max_attempts=settings.purchase_max_attempts,
-                           new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds)
+                           new_id=vela.new_id, poll_seconds=settings.payment_poll_seconds,
+                           silent_after=timedelta(minutes=settings.silent_order_minutes)
+                           if settings.silent_order_minutes else None,
+                           sms_enabled=vela.sms_enabled)
     booking = BookingJob(vela.repos, router, now=vela.now,
                          max_attempts=settings.booking_max_attempts, backoff=settings.booking_backoff,
-                         new_id=vela.new_id)
+                         new_id=vela.new_id, defaults=vela.defaults)
     check = PaymentCheckJob(vela.repos, vela.payments, vela.orders, now=vela.now,
                             poll_seconds=settings.payment_poll_seconds)
     sms = SmsJob(vela.repos, notifier, now=vela.now)

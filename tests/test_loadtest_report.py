@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from loadtest.fake_hofj.log import max_in_window
-from loadtest.report import (booking_measures, main, percentile, quota_measures,
+from loadtest.report import (booking_measures, cost_measures, main, percentile, quota_measures,
                              read_stats, traveler_measures)
 
 S = 1_000_000.0
@@ -14,6 +14,23 @@ S = 1_000_000.0
 def call(t, endpoint="GET /v1/quota", status=200, origin="vela", iid=None, executed=True, counted=True):
     return {"t": t, "endpoint": endpoint, "status": status, "origin": origin, "itinerary_id": iid,
             "executed": executed, "counted": counted}
+
+
+class CostTest(unittest.TestCase):
+    def test_calls_per_link_and_per_paid_order(self):
+        """M19: chiamate del carrello per link, chiamate di cliente, pax e booking per ordine
+        prenotato; il sync e la quota non contano."""
+        by_endpoint = {"POST /v1/itineraries": 10, "GET /v1/itineraries/{id}": 10,
+                       "PUT /v1/itineraries/{id}/customer": 2, "PUT /v1/itineraries/{id}/pax": 2,
+                       "GET /v1/itineraries/{id}/pax": 1, "POST /v1/bookings": 2,
+                       "GET /v1/quota": 3, "GET /v1/products": 5}
+        c = cost_measures(by_endpoint, links=8, booked=2)
+        self.assertEqual((c["purchase_calls"], c["booking_calls"]), (20, 7))
+        self.assertEqual((c["calls_per_link"], c["calls_per_paid_order"]), (2.5, 3.5))
+
+    def test_no_links_no_ratio(self):
+        c = cost_measures({}, links=0, booked=0)
+        self.assertEqual((c["calls_per_link"], c["calls_per_paid_order"]), (None, None))
 
 
 class WindowTest(unittest.TestCase):
@@ -104,6 +121,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("`create_intent` | 10 | 0 | 20 | 45 | 60", text)
         self.assertIn("Marco", text)
         self.assertEqual(data["quota"]["calls_vela"], 2)
+        self.assertEqual(data["cost"]["purchase_calls"], 1)
+        self.assertIn("Chiamate per link", text)
 
 
 if __name__ == "__main__":

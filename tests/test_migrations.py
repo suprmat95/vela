@@ -30,7 +30,7 @@ def versions(url):
 
 
 def seed_rejection(conn):
-    """Intento, prodotto, proposta e un rifiuto con le sole colonne di prima di 0016."""
+    """Intento, prodotto, proposta e un rifiuto con le sole colonne di prima di 0017."""
     conn.execute(text("INSERT INTO intents (id, text, criteria, profile, language, created_at) "
                       "VALUES ('i1', 'padel', '{}', '{}', 'it', '2026-09-27 10:00:00')"))
     conn.execute(text("INSERT INTO products (id, title, slug, short_description, sport, price, "
@@ -47,14 +47,14 @@ def seed_rejection(conn):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0016"])
+        self.assertEqual(heads, ["0017"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0016", res.stdout)
+        self.assertIn("0017", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -63,7 +63,7 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0016"])
+                self.assertEqual(versions(url), ["0017"])
                 with create_engine(url).connect() as conn:
                     tables = inspect(conn).get_table_names()
                     self.assertIn("orders", tables)
@@ -93,7 +93,7 @@ class SqliteUpgradeTest(unittest.TestCase):
                         self.assertFalse(product_cols[flag]["nullable"], flag)
                         self.assertIn(str(product_cols[flag]["default"]).lower(), ("0", "false"), flag)
                     rejection_cols = {c["name"]: c for c in inspect(conn).get_columns("rejections")}
-                    self.assertTrue(rejection_cols["kind"]["nullable"])             # 0016 (M21-F)
+                    self.assertTrue(rejection_cols["kind"]["nullable"])             # 0017 (M21-F)
                     self.assertFalse(rejection_cols["keep_product"]["nullable"])
                     self.assertIn(str(rejection_cols["keep_product"]["default"]).lower(), ("0", "false"))
                     quota_cols = {c["name"] for c in inspect(conn).get_columns("quota_window")}
@@ -203,32 +203,33 @@ class SqliteUpgradeTest(unittest.TestCase):
             labels = labels_of(raw)
             self.assertEqual(got[pid], (ordered(labels.levels), labels.levels_exclusive, labels.coaching))
 
-    def test_0016_follows_0015_and_leaves_0013_0014_unused(self):
-        """M21-F: la catena su master è 0012 → 0015 → 0016; una 0013 in mezzo romperebbe i
-        database già a 0015 (decisione M23)."""
+    def test_0017_follows_0016_and_leaves_0013_0014_unused(self):
+        """M21-F: la catena su master è 0012 → 0015 (M23) → 0016 (M19) → 0017; una 0013 in mezzo
+        romperebbe i database già a 0015 o 0016 (decisione M23)."""
         scripts = ScriptDirectory.from_config(alembic_config())
+        self.assertEqual(scripts.get_revision("0017").down_revision, "0016")
         self.assertEqual(scripts.get_revision("0016").down_revision, "0015")
         self.assertEqual(scripts.get_revision("0015").down_revision, "0012")
         for unused in ("0013", "0014"):
             with self.assertRaises(Exception):
                 scripts.get_revision(unused)
 
-    def test_upgrade_to_0016_keeps_existing_rejections_without_a_kind(self):
+    def test_upgrade_to_0017_keeps_existing_rejections_without_a_kind(self):
         """M21-F: un rifiuto già in tabella non ha tipo (nullo, nessun tipo inventato) e non
         tiene il prodotto."""
         with tempfile.TemporaryDirectory() as tmp:
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
-                command.upgrade(alembic_config(), "0015")
+                command.upgrade(alembic_config(), "0016")
                 engine = create_engine(url)
                 with engine.begin() as conn:
                     seed_rejection(conn)
-                command.upgrade(alembic_config(), "0016")
+                command.upgrade(alembic_config(), "0017")
                 with engine.connect() as conn:
                     rows = conn.execute(text("SELECT reason, kind, keep_product FROM rejections")).all()
         self.assertEqual([(r[0], r[1], bool(r[2])) for r in rows], [("troppo caro", None, False)])
 
-    def test_downgrade_from_0016_removes_rejection_columns(self):
+    def test_downgrade_from_0017_removes_rejection_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
@@ -236,8 +237,8 @@ class SqliteUpgradeTest(unittest.TestCase):
                 engine = create_engine(url)
                 with engine.begin() as conn:
                     seed_rejection(conn)
-                command.downgrade(alembic_config(), "0015")
-                self.assertEqual(versions(url), ["0015"])
+                command.downgrade(alembic_config(), "0016")
+                self.assertEqual(versions(url), ["0016"])
                 with engine.connect() as conn:
                     cols = {c["name"] for c in inspect(conn).get_columns("rejections")}
                     reasons = [r[0] for r in conn.execute(text("SELECT reason FROM rejections"))]
@@ -378,16 +379,16 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0016"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0017"])
 
     @unittest.skipUnless(os.environ.get("DATABASE_URL"), "serve DATABASE_URL")
-    def test_0016_on_existing_rejections_then_downgrade_and_back(self):
-        """M21-F su Postgres: un rifiuto scritto a 0015 resta, senza tipo e senza `keep_product`;
+    def test_0017_on_existing_rejections_then_downgrade_and_back(self):
+        """M21-F su Postgres: un rifiuto scritto a 0016 resta, senza tipo e senza `keep_product`;
         il downgrade toglie le due colonne e tiene la riga; si torna alla testa."""
         from vela.config import Settings
         url = Settings.from_env().database_url
         command.upgrade(alembic_config(), "head")
-        command.downgrade(alembic_config(), "0015")
+        command.downgrade(alembic_config(), "0016")
         engine = create_engine(url)
         ids = ("m21f-i", "m21f-p", "m21f-x")
         try:
@@ -405,12 +406,12 @@ class PostgresUpgradeTest(unittest.TestCase):
                 conn.execute(text("INSERT INTO rejections (intent_id, proposal_id, product_id, reason, "
                                   "created_at) VALUES (:i, :p, :x, 'troppo caro', now())"),
                              {"i": ids[0], "p": ids[1], "x": ids[2]})
-            command.upgrade(alembic_config(), "0016")
+            command.upgrade(alembic_config(), "0017")
             with engine.connect() as conn:
                 row = conn.execute(text("SELECT kind, keep_product FROM rejections WHERE proposal_id = :p"),
                                    {"p": ids[1]}).one()
             self.assertEqual(tuple(row), (None, False))
-            command.downgrade(alembic_config(), "0015")
+            command.downgrade(alembic_config(), "0016")
             with engine.connect() as conn:
                 cols = {c["name"] for c in inspect(conn).get_columns("rejections")}
                 left = conn.execute(text("SELECT count(*) FROM rejections WHERE proposal_id = :p"),
@@ -424,4 +425,4 @@ class PostgresUpgradeTest(unittest.TestCase):
                 conn.execute(text("DELETE FROM proposals WHERE id = :p"), {"p": ids[1]})
                 conn.execute(text("DELETE FROM intents WHERE id = :i"), {"i": ids[0]})
                 conn.execute(text("DELETE FROM products WHERE id = :x"), {"x": ids[2]})
-        self.assertEqual(versions(url), ["0016"])
+        self.assertEqual(versions(url), ["0017"])

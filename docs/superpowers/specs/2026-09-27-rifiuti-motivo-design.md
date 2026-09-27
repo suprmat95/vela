@@ -98,9 +98,10 @@ Nessun tipo → la domanda di RF-75. Motivo vuoto senza campi = nessun tipo.
 Nei casi 1 e 2 nessun rifiuto, criteri invariati, ordine invariato (RF-49): la domanda non tocca un
 leader o un agganciato di `price_quotes`.
 
-## 6. Schema: migrazione 0016
+## 6. Schema: migrazione 0017
 
-`down_revision = "0015"` (0013 e 0014 restano numeri non usati: M21-F doveva usare 0013, M22-b
+Scritta come 0016 con `down_revision = "0015"`; al merge in `master` M19 aveva già la 0016
+(`orders.last_seen_at`), quindi è la 0017 con `down_revision = "0016"` (0013 e 0014 restano numeri non usati: M21-F doveva usare 0013, M22-b
 0014, archiviata). `rejections.kind` `String(16)` nullo: nullo = rifiuto senza tipo, cioè
 registrato prima di M21-F o esclusione di RF-17 (prodotto non prenotabile), senza inventarne uno.
 `rejections.keep_product` booleano non nullo, default falso. Downgrade: drop delle due colonne.
@@ -120,6 +121,6 @@ UC-F (F1-F4, "Altri tipi": una frase it e una en per tipo), i tre casi rimandati
 classificazione, il load test ("troppo caro" → `price`, nessuna domanda, stesse chiamate HofJ),
 RF-84 (cancellazione di un leader tramite `reject_proposal` con passaggio del testimone, domanda
 senza sganci, rifiuto in `awaiting_confirmation` su prezzo dalla cache come senza cache),
-repository in memoria e Postgres (`kind`, `keep_product`, `update`), migrazione 0016 (upgrade da
+repository in memoria e Postgres (`kind`, `keep_product`, `update`), migrazione 0017 (upgrade da
 zero, righe esistenti, downgrade). I test che fissavano "motivo non capito → proposta successiva"
 passano `reject_kind="other"` e tengono le stesse asserzioni.

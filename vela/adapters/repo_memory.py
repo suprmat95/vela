@@ -2,14 +2,14 @@
 import threading
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
 
 from vela.domain.models import (Criteria, Intent, Job, JobKind, JobStatus, Order, OrderStatus,
                                 PriceQuote, Product, Proposal, QuotaClass, QuoteKey, QuoteStatus,
                                 Rejection)
-from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
+from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, DEFAULT_RESERVE, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
 from vela.ports.hofj import QuotaSnapshot
@@ -118,14 +118,26 @@ class MemoryOrders:
 
     def save(self, order: Order) -> None:
         with self._lock:
-            self._items[order.id] = order
+            self._items[order.id] = self._keep_last_seen(order)
 
     def save_if_status(self, order: Order, expected: OrderStatus) -> bool:
         with self._lock:
             current = self._items.get(order.id)
             if current is None or current.status != expected:
                 return False
-            self._items[order.id] = order
+            self._items[order.id] = self._keep_last_seen(order)
+            return True
+
+    def _keep_last_seen(self, order: Order) -> Order:
+        current = self._items.get(order.id)
+        return order if current is None else replace(order, last_seen_at=current.last_seen_at)
+
+    def touch(self, order_id: str, at: datetime, min_interval: timedelta) -> bool:
+        with self._lock:
+            current = self._items.get(order_id)
+            if current is None or (current.last_seen_at is not None and current.last_seen_at > at - min_interval):
+                return False
+            self._items[order_id] = replace(current, last_seen_at=at)
             return True
 
     def orphan_itineraries_total(self) -> int:
@@ -229,7 +241,7 @@ class MemoryQuotes:
             current = self._orders._items.get(order.id)
             if current is None or current.status != OrderStatus.QUEUED or not current.follows_quote:
                 return False
-            self._orders._items[order.id] = order
+            self._orders._items[order.id] = replace(order, last_seen_at=current.last_seen_at)   # M19
             return True
 
 
@@ -290,7 +302,7 @@ class MemoryJobs:
 
 
 class MemoryRepositories:
-    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = 0.20,
+    def __init__(self, quota_margin: float = 0.10, booking_reserve: float = DEFAULT_RESERVE,
                  quota_burst: int = DEFAULT_BURST, quota_floor: int = DEFAULT_FLOOR):
         self.quota_rules = BucketRules(quota_margin, booking_reserve, quota_burst, quota_floor)
         self._catalog_lock = threading.Lock()
@@ -319,7 +331,7 @@ class MemoryRepositories:
 class MemoryQuota:
     """Token bucket in memoria (test e replay): stesse regole di Postgres, lock di processo."""
 
-    def __init__(self, margin: float = 0.10, reserve: float = 0.20, rules: Optional[BucketRules] = None):
+    def __init__(self, margin: float = 0.10, reserve: float = DEFAULT_RESERVE, rules: Optional[BucketRules] = None):
         self.rules = rules or BucketRules(margin, reserve)
         self._lock = threading.Lock()
         self._bucket: Optional[QuotaBucket] = None

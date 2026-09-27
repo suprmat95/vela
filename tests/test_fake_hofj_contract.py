@@ -14,7 +14,7 @@ from support import asgi_transport
 from vela.adapters.hofj_http import HofJHttp
 from vela.adapters.hofj_replay import FIXTURES_DIR
 from vela.domain.catalog import load_fixture
-from vela.ports.hofj import (ConfigError, Customer, PaymentProof, ProductError, QuotaError,
+from vela.ports.hofj import (ConfigError, Customer, Pax, PaymentProof, ProductError, QuotaError,
                              UpstreamError)
 
 KEY = "loadtest-key"
@@ -38,7 +38,7 @@ class ContractTest(unittest.TestCase):
         hofj.set_customer(iid, CUSTOMER)
         pax = hofj.get_pax(iid)
         self.assertEqual(pax[0].first_name, "Mario")
-        hofj.set_pax(iid, pax)
+        hofj.set_pax(iid, [pax[0], Pax(pax[1].ref_id, "Anna", "Bianchi")])   # M19: tutti con un nome
         itinerary = hofj.get_itinerary(iid)
         self.assertEqual(itinerary.total, PADEL.price * 2)
         proof = PaymentProof("pi_replay_o1", "succeeded")
@@ -110,6 +110,8 @@ class TimeoutTest(unittest.TestCase):
     def test_timeout_after_execution_then_retry_gives_one_booking(self):
         hofj = HofJHttp("http://127.0.0.1:%d" % self.port, KEY, "weebora.com", timeout=0.3)
         iid = hofj.create_itinerary(PADEL, date(2026, 10, 10), 2, 1, "EUR")
+        hofj.set_customer(iid, CUSTOMER)                 # M19: senza, il finto rifiuta il booking
+        hofj.set_pax(iid, [Pax("pax-1", "Mario", "Rossi"), Pax("pax-2", "Anna", "Bianchi")])
         proof = PaymentProof("pi_replay_o1", "succeeded")
         outcomes = []
         for _ in range(6):   # come BookingJob: si ripete la stessa POST finché non risponde

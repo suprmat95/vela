@@ -286,8 +286,13 @@ class SyncTest(unittest.TestCase):
     def test_every_call_takes_a_sync_quota_slot(self):
         calls = []
         acquire = self.repos.quota.acquire
-        self.repos.quota.acquire = lambda cls, n, now, purchase_waiting=False: (
-            calls.append((cls, n, purchase_waiting)) or acquire(cls, n, now, purchase_waiting))
+        def taking(cls, n, now, purchase_waiting=False):
+            taken = acquire(cls, n, now, purchase_waiting)
+            if taken:   # M19: con la soglia a 3 un prelievo può essere rifiutato e ripetuto
+                calls.append((cls, n, purchase_waiting))
+            return taken
+
+        self.repos.quota.acquire = taking
         source = two_brands()
         self.sync(source).run()
         self.assertEqual(len(calls), len(source.calls))

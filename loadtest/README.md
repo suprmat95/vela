@@ -35,19 +35,23 @@ lancia Locust per `--duration` minuti (default 10: 2/3 di arrivi, 1/3 di coda), 
 
 Opzioni di `run.py`: `--travelers`, `--label`, `--duration` (minuti dell'intero giro, default 10),
 `--arrival-minutes` e `--tail-minutes` per dividerlo a mano (la somma non supera `--duration`),
-`--seed` (13). Anna arriva al 60% della finestra degli arrivi, Marco a 55 s.
+`--seed` (13), `--pay` (quota di chi riceve il link e paga, default 0,60; M19). Anna arriva al 60%
+della finestra degli arrivi, Marco a 55 s. `--pay` cambia solo chi paga: arrivi, frasi e chi
+accetta restano quelli del seme, quindi i giri restano confrontabili.
 
 I giri di `RESULTS.md` (colonne "prima", M13a, e "dopo", M13b) sono cinque, tutti con
 `--duration 8 --arrival-minutes 5 --tail-minutes 3` e un `docker compose down -v` tra l'uno e
 l'altro: A-500, B-1000, C-2500 (`--travelers` 500, 1000, 2500), D-1000-guasti (sotto) ed
-E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Dopo una modifica a `vela/` serve
+E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Il giro con la cache del prezzo (RF-84, 2026-09-27) è C-2500 con gli stessi parametri e
+`--label 2500-cache`. Il giro di M19 (2026-09-27) è C-2500 con gli stessi parametri e `--pay
+0.02 --label 2500-m19-pay2`. Dopo una modifica a `vela/` serve
 `docker compose --profile loadtest build`. Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
 
 ## Scenario (modello aperto)
 
 Gli arrivi sono fissati dallo scenario (`loadtest/scenario.py`, seme fisso), non dalle risposte di
 Vela: 100% riceve una proposta, 30% dice "troppo caro", 20% accetta, chi ha accettato chiede lo
-stato ogni 30-60 s, 60% di chi riceve il link paga. Due sentinelle in più: **Marco** accetta a
+stato ogni 30-60 s, 60% di chi riceve il link paga (`--pay`). Due sentinelle in più: **Marco** accetta a
 60 s e paga appena ha il link; **Anna** arriva al minuto 6, rifiuta e accetta.
 
 Con la cache del prezzo (RF-84) chi accetta un viaggio già prezzato riceve subito

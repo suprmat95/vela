@@ -8,7 +8,6 @@ from support import NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
-from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, QuotaClass,
@@ -158,7 +157,7 @@ class PurchaseEnqueuesCheckTest(unittest.TestCase):
         repos.jobs.enqueue(job)
         ids = iter(["chk1", "sms1"])   # id distinto per il job di verifica e per l'SMS accodati insieme
         purchase = PurchaseJob(repos, SingleClientRouter(FakeHofJ()), StubPayments(), lambda i: NoMatch("i1", "x", "x"),
-                               DEFAULT_TRAVELER, now=lambda: NOW, max_attempts=3,
+                               now=lambda: NOW, max_attempts=3,
                                new_id=lambda: next(ids), poll_seconds=60)
         purchase.run(job, NOW + timedelta(seconds=60))
         check = repos.jobs.active_for_order("o1", JobKind.PAYMENT_CHECK)

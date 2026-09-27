@@ -481,3 +481,81 @@ The first `ERROR` is just the module not being importable outside `discover`. Re
 Both Postgres migration tests ran and passed, with nothing skipped. Stopping the container, then committing the docs:
 
 - 🔧 Bash: Stop Postgres, verify, commit docs
+
+All committed and the tree is clean. Now the local merge into `master`. Checking where `master` is checked out and whether it moved since this branch started:
+
+- 🔧 Bash: Check worktrees and master position
+
+`master` has moved: `task/m19` was merged after this branch started. Checking what M19 brought, especially migrations and the files I touched:
+
+- 🔧 Bash: Inspect commits merged into master since branch start
+
+- 🔧 Bash: Merge master into task/21f without committing
+
+The merge is blocked by the auto-generated `agent-log/` files (the commit hook writes them; I don't edit them). Checking where they come from before doing anything:
+
+- 🔧 Bash: Inspect agent-log file state and docs
+
+- 🔧 Bash: Restore regenerated logs and merge master
+
+The hook fires on this command too. Reading its configuration to see what triggers it:
+
+- 🔧 Bash: Read hook configuration
+
+- 🔧 Bash: Check staged state of agent-log files
+
+The two files come back as staged even after a restore, and neither command contained "commit". Checking whether the restore itself works when run on its own:
+
+- 🔧 Bash: Restore agent-log files and show status
+
+- 🔧 Bash: Read the hook's trigger logic
+
+The restore exits 0 but the files stay staged, which the hook code doesn't explain. Looking at the actual staged diff:
+
+- 🔧 Bash: Show staged diff of the agent-log md
+
+The staged content stops at my first merge attempt, so the restore isn't writing anything. Trying the equivalent with `reset` and `checkout`:
+
+- 🔧 Bash: Unstage and restore agent-log files
+
+Clean now. Running the merge:
+
+- 🔧 Bash: Merge master into the task branch
+
+Two conflicts. Starting with `tests/test_migrations.py`:
+
+- 🔧 Bash: Locate conflict markers and read M19 migration
+
+- 🔧 Bash: Show migration test conflict and master's change
+
+M19 only moved the head assertions to 0016. Resolving: I keep my tests, move them to 0017 on top of M19's 0016, and rename my migration file.
+
+- 🔧 Bash: Renumber migration to 0017 and fix migration tests
+
+- 🔧 Bash: Resolve migration test conflict and renumber to 0017
+
+Now `docs/decisions.md`: both branches appended a section at the end. I'll keep both in time order (M19 first, then M21-F), then update my own references from 0016 to 0017.
+
+- 🔧 Bash: Resolve decisions.md conflict keeping both sections
+
+Now every 0016 reference in text I wrote. M19's own mentions of its 0016 stay as they are:
+
+- 🔧 Bash: Find 0016 references to review
+
+Updating each of my references to 0017, and adding a decision row for the renumbering:
+
+- 🔧 Bash: Update migration number references to 0017
+
+- 🔧 Bash: Show M19 changes in files shared with M21-F
+
+- 🔧 Bash: Run suite and lint on the merged tree
+
+- 🔧 Bash: Show merged-tree failures
+
+- 🔧 Bash: Update the HofJ call count and rerun
+
+Green. The merge changed the migration chain, so I'm rerunning the Postgres pass on a fresh throwaway container: upgrade from zero to 0017, the full suite, then down to base and back.
+
+- 🔧 Bash: Postgres run on merged tree with throwaway container
+
+- 🔧 Bash: Commit the merge and check the master worktree

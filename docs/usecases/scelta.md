@@ -254,7 +254,7 @@ Ogni rifiuto ha un tipo (`reject_kind`, RF-71): `price`, `place`, `hotel`, `date
 `duration`, `sport`, `pax`, `level`, `direction`, `other`. Il campo dell'agente vince sul testo;
 senza campo, `refine.py` classifica il motivo con regole it/en. Se il motivo tocca più tipi
 ("troppo caro e troppo lontano"), tutti i criteri cambiano come oggi e il tipo registrato è il
-primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 0016: 0013 e 0014
+primo nell'ordine dell'elenco sopra. Il tipo si salva sul rifiuto (migrazione 0017, dopo la 0016 di M19: 0013 e 0014
 restano numeri non usati, decisione M21-F). Stato: fatto in M21-F (2026-09-27), test in
 `tests/test_refine_kinds.py`, `tests/test_chooser_rejections.py`, `tests/test_usecases_rejections.py`.
 

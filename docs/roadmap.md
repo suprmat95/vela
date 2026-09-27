@@ -733,6 +733,12 @@ lettura").
 
 **Taglia.** M. **Dipende da** M18, M13b (cambia i numeri). **Ondata** 5, condizionata.
 
+**Stato (2026-09-27).** Passo 1: due sonde su staging (5 + 7 chiamate), verdetto "sì su staging"
+(`docs/api/customer-pax.md`). Passo 2 fatto su `task/m19`, non ancora in `master`: link con 2
+chiamate, booking con cliente, pax e booking (3 chiamate), riserva da `expected_pay_share`, ordini
+silenziosi a 15 minuti (migrazione 0016). Giro C-2500 con il 2% di paganti: 47,4 link/min (prima
+17,8). Aperti: domanda 10 a HofJ per la produzione, giro con il 60% di paganti, taglia vera L.
+
 **Prompt.**
 > Leggi docs/decisions.md ("2026-09-26 — Twist, seconda lettura"),
 > docs/plans/2026-09-26-twist-seconda-lettura.md (sezione 3.4), docs/hofj-questions.md
@@ -981,7 +987,7 @@ d'uso in `docs/usecases/scelta.md` (UC-A..UC-F), requisiti in `docs/spec.md` §4
 - Ogni task aggiorna `docs/rest.md`, le descrizioni MCP che la riguardano e la riga dei criteri
   in `say` (RF-54). Campi nuovi validati come RF-53: invalido scartato e dichiarato.
 - Cambi di schema: una migrazione per task che ne ha bisogno (0010 in B, 0011 in D, 0012 in C,
-  0016 in F: dopo la 0015 di M23, 0013 e 0014 restano numeri non usati), ognuna da approvare
+  0017 in F: dopo la 0015 di M23 e la 0016 di M19, 0013 e 0014 restano numeri non usati), ognuna da approvare
   all'inizio della task. I criteri nuovi stanno nel JSON di
   `intents.criteria` senza migrazione.
 - I test esistenti che fissano l'ordinamento v2 o "motivo non capito → proposta successiva"
@@ -1084,7 +1090,7 @@ livello: il filtro duro di RF-64 oggi non esclude nulla.
 ### M21-F — Rifiuti con motivo sempre capito (UC-F)
 
 **Scope.** Classificazione del rifiuto in `refine.py` (RF-71) e campo `reject_kind`;
-`rejections.kind` e `rejections.keep_product` (migrazione 0016, prevista come 0013); esclusione per hotel ricavata
+`rejections.kind` e `rejections.keep_product` (migrazione 0017, prevista come 0013); esclusione per hotel ricavata
 dai rifiuti (RF-72); `excluded_areas` e luogo negato (RF-73), Marbella aggiunta a `geo`;
 stesso prodotto con altre date (RF-74) in `chooser.departure` con finestre escluse, e
 `keep_product=false` sulla stessa proposta che aggiorna il rifiuto (RF-55); domanda chiusa per
@@ -1103,7 +1109,7 @@ criteri aggiornati tutti, tipo registrato = il primo dell'elenco di RF-71**; B) 
 conta di più?".
 
 **Stato (2026-09-27).** Fatta in modalità autonoma con l'OK anticipato dell'utente: A, la
-migrazione 0016 (dopo la 0015 di M23), i casi rimandati da M21-B (rifiuto `hotel` del 78 → né 78
+migrazione 0017 (scritta come 0016 dopo la 0015 di M23, rinumerata al merge dopo la 0016 di M19), i casi rimandati da M21-B (rifiuto `hotel` del 78 → né 78
 né 900078) e da M21-D (domanda sulle camere nel rifiuto, `proposal_id` sulla domanda di
 `accept_proposal`), le verifiche con la cache del prezzo (RF-84) e con il load test. Design in
 `docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md`, piano in
@@ -1190,7 +1196,10 @@ con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
 
 ## M23 — Cache del prezzo con fanout
 
-**Stato (2026-09-27).** Fatta sul branch `task/cache`.
+**Stato (2026-09-27).** Fatta sul branch `task/cache`. Load test rigirato lo stesso giorno, un
+solo giro C-2500 con la cache (`loadtest/RESULTS.md`, "Dopo la cache del prezzo"): criteri
+passati, prezzo subito a 473 accettazioni su 487, Marco confermato a 160 s contro 372; ritmo di
+acquisti invariato perché limitato dalla quota.
 
 **Risultato.** Nel picco molti viaggiatori accettano lo stesso viaggio: il prezzo effettivo si
 scopre una volta per chiave (prodotto, data, adulti, camere, valuta) e vale per tutti per 15

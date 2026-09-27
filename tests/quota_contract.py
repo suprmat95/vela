@@ -1,7 +1,7 @@
 """Contratto del token bucket della quota (RF-36..38, RF-47, M18), in memoria e su Postgres.
 
 Limite 120, margine 10%: 108 effettive. Capienza B = 8, ritmo r = (108 − 8)/60 = 100/60
-gettoni al secondo, soglia 2 per `purchase` e `sync`. `now` è passato esplicitamente: nessun
+gettoni al secondo, soglia 3 per `purchase` e `sync` (M19: un booking intero). `now` è passato esplicitamente: nessun
 orologio reale.
 """
 import random
@@ -69,49 +69,49 @@ class QuotaContract:
         self.assertEqual(self.tokens(), 2)
 
     def test_purchase_leaves_the_floor_to_bookings(self):
-        self.assertTrue(self.store.acquire(P, 6, NOW))
+        self.assertTrue(self.store.acquire(P, 5, NOW))
         self.assertFalse(self.store.acquire(P, 1, NOW))
-        self.assertEqual(self.tokens(), 2)
+        self.assertEqual(self.tokens(), 3)
 
     def test_booking_takes_the_floor_down_to_zero(self):
-        fill(self.store, P, 6)
-        fill(self.store, B, 2)
+        fill(self.store, P, 5)
+        self.assertTrue(self.store.acquire(B, 3, NOW))   # M19: la soglia contiene un booking intero
         self.assertFalse(self.store.acquire(B, 1, NOW))
         self.assertEqual(self.tokens(), 0)
 
     def test_block_is_atomic_all_or_nothing(self):
-        self.assertFalse(self.store.acquire(P, 7, NOW))
+        self.assertFalse(self.store.acquire(P, 6, NOW))
         self.assertEqual(self.tokens(), 8)
-        self.assertTrue(self.store.acquire(P, 6, NOW))
+        self.assertTrue(self.store.acquire(P, 5, NOW))
 
     def test_sync_only_without_waiting_purchase(self):
         self.assertFalse(self.store.acquire(S, 1, NOW, purchase_waiting=True))
         self.assertTrue(self.store.acquire(S, 1, NOW, purchase_waiting=False))
-        fill(self.store, S, 5)
+        fill(self.store, S, 4)
         self.assertFalse(self.store.acquire(S, 1, NOW))   # soglia come purchase
 
     # --- ritmo ------------------------------------------------------------------------------
 
     def test_tokens_refill_at_constant_rate(self):
-        fill(self.store, P, 6)
-        fill(self.store, B, 2)
+        fill(self.store, P, 5)
+        fill(self.store, B, 3)
         self.assertAlmostEqual(self.tokens(at(3)), 5, places=3)
-        self.assertFalse(self.store.acquire(P, 5, at(3)))     # servono 5 + soglia 2
-        self.assertTrue(self.store.acquire(P, 5, at(4.2)))
+        self.assertFalse(self.store.acquire(P, 2, at(2.9)))   # servono 2 + soglia 3
+        self.assertTrue(self.store.acquire(P, 2, at(3)))
 
     def test_refill_stops_at_burst(self):
         self.store.acquire(P, 5, NOW)
         self.assertEqual(self.tokens(at(600)), 8)
 
     def test_clock_behind_does_not_add_tokens(self):
-        fill(self.store, P, 6)
-        self.assertEqual(self.tokens(at(-30)), 2)
+        fill(self.store, P, 5)
+        self.assertEqual(self.tokens(at(-30)), 3)
         self.assertFalse(self.store.acquire(P, 1, at(-30)))
 
     def test_next_window_start_is_when_a_whole_purchase_fits(self):
-        fill(self.store, P, 6)
-        fill(self.store, B, 2)
-        self.assertEqual(self.store.next_window_start(NOW), at(7 / RATE))
+        fill(self.store, P, 5)
+        fill(self.store, B, 3)
+        self.assertEqual(self.store.next_window_start(NOW), at(5 / RATE))   # M19: 2 + soglia 3
         self.assertEqual(self.store.next_window_start(at(600)), at(600))
 
     def test_never_more_than_108_in_any_60s_whatever_hofj_window(self):
@@ -147,7 +147,7 @@ class QuotaContract:
         self.assertTrue(self.store.needs_refresh(at(10)))
         self.assertFalse(self.store.acquire(B, 1, at(10)))
         self.assertTrue(self.store.acquire(B, 1, at(10 + 1 / RATE)))
-        self.assertGreater(self.store.next_window_start(at(10)), at(14))
+        self.assertEqual(self.store.next_window_start(at(10)), at(10 + 5 / RATE))   # 2 + soglia 3
 
     def test_429_with_hold_blocks_a_whole_window(self):
         self.store.on_429(NOW, hold_seconds=60)
@@ -191,6 +191,6 @@ class QuotaContract:
         self.assertTrue(self.store.acquire(B, 1, at(20 + 1 / RATE)))
 
     def test_snapshot_view_does_not_write(self):
-        fill(self.store, P, 6)
+        fill(self.store, P, 5)
         self.assertEqual(self.tokens(at(600)), 8)
         self.assertFalse(self.store.acquire(P, 1, NOW))

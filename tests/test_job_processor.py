@@ -12,7 +12,6 @@ from support import NOW, FakeHofJ, StubPayments, make_product
 from vela.adapters.hofj_router import SingleClientRouter
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.sms_fake import FakeSms
-from vela.config import DEFAULT_TRAVELER
 from vela.domain.booking import BookingJob
 from vela.domain.jobs import JobProcessor
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, NoMatch, Order,
@@ -41,7 +40,7 @@ class Clock:
 
 
 class World:
-    def __init__(self, hofj=None, quota=None):
+    def __init__(self, hofj=None, quota=None, silent_after=None):
         self.clock = Clock()
         self.repos = MemoryRepositories()
         self.repos.products.upsert_many([make_product(i, price=300 + i) for i in range(1, 6)])
@@ -50,7 +49,7 @@ class World:
         payments = StubPayments()
         router = SingleClientRouter(self.hofj)
         purchase = PurchaseJob(self.repos, router, payments, lambda intent: NoMatch("i1", "x", "x"),
-                               DEFAULT_TRAVELER, now=self.clock, max_attempts=3)
+                               now=self.clock, max_attempts=3, silent_after=silent_after)
         booking = BookingJob(self.repos, router, now=self.clock)
         orders = OrderService(self.repos, self.hofj, now=self.clock)
         check = PaymentCheckJob(self.repos, payments, orders, now=self.clock)
@@ -107,12 +106,12 @@ class SchedulingTest(unittest.TestCase):
         w.purchase(1)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
-        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 5)   # quota + acquisto
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 2)   # quota + acquisto (M19)
 
     def test_no_hofj_call_without_acquired_block(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 1)                 # 6 gettoni: un acquisto ne vuole 5 + soglia 2
+        w.fill(QuotaClass.PURCHASE, 3)                 # 4 gettoni: un acquisto ne vuole 2 + soglia 3
         w.purchase(1)
         self.assertTrue(w.processor.run_once())
         self.assertEqual(w.hofj_methods(), [])
@@ -123,7 +122,7 @@ class SchedulingTest(unittest.TestCase):
     def test_job_waits_for_the_bucket_when_budget_short(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 1)
+        w.fill(QuotaClass.PURCHASE, 3)
         w.purchase(1)
         w.processor.run_once()
         w.clock.advance(0.5)
@@ -135,7 +134,7 @@ class SchedulingTest(unittest.TestCase):
     def test_booking_reserve_respected_with_full_purchase_queue(self):
         w = World()
         w.boot()
-        w.fill(QuotaClass.PURCHASE, 5)                 # restano i 2 gettoni della soglia
+        w.fill(QuotaClass.PURCHASE, 4)                 # restano i 3 gettoni della soglia
         w.purchase(1)
         w.booking(2)
         w.processor.run_once()                         # booking prima, dalla soglia
@@ -167,17 +166,38 @@ class SchedulingTest(unittest.TestCase):
         order = w.repos.orders.get("o1")
         w.repos.orders.save(replace(order, itinerary_id="it-1"))
         w.repos.jobs.save(replace(w.repos.jobs.get("j1"), step=3))
-        w.fill(QuotaClass.PURCHASE, 4)                 # 3 gettoni: c'è posto per 1 sola chiamata
+        w.fill(QuotaClass.PURCHASE, 3)                 # 4 gettoni: 1 chiamata + soglia 3
         w.processor.run_once()
         self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
 
     def test_unused_calls_are_not_refunded(self):
-        w = World(hofj=FakeHofJ(fail_at={"set_customer": [UpstreamError("timeout")]}))
+        w = World(hofj=FakeHofJ(fail_at={"get_itinerary": [UpstreamError("timeout")]}))
         w.boot()
         w.purchase(1)
         w.processor.run_once()
-        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 5)
-        self.assertEqual(w.repos.jobs.get("j1").step, 1)
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], 8 - 1 - 2)
+        self.assertEqual(w.repos.jobs.get("j1").step, 3)
+
+
+class SilentOrderTest(unittest.TestCase):
+    def test_silent_order_expires_before_taking_tokens(self):
+        """M19: la scadenza costa zero chiamate e zero gettoni."""
+        w = World(silent_after=timedelta(minutes=15))
+        w.boot()
+        w.purchase(1, seconds_ago=16 * 60)
+        tokens = w.repos.quota.snapshot(w.clock())["tokens"]
+        self.assertTrue(w.processor.run_once())
+        self.assertEqual(w.status(1), OrderStatus.EXPIRED)
+        self.assertEqual(w.hofj_methods(), [])
+        self.assertEqual(w.repos.quota.snapshot(w.clock())["tokens"], tokens)
+        self.assertEqual(w.repos.jobs.get("j1").status, JobStatus.DONE)
+
+    def test_live_order_runs_as_before(self):
+        w = World(silent_after=timedelta(minutes=15))
+        w.boot()
+        w.purchase(1, seconds_ago=14 * 60)
+        w.processor.run_once()
+        self.assertEqual(w.status(1), OrderStatus.AWAITING_CONFIRMATION)
 
 
 class QuotaErrorTest(unittest.TestCase):
@@ -190,7 +210,7 @@ class QuotaErrorTest(unittest.TestCase):
         w.processor.run_once()                         # acquisto: 429
         snap = w.repos.quota.snapshot(w.clock())
         self.assertEqual((snap["tokens"], snap["needs_refresh"]), (0, True))
-        self.assertGreaterEqual(w.repos.jobs.get("j1").run_after, NOW + timedelta(seconds=4))
+        self.assertGreaterEqual(w.repos.jobs.get("j1").run_after, NOW + timedelta(seconds=3))   # (2 + 3) × 0,6 s
         self.assertFalse(w.processor.run_once())       # nessun gettone, nessun job pronto
         self.assertEqual(w.hofj_methods(), ["create_itinerary"])
         w.clock.advance(0.6)                           # un gettone: la rilettura, una sola
@@ -226,9 +246,9 @@ class QuotaErrorTest(unittest.TestCase):
         self.assertEqual(w.hofj_methods(), ["get_quota"])
         w.clock.advance(2)
         w.processor.run_once()                         # rilettura riuscita (il gettone era suo)
-        w.clock.advance(1)
+        w.clock.advance(2)                             # M19: il booking vuole 3 gettoni
         w.processor.run_once()                         # poi il booking
-        self.assertEqual(w.hofj_methods(), ["get_quota", "get_quota", "create_booking"])
+        self.assertEqual(w.hofj_methods(), ["get_quota", "get_quota", "set_customer", "set_pax", "create_booking"])
 
     def test_quota_refresh_only_at_boot_and_after_429(self):
         w = World()

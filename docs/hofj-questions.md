@@ -91,6 +91,13 @@ Nate dalla rilettura del twist (`docs/plans/2026-09-26-twist-seconda-lettura.md`
     di `POST /v1/bookings`)? Il totale dell'itinerario può cambiare dopo l'inserimento dei
     passeggeri?
 
+    *Verificato in parte su staging il 2026-09-27 (`docs/api/customer-pax.md`, sonda M19):* il
+    totale non cambia dopo `PUT customer` e `PUT pax` (1156 € prima e dopo sul prodotto 124).
+    Anche la prima metà su staging: con un PaymentIntent di test `succeeded` legato da
+    `checkoutRefId`, `PUT customer` e `PUT pax` rispondono 200 e il booking successivo riesce
+    (`scripts/m19_paid_probe.py`, itinerario `ttlup3o1amxu`). Da chiedere a HofJ: vale anche in
+    produzione e con il PaymentIntent creato da una Checkout Session?
+
 ## Domande aggiunte il 2026-09-27 (sonda di `/accommodations`, M22-a)
 
 Nate dalla sonda di M22-a (`docs/api/accommodations.md`, differenze #28-#35).

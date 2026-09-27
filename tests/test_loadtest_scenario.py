@@ -37,6 +37,16 @@ class ScenarioTest(unittest.TestCase):
         self.assertAlmostEqual(share("pays"), 0.60, delta=0.02)
         self.assertEqual({t.poll for t in crowd}, {Funnel().poll})
 
+    def test_pay_share_changes_only_who_pays(self):
+        """M19: `--pay` cambia chi paga, non arrivi, frasi né chi accetta: giri confrontabili."""
+        base = travelers(20_000, seed=2)
+        few = travelers(20_000, seed=2, funnel=Funnel(pay=0.02))
+        strip = lambda ts: [(t.arrival, t.text, t.rejects, t.accepts, t.role) for t in ts]   # noqa: E731
+        self.assertEqual(strip(few), strip(base))
+        crowd = [t for t in few if t.role is None]
+        self.assertAlmostEqual(sum(t.pays for t in crowd) / len(crowd), 0.02, delta=0.005)
+        self.assertTrue(all(t.pays for t in few if t.role))                  # le sentinelle pagano
+
     def test_sentinels(self):
         roles = {t.role: t for t in travelers(100) if t.role}
         marco, anna = roles["marco"], roles["anna"]
@@ -106,7 +116,7 @@ class RejectionKindTest(unittest.TestCase):
         for text, _ in INTENTS:
             with self.subTest(text):
                 calls = self.journey(text, rejects=True)
-                self.assertEqual(len(calls), 5)   # i cinque passi fino al prezzo effettivo
+                self.assertEqual(len(calls), 2)   # carrello e totale fino al prezzo effettivo (M19)
                 self.assertEqual(calls, self.journey(text, rejects=False))
 
 
