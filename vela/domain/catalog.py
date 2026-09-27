@@ -19,7 +19,7 @@ MEDIA_KEYS = frozenset(["gallery", "image", "images", "cover", "media", "travelP
 # campi di RF-28 presi pari pari dal dettaglio (category, venue, destination, hotels a parte)
 CATALOG_FIELDS = ("id", "title", "slug", "shortDescription", "price", "currency", "minPax",
                   "maxPax", "minDate", "maxDate", "availabilities", "defaultDurationInDays",
-                  "updatedAt", "featured", "isSpecialOffer")
+                  "updatedAt", "featured", "isSpecialOffer", "maxPaxPerRoom")
 
 
 def strip_media(value):
@@ -54,6 +54,13 @@ def detect_sport(*texts: Optional[str]) -> str:
 
 def _date(value: Optional[str]) -> Optional[date]:
     return date.fromisoformat(value[:10]) if value else None
+
+
+def _positive_int(value) -> Optional[int]:
+    """`maxPaxPerRoom` vale solo come intero positivo: assente, nullo, zero o altro = nessun limite."""
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def _hotel_name(entry: dict) -> Optional[str]:
@@ -104,6 +111,7 @@ def product_from_entry(entry: dict, archived: bool, raw: dict, fetched_at: datet
         brand=brand,
         featured=bool(entry.get("featured")),            # M21-B (RF-60): assente o nullo = falso
         special_offer=bool(entry.get("isSpecialOffer")),
+        max_pax_per_room=_positive_int(entry.get("maxPaxPerRoom")),   # M21-D (RF-66)
     )
 
 

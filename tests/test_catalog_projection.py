@@ -30,7 +30,8 @@ class ProjectDetailTest(unittest.TestCase):
         self.assertEqual(sorted(catalog), sorted([
             "id", "title", "slug", "shortDescription", "price", "currency", "minPax", "maxPax",
             "minDate", "maxDate", "availabilities", "defaultDurationInDays", "updatedAt",
-            "category", "venue", "destination", "hotels", "featured", "isSpecialOffer"]))
+            "category", "venue", "destination", "hotels", "featured", "isSpecialOffer",
+            "maxPaxPerRoom"]))
         self.assertEqual(catalog["category"]["slug"], "padel")
         self.assertEqual(catalog["destination"]["geohierarchy"], "IT_123")
         self.assertEqual(catalog["hotels"]["data"][0]["attributes"], {"name": "Hotel Uno"})
@@ -41,9 +42,15 @@ class ProjectDetailTest(unittest.TestCase):
         catalog = cat.project_detail(detail_of(item(12, featured=True, isSpecialOffer=True)))
         self.assertEqual((catalog["featured"], catalog["isSpecialOffer"]), (True, True))
 
+    def test_keeps_max_pax_per_room(self):
+        """M21-D (RF-66): il limite per camera del dettaglio passa dalla proiezione."""
+        catalog = cat.project_detail(detail_of(item(12, maxPaxPerRoom=2)))
+        self.assertEqual(catalog["maxPaxPerRoom"], 2)
+
     def test_missing_fields_become_none(self):
         catalog = cat.project_detail({"id": "1"})
         self.assertIsNone(catalog["venue"])
         self.assertIsNone(catalog["hotels"])
         self.assertIsNone(catalog["price"])
         self.assertIsNone(catalog["featured"])
+        self.assertIsNone(catalog["maxPaxPerRoom"])

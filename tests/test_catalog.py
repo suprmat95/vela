@@ -64,6 +64,17 @@ class ProductFromEntryTest(unittest.TestCase):
                                raw={}, fetched_at=NOW)
         self.assertEqual((p.featured, p.special_offer), (False, False))
 
+    def test_max_pax_per_room_is_read_from_the_entry(self):
+        """M21-D (RF-66): `maxPaxPerRoom` dell'API; assente, nullo o zero = nessun limite."""
+        p = product_from_entry(dict(ENTRY, maxPaxPerRoom=2), archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual(p.max_pax_per_room, 2)
+        for value in (None, 0, "2", True):
+            with self.subTest(value=value):
+                p = product_from_entry(dict(ENTRY, maxPaxPerRoom=value), archived=False, raw={},
+                                       fetched_at=NOW)
+                self.assertIsNone(p.max_pax_per_room)
+        self.assertIsNone(product_from_entry(ENTRY, archived=False, raw={}, fetched_at=NOW).max_pax_per_room)
+
     def test_missing_destination_venue_hotel(self):
         entry = dict(ENTRY, destination=None, venue=None, hotels={"data": []}, minPax=2, maxPax=0)
         p = product_from_entry(entry, archived=True, raw={}, fetched_at=NOW)

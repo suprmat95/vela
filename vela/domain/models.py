@@ -212,6 +212,7 @@ class Product:
     brand: Optional[str] = None  # brand HofJ del catalogo di provenienza (M10); None = pre-M10
     featured: bool = False       # M21-B (RF-60): `featured` di HofJ, letto dal sync
     special_offer: bool = False  # M21-B (RF-60): `isSpecialOffer` di HofJ
+    max_pax_per_room: Optional[int] = None   # M21-D (RF-66): `maxPaxPerRoom` di HofJ; None = nessun limite
 
 
 # --- proposta, ordine, rifiuto -------------------------------------------------

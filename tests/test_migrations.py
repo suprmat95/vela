@@ -29,14 +29,14 @@ def versions(url):
 class ScriptsTest(unittest.TestCase):
     def test_single_head_is_initial_revision(self):
         heads = ScriptDirectory.from_config(alembic_config()).get_heads()
-        self.assertEqual(heads, ["0010"])
+        self.assertEqual(heads, ["0011"])
 
     def test_ini_paths_do_not_depend_on_cwd(self):
         with tempfile.TemporaryDirectory() as tmp:
             res = subprocess.run([sys.executable, "-m", "alembic", "-c", os.path.abspath(INI), "heads"],
                                  cwd=tmp, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertIn("0010", res.stdout)
+        self.assertIn("0011", res.stdout)
 
 
 class SqliteUpgradeTest(unittest.TestCase):
@@ -45,7 +45,7 @@ class SqliteUpgradeTest(unittest.TestCase):
             url = "sqlite:///" + os.path.join(tmp, "vela.db")
             with patch.dict(os.environ, {"DATABASE_URL": url}):
                 command.upgrade(alembic_config(), "head")
-                self.assertEqual(versions(url), ["0010"])
+                self.assertEqual(versions(url), ["0011"])
                 with create_engine(url).connect() as conn:
                     tables = inspect(conn).get_table_names()
                     self.assertIn("orders", tables)
@@ -63,6 +63,9 @@ class SqliteUpgradeTest(unittest.TestCase):
                         # default falso: SQLite lo riflette come "0", Postgres come "false"
                         self.assertIn(str(product_cols[flag]["default"]).lower(), ("0", "false"), flag)
                     self.assertFalse(order_cols["orphan_itineraries"]["nullable"])
+                    self.assertTrue(product_cols["max_pax_per_room"]["nullable"])   # 0011 (M21-D)
+                    self.assertFalse(order_cols["rooms"]["nullable"])
+                    self.assertEqual(str(order_cols["rooms"]["default"]).strip("'"), "1")
                     quota_cols = {c["name"] for c in inspect(conn).get_columns("quota_window")}
                     self.assertTrue({"tokens", "refilled_at"} <= quota_cols)
                     self.assertNotIn("used", quota_cols)
@@ -105,6 +108,48 @@ class SqliteUpgradeTest(unittest.TestCase):
                         text("SELECT id, featured, special_offer FROM products"))}
         self.assertEqual(got, {"f": (True, False), "s": (False, True), "n": (False, False),
                                "z": (False, False)})
+
+    def test_upgrade_to_0011_backfills_max_pax_per_room_from_raw(self):
+        """M21-D: le righe già in tabella prendono `max_pax_per_room` dal dettaglio in `raw`;
+        assente, nullo o zero = nessun limite. Gli ordini di prima restano a una camera
+        (decisione A)."""
+        rows = {"two": '{"maxPaxPerRoom": 2}', "none": '{"maxPaxPerRoom": null}',
+                "zero": '{"maxPaxPerRoom": 0}', "absent": '{"title": "senza limite"}'}
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "0010")
+                engine = create_engine(url)
+                with engine.begin() as conn:
+                    for pid, raw in rows.items():
+                        conn.execute(text(
+                            "INSERT INTO products (id, title, slug, short_description, sport, price, "
+                            "currency, availabilities, raw, fetched_at, bookable, archived) VALUES "
+                            "(:id, 't', 's', '', 'padel', 1, 'EUR', '[]', :raw, "
+                            "'2026-09-27 10:00:00', 1, 0)"), {"id": pid, "raw": raw})
+                    conn.execute(text(
+                        "INSERT INTO orders (id, proposal_id, intent_id, product_id, status, pax, "
+                        "price_from, currency, traveler, created_at, updated_at) VALUES "
+                        "('o1', 'p1', 'i1', 'two', 'confirmed', 4, 100, 'EUR', '{}', "
+                        "'2026-09-27 10:00:00', '2026-09-27 10:00:00')"))
+                command.upgrade(alembic_config(), "0011")
+                with engine.connect() as conn:
+                    got = dict(conn.execute(text("SELECT id, max_pax_per_room FROM products")).all())
+                    rooms = conn.execute(text("SELECT rooms FROM orders WHERE id = 'o1'")).scalar()
+        self.assertEqual(got, {"two": 2, "none": None, "zero": None, "absent": None})
+        self.assertEqual(rooms, 1)
+
+    def test_downgrade_from_0011_removes_rooms_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "sqlite:///" + os.path.join(tmp, "vela.db")
+            with patch.dict(os.environ, {"DATABASE_URL": url}):
+                command.upgrade(alembic_config(), "head")
+                command.downgrade(alembic_config(), "0010")
+                with create_engine(url).connect() as conn:
+                    product_cols = {c["name"] for c in inspect(conn).get_columns("products")}
+                    order_cols = {c["name"] for c in inspect(conn).get_columns("orders")}
+        self.assertNotIn("max_pax_per_room", product_cols)
+        self.assertNotIn("rooms", order_cols)
 
     def test_downgrade_from_0010_removes_flag_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,4 +261,4 @@ class PostgresUpgradeTest(unittest.TestCase):
         from vela.config import Settings
         command.upgrade(alembic_config(), "head")
         command.upgrade(alembic_config(), "head")
-        self.assertEqual(versions(Settings.from_env().database_url), ["0010"])
+        self.assertEqual(versions(Settings.from_env().database_url), ["0011"])

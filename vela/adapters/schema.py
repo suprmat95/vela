@@ -40,6 +40,7 @@ products_t = Table(
     Column("brand", String(64)),
     Column("featured", Boolean, nullable=False, default=False),        # 0010 (M21-B)
     Column("special_offer", Boolean, nullable=False, default=False),   # 0010 (M21-B)
+    Column("max_pax_per_room", Integer),                                # 0011 (M21-D)
 )
 
 intents_t = Table(
@@ -89,6 +90,7 @@ orders_t = Table(
     Column("enqueued_at", DateTime(timezone=True)),
     Column("replacement_proposal_id", String(36), index=True),
     Column("orphan_itineraries", Integer, nullable=False, server_default="0"),   # M18
+    Column("rooms", Integer, nullable=False, server_default="1"),                # 0011 (M21-D)
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
