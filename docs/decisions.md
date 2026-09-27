@@ -935,3 +935,22 @@ rilettura ogni secondo), più ampia di M20 (solo posizione 1, 10 s, 0,5 s).
 |---|---|---|
 | Codice di M20 | Non si mergia; `task/m20` resta come archivio | Riportare le regole di M20 romperebbe la conferma del prezzo: chi non è primo in coda non sentirebbe il prezzo nella stessa chiamata. Vale la decisione più recente |
 | Cosa si tiene | I test su sostituzione, fallimento e doppio accept durante l'attesa (`tests/test_usecases.py`, `PriceConfirmationTest`), il test REST del 200 `order_status` con il link, RNF-04 corretto | Coprono esiti dell'attesa che `master` gestiva senza test; RNF-04 diceva ancora che nessun caso d'uso aspetta |
+
+## 2026-09-27 — M22-a: scelta dell'hotel con degrado dinamico
+
+Origine: richiesta dell'utente del 2026-09-27. Oggi RF-15 fissa l'hotel di default e §7
+esclude la scelta dell'hotel. Bozza in `docs/plans/2026-09-27-m22-hotel.md`, roadmap M22. Qui
+ci sono solo le decisioni già prese dall'utente. Le domande aperte della bozza (§10) entrano
+dopo la sua risposta.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Mai una lista | Il viaggiatore esprime una preferenza (più vicino al campo, più economico, più stelle, recensioni migliori) e Vela propone un solo hotel alternativo, con la motivazione. Gli hotel di `/accommodations` non si elencano mai | È la premessa del brief (RF-10) |
+| Priorità della quota | `booking` > `purchase` > `hotel` > `sync`. `purchase` ha precedenza assoluta: con un solo acquisto in attesa, `hotel` e `sync` non prendono gettoni. `hotel` prende tutti i gettoni del cambio insieme o nessuno. `sync` cede anche a `hotel` | Il cambio di hotel è un lusso della coda vuota: non deve rallentare chi sta comprando, e non deve mai restare a metà |
+| Catalogo vecchio | Rischio accettato: con cambi continui a coda vuota il catalogo può superare le 6 h. Nessun tetto di età | Coperto da RF-17/RF-33 (un prodotto che fallisce al carrello viene sostituito) |
+| Proposta | Resta a 0 chiamate HofJ; la latenza di `/accommodations` passa dalla coda, come gli acquisti | RF-11, RNF-05 |
+| Hotel fisso | Il cambio vale solo per i prodotti con `hotelSelection` o `allowAccommodationList`; per gli altri Vela dice che l'hotel è fisso | Campi già nel catalogo: 0 chiamate |
+| Momento e ingresso | Ordine in `awaiting_confirmation`; `reject_proposal` con `reject_kind="hotel"` (M21-F) più una preferenza; nessun tool MCP nuovo | È il momento in cui il viaggiatore sente hotel e totale reale, e il carrello esiste già |
+| Collocazione | M22 dopo M21-D (`orders.rooms`) e M21-F (tipo `hotel`): M22-a (bozza, sonda, verdetto, niente codice in `vela/`) e M22-b (implementazione, condizionata al verdetto) | M22 è un ramo del rifiuto `hotel` e usa le camere dell'ordine |
+| Dove sta la bozza | `docs/plans/2026-09-27-m22-hotel.md`, non `docs/spec.md` | Ogni task di M21 modifica la spec: i testi entrano all'inizio di M22-b |
+| Schema | Migrazione 0014 solo proposta (campi hotel sull'ordine), da approvare in M22-b. Tipo di job e classe di quota non la richiedono: `jobs.kind` è `String(16)` senza vincoli e la classe si ricava dal tipo nel codice | Verificato su `alembic/versions/0005_jobs_quota.py` |
