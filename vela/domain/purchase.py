@@ -35,7 +35,7 @@ from vela.domain import say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
 from vela.domain.notify import enqueue_sms
-from vela.domain.quotes import quote_key
+from vela.domain.quotes import quote_key, release_quote
 from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError,
                              UpstreamTimeout)
 from vela.ports.payments import PaymentsError, PaymentsPort
@@ -192,6 +192,8 @@ class PurchaseJob:
         if order is not None and order.status == OrderStatus.QUEUED:
             self._save_order(replace(order, status=OrderStatus.FAILED,
                                      failure_reason=say.failure_reason(reason, self._lang(order))))
+        if order is not None:
+            release_quote(self.repos, order, self.now(), self.new_id)   # RF-84: ripiego
 
     def _replace(self, job: Job, exc: Exception) -> JobResult:
         """RF-17, RF-33: prodotto non prenotabile per tutti; proposta successiva per questo intento."""
@@ -206,6 +208,7 @@ class PurchaseJob:
                                      replacement_proposal_id=result.proposal.id))
         else:
             self._fail_order(job, "no_alternative")
+        release_quote(self.repos, order, now, self.new_id)   # RF-84: ripiego
         return self._close(job, JobStatus.DONE, exc)
 
 

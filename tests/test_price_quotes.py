@@ -4,6 +4,7 @@ Repository in memoria, HofJ finto, worker in linea; l'orologio avanza di un minu
 il token bucket (B = 8, 5 chiamate per acquisto) lascia passare un carrello dopo l'altro.
 """
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -14,6 +15,7 @@ from vela.domain.models import (Area, Criteria, Intent, JobKind, OrderQueued, Or
                                 OrderStatusResponse, Participant, Period, Proposal, QuoteKey,
                                 QuoteStatus, TravelerProfile)
 from vela.domain.usecases import Vela
+from vela.ports.hofj import ConfigError, ProductError
 
 CRITERIA = Criteria("padel", Area("country", "Spagna", "ES"),
                     Period(date(2026, 10, 1), date(2026, 10, 31), "ottobre"), 2, Decimal("800"))
@@ -243,6 +245,69 @@ class ConfirmWithoutCartTest(unittest.TestCase):
         w.accept(pid)
         self.assertEqual(w.job(pid).step, 4)
         self.assertIsNone(w.order(pid).confirmed_total)
+
+
+class FallbackTest(unittest.TestCase):
+    def three(self, **hofj):
+        w = World(hofj=FakeHofJ(**hofj)) if hofj else World()
+        pids = [w.traveler() for _ in range(3)]
+        for pid in pids:
+            w.accept(pid)
+        return w, pids
+
+    def assert_released(self, w, followers):
+        """Riga sparita, agganciati sganciati; dopo qualche giro ognuno ha il suo carrello."""
+        self.assertIsNone(w.repos.quotes.get(KEY))
+        for pid in followers:
+            self.assertFalse(w.order(pid).follows_quote)
+        w.settle()
+        for pid in followers:
+            o = w.order(pid)
+            self.assertEqual(o.status, OrderStatus.AWAITING_CONFIRMATION, pid)
+            self.assertIsNotNone(o.itinerary_id, pid)
+
+    def test_failed_leader_hands_followers_their_own_jobs(self):
+        w, pids = self.three(fail_at={"create_itinerary": [ConfigError("401")]})
+        w.worker.drain()
+        self.assertEqual(w.order(pids[0]).status, OrderStatus.FAILED)
+        self.assert_released(w, pids[1:])
+
+    def test_unbookable_leader_hands_followers_their_own_jobs(self):
+        w, pids = self.three(fail_at={"create_itinerary": [ProductError("502")]})
+        w.worker.drain()
+        self.assertNotEqual(w.order(pids[0]).status, OrderStatus.QUEUED)   # replaced o failed
+        self.assert_released(w, pids[1:])
+
+    def test_cancelled_leader_hands_followers_their_own_jobs_in_their_place(self):
+        w, pids = self.three()
+        w.vela._cancel_unpaid_order(pids[0])   # RF-49, senza passare dal chooser di reject_proposal
+        self.assertEqual(w.order(pids[0]).status, OrderStatus.CANCELLED)
+        for pid in pids[1:]:                   # prima di ogni drain: il job c'è, al suo posto
+            o = w.order(pid)
+            job = w.repos.jobs.active_for_order(o.id, JobKind.PURCHASE)
+            self.assertEqual(job.enqueued_at, o.enqueued_at)
+        self.assert_released(w, pids[1:])
+
+    def test_follower_unsticks_when_leader_left_without_release(self):
+        w, pids = self.three()
+        leader = w.order(pids[0])
+        w.repos.orders.save(replace(leader, status=OrderStatus.FAILED))   # uscita senza rilascio
+        w.vela.get_order_status(w.order(pids[1]).id)
+        self.assert_released(w, pids[1:])
+
+    def test_release_by_a_follower_changes_nothing(self):
+        from vela.domain.quotes import release_quote
+        w, pids = self.three()
+        self.assertEqual(release_quote(w.repos, w.order(pids[1]), NOW, lambda: "x"), 0)
+        self.assertEqual(w.repos.quotes.get(KEY).status, QuoteStatus.PENDING)
+        self.assertTrue(w.order(pids[2]).follows_quote)
+
+    def test_cancelled_follower_is_left_out_of_the_fanout(self):
+        w, pids = self.three()
+        w.vela._cancel_unpaid_order(pids[1])
+        w.settle()
+        self.assertEqual(w.order(pids[1]).status, OrderStatus.CANCELLED)
+        self.assertEqual(w.order(pids[2]).status, OrderStatus.AWAITING_CONFIRMATION)
 
 
 class SettingsTest(unittest.TestCase):

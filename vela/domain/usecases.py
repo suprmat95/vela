@@ -24,7 +24,7 @@ from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobK
 from vela.domain.orders import NotFound, OrderService
 from vela.domain.purchase import STEP_ITINERARY, STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
-from vela.domain.quotes import quote_key
+from vela.domain.quotes import quote_key, release_quote, unstick
 from vela.domain.refine import Refinement, is_price_reason, refine
 from vela.ports.hofj import HofJRouter
 from vela.ports.llm import IntentExtractor
@@ -149,6 +149,7 @@ class Vela:
                                                  OrderStatus.AWAITING_PAYMENT):
             return False
         self.repos.orders.save(replace(order, status=OrderStatus.CANCELLED, updated_at=self.now()))
+        release_quote(self.repos, order, self.now(), self.new_id)   # RF-84: ripiego
         return True
 
     def _refined(self, intent: Intent, proposal: Proposal, reason: str,
@@ -349,8 +350,10 @@ class Vela:
         while waited < self.accept_wait_seconds:
             self.sleep(self.accept_poll_seconds)
             waited += self.accept_poll_seconds
-            if self.repos.orders.get(order_id).status != OrderStatus.QUEUED:
+            current = self.repos.orders.get(order_id)
+            if current.status != OrderStatus.QUEUED:
                 return self.get_order_status(order_id)
+            unstick(self.repos, current, self.now(), self.new_id)   # RF-84
         order = self.repos.orders.get(order_id)
         if order.status != OrderStatus.QUEUED:
             return self.get_order_status(order_id)
@@ -386,6 +389,9 @@ class Vela:
 
     def get_order_status(self, order_id: str) -> OrderStatusResponse:
         order = self.orders.get(order_id)
+        if order.follows_quote:   # RF-84: un leader uscito senza rilascio non blocca nessuno
+            unstick(self.repos, order, self.now(), self.new_id)
+            order = self.orders.get(order_id)
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
         status = order.status
