@@ -1048,6 +1048,13 @@ con la domanda sulle camere.
 **Da decidere nel brainstorm.** Ordini già in tabella: **A) `rooms` = 1 (default della
 colonna, come oggi)**; B) ricalcolato dal prodotto.
 
+**Stato (2026-09-27).** Fatta: A con l'OK dell'utente, la migrazione 0011 con il backfill di
+`max_pax_per_room` da `raw`, e tre scelte di dettaglio (camere tenute e limitate alle persone nel
+rifiuto, camere mute con 1-2 persone in 1 camera, correzione all'accettazione che aggiorna anche
+i criteri). Decisioni, differenza sulla regola 4 del budget e test cambiati in
+`docs/decisions.md` ("M21-D Persone e camere"). Il caso "più persone nel rifiuto senza dire le
+camere" passa a M21-F come domanda chiusa.
+
 ### M21-C — Livello e lezioni (UC-C)
 
 **Scope.** Parser di `level` e `wants_coaching`; campi su `create_intent` e `reject_proposal`;
@@ -1071,8 +1078,11 @@ stesso prodotto con altre date (RF-74) in `chooser.departure` con finestre esclu
 `keep_product=false` sulla stessa proposta che aggiorna il rifiuto (RF-55); domanda chiusa per
 il motivo non classificabile, senza rifiuto registrato né cancellazione dell'ordine `queued`
 (RF-75, RF-49); risposta `question` con `proposal_id` su MCP e REST; descrizione MCP di
-`reject_proposal`.
-**Test.** Quelli di UC-F (F1-F4 e "Altri tipi").
+`reject_proposal`. Da M21-D: un rifiuto che porta le persone oltre 2 senza dire le camere (oggi
+le camere restano quelle di prima, limitate alle persone, e il `say` le ripete) diventa la
+domanda chiusa "In quante camere?" con `proposal_id`, senza rifiuto registrato, come RF-75.
+**Test.** Quelli di UC-F (F1-F4 e "Altri tipi"); il rifiuto "siamo in 5" senza camere da un
+intento a 2 persone (`tests/test_usecases_rooms.py`) passa dalla domanda.
 **Copre.** RF-08, RF-09, RF-39..41, RF-49, RF-52..55, RF-71..75.
 **Taglia.** L. **Dipende da** M21-A, M21-B, M21-C (tipi `duration`, `level`), M21-D (tipo
 `pax` con le camere).

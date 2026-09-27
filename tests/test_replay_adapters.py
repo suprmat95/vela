@@ -30,6 +30,13 @@ class ReplayHofJTest(unittest.TestCase):
         self.assertIsInstance(iid, str)
         self.assertTrue(iid.startswith(ITINERARY_PREFIX))
 
+    def test_create_itinerary_keeps_the_rooms(self):
+        """M21-D (RF-67): le camere arrivano al carrello replay; il totale resta prezzo × adulti
+        (nessun sovrapprezzo simulato)."""
+        iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 5, 3, "EUR")
+        self.assertEqual(self.hofj._get(iid)["rooms"], 3)
+        self.assertEqual(self.hofj.get_itinerary(iid).total, Decimal("2890"))
+
     def test_get_itinerary_returns_the_amount_to_pay(self):
         iid = self.hofj.create_itinerary(make_product(1, price=578), date(2026, 10, 1), 2, 1, "EUR")
         it = self.hofj.get_itinerary(iid)
