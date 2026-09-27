@@ -1562,6 +1562,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2030,6 +2033,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2427,6 +2433,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -2763,6 +2772,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3099,6 +3111,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3390,6 +3405,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3700,6 +3718,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3971,6 +3992,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": 2,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4307,6 +4331,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4579,6 +4606,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "15",
      "name": "Tournaments",
@@ -4852,6 +4882,14 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "beginner",
+     "intermediate",
+     "advanced",
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5232,6 +5270,13 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "beginner",
+     "advanced",
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5616,6 +5661,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "14",
      "name": "Holidays",

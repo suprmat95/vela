@@ -75,6 +75,20 @@ class ProductFromEntryTest(unittest.TestCase):
                 self.assertIsNone(p.max_pax_per_room)
         self.assertIsNone(product_from_entry(ENTRY, archived=False, raw={}, fetched_at=NOW).max_pax_per_room)
 
+    def test_level_labels_are_read_from_the_entry(self):
+        """M21-C (RF-63): le etichette calcolate dalla proiezione; assenti (item di lista di un
+        archiviato) = livello sconosciuto, nessuna esclusività, nessuna lezione."""
+        p = product_from_entry(dict(ENTRY, vela_levels=["intermediate", "advanced"],
+                                    vela_levels_exclusive=False, vela_coaching=True),
+                               archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching),
+                         (frozenset({"intermediate", "advanced"}), False, True))
+        p = product_from_entry(ENTRY, archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching), (frozenset(), False, False))
+        p = product_from_entry(dict(ENTRY, vela_levels=["expert", "all", 3], vela_levels_exclusive=None),
+                               archived=False, raw={}, fetched_at=NOW)
+        self.assertEqual((p.levels, p.levels_exclusive), (frozenset({"all"}), False))   # solo valori noti
+
     def test_missing_destination_venue_hotel(self):
         entry = dict(ENTRY, destination=None, venue=None, hotels={"data": []}, minPax=2, maxPax=0)
         p = product_from_entry(entry, archived=True, raw={}, fetched_at=NOW)

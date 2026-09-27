@@ -213,6 +213,10 @@ class Product:
     featured: bool = False       # M21-B (RF-60): `featured` di HofJ, letto dal sync
     special_offer: bool = False  # M21-B (RF-60): `isSpecialOffer` di HofJ
     max_pax_per_room: Optional[int] = None   # M21-D (RF-66): `maxPaxPerRoom` di HofJ; None = nessun limite
+    # M21-C (RF-63): etichette di Vela dalle descrizioni (`labels.labels_of`), calcolate dal sync
+    levels: frozenset = frozenset()   # ⊆ {beginner, intermediate, advanced, all}; vuoto = sconosciuto
+    levels_exclusive: bool = False    # riserva esplicita: ammessi solo `levels` (RF-64)
+    coaching: bool = False            # lezioni, coach o allenamenti
 
 
 # --- proposta, ordine, rifiuto -------------------------------------------------
