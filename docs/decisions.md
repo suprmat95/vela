@@ -954,3 +954,24 @@ dopo la sua risposta.
 | Collocazione | M22 dopo M21-D (`orders.rooms`) e M21-F (tipo `hotel`): M22-a (bozza, sonda, verdetto, niente codice in `vela/`) e M22-b (implementazione, condizionata al verdetto) | M22 è un ramo del rifiuto `hotel` e usa le camere dell'ordine |
 | Dove sta la bozza | `docs/plans/2026-09-27-m22-hotel.md`, non `docs/spec.md` | Ogni task di M21 modifica la spec: i testi entrano all'inizio di M22-b |
 | Schema | Migrazione 0014 solo proposta (campi hotel sull'ordine), da approvare in M22-b. Tipo di job e classe di quota non la richiedono: `jobs.kind` è `String(16)` senza vincoli e la classe si ricava dal tipo nel codice | Verificato su `alembic/versions/0005_jobs_quota.py` |
+
+### Revisione della bozza (2026-09-27)
+
+Bozza approvata dall'utente con queste modifiche. Sostituiscono le raccomandazioni della bozza
+dove diverse; la bozza è già aggiornata (§10).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| M22 o RF-72 | Un rifiuto `hotel`, con o senza preferenza, propone UN altro hotel dello stesso viaggio quando valgono le condizioni del ramo a: ordine in `awaiting_confirmation`, prodotto con `hotelSelection` o `allowAccommodationList`, nessun acquisto `pending`. Non decide più la presenza di `hotel_preference` (raccomandazione della bozza, scartata) | "L'hotel non mi piace" su un viaggio che va bene chiede un altro hotel, non un altro viaggio |
+| Preferenza assente | Primo hotel in ordine `recommended` di HofJ diverso dall'attuale e da quelli già rifiutati sull'ordine | Nessuna domanda in più; l'ordine del fornitore è l'unico dato neutro |
+| Hotel rifiutati | `orders.rejected_accommodations` (JSON, default `[]`), uno dei cinque campi di 0014 al posto di `tried_accommodations`: contiene l'hotel di default e ogni hotel lasciato | Un secondo "non mi piace" non torna al primo |
+| Nessuna alternativa | Hotel fisso, lista vuota, hotel tutti già rifiutati, nessun hotel migliore per la preferenza → RF-72: altro viaggio, escluso quell'hotel. Il caso `no_better` della bozza (tenere l'hotel attuale) è tolto | Il viaggiatore ha rifiutato l'hotel: tenerlo sarebbe ignorare il rifiuto |
+| Istruzioni MCP | Nessuna domanda preventiva sulla preferenza: l'agente chiama subito `reject_proposal` con `reject_kind="hotel"` | Un turno in più, a voce, per un dato facoltativo |
+| Risposta nel ramo a | `reject_proposal` aspetta fino a 100 s come `accept_proposal` e restituisce l'ordine in `awaiting_confirmation`. Rottura di compatibilità accettata: i client sono nostri. In M22-b: istruzioni MCP, descrizione di `reject_proposal`, `docs/rest.md`, `scripts/rest_flow.py` se serve; ElevenLabs `response_timeout_secs` ≥ 120 | La forma che l'agente conosce già dalla conferma del prezzo |
+| Rifiuto nei rami a e b | Non registrato, ordine non cancellato (eccezione a RF-49, come RF-75) | Il viaggiatore non ha rifiutato il viaggio |
+| Job `hotel_change` | Non aspetta mai: al run, con un acquisto `pending` o senza tutti i gettoni del cambio subito, esito `busy` (ramo b). Sostituisce "rinuncia se arriva un acquisto mentre aspetta" | Più semplice: nessuno stato di attesa, nessuna attesa nella conversazione |
+| Acquisto in attesa | Per il cambio contano solo i job d'acquisto in stato `pending`; quelli in lavorazione hanno già preso i loro gettoni. Sostituisce "prima del link" della bozza. Il sync resta bloccato da ogni acquisto attivo, come oggi, e in più dai `hotel_change` attivi | Chi ha già i gettoni non compete col cambio |
+| Totale dopo il `PATCH` | Riletto e salvato su `orders.total` prima di ogni conferma; senza, il link non nasce (RF-82) | Il link Stripe usa `order.total` |
+| Altre domande (raccomandazioni della bozza) | Nessun tetto ai cambi per ordine; hotel sceglibile letto dal JSON grezzo del prodotto; ordine non in conferma → RF-72; tre riletture del totale fallite → ordine `failed` con motivo leggibile; "torna all'hotel di prima" fuori da M22 | Scelta dell'utente: "segui le tue raccomandazioni" |
+| Migrazione 0014 | Approvata come proposta: cinque campi su `orders` (`hotel_name`, `accommodation_id`, `hotel_preference`, `rejected_accommodations`, `hotel_change`) | Tipo di job e classe di quota senza migrazione |
+| ARCHITECTURE.md | Sul branch `doc/architecture`: il nuovo ordine di sacrificio (catalogo → scelta dell'hotel → attesa del link → mai le prenotazioni pagate) va in §5.2 (bilancio della quota), l'esperienza del viaggiatore a coda piena in §5.3 (il minuto sei) | Correzione dell'utente sui riferimenti del piano |

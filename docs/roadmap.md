@@ -1098,9 +1098,10 @@ che tocchi `chooser.py`, `intent.py`, `refine.py`.
 
 ## M22 — Scelta dell'hotel con degrado dinamico
 
-**Risultato.** Su un ordine in `awaiting_confirmation` il viaggiatore può chiedere un hotel
-diverso con una preferenza (più vicino al campo, più economico, più stelle, recensioni
-migliori) e Vela propone un solo hotel alternativo con la motivazione e il nuovo totale. Il
+**Risultato.** Su un ordine in `awaiting_confirmation` il viaggiatore può rifiutare l'hotel,
+con o senza una preferenza (più vicino al campo, più economico, più stelle, recensioni
+migliori), e Vela propone un solo hotel alternativo dello stesso viaggio con la motivazione e
+il nuovo totale. Il
 cambio avviene solo a coda d'acquisto vuota; con la coda piena Vela tiene l'hotel incluso e lo
 dice. Priorità della quota: `booking` > `purchase` > `hotel` > `sync`. Bozza dei requisiti
 (RF-15 riscritto, RF-76..RF-82), casi d'uso UC-G e domande aperte in
@@ -1113,8 +1114,9 @@ in `docs/spec.md`, che ogni task di M21 modifica); sonda su HofJ staging
 (`scripts/accommodations_probe.py`, sul modello di `scripts/quota_probe.py`): latenza di
 `/accommodations`, formato e risposta del `PATCH` con i `roomIds`, totale dopo il `PATCH`,
 risposta di un prodotto con `hotelSelection=false`; esiti in `docs/api/accommodations.md` e
-`docs/api/differences.md`. Verdetto: M22-b si fa o no. Testo per `ARCHITECTURE.md` §5.2 e
-§5.3 in entrambi i casi. Tre fasi, ognuna con l'OK dell'utente.
+`docs/api/differences.md`. Verdetto: M22-b si fa o no. Testo per `ARCHITECTURE.md` (branch
+`doc/architecture`) §5.2 (bilancio della quota, nuovo ordine di sacrificio) e §5.3 (cosa
+degrada: il viaggiatore a coda piena) in entrambi i casi. Tre fasi, ognuna con l'OK dell'utente.
 **Test.** Nessun codice in `vela/`; suite e lint verdi.
 **Copre.** Bozza di RF-15, RF-76..RF-82 (spec in M22-b).
 **Taglia.** S-M. **Dipende da** nessuna (le chiamate della sonda si dichiarano prima).
@@ -1126,21 +1128,24 @@ UC-G in `docs/usecases/scelta.md`; campo `hotel_preference` e parser it/en; i tr
 in `reject_proposal`; job `hotel_change` (lista, `PATCH`, rilettura del totale); classe
 `hotel` nello scheduler della quota (tutti i gettoni insieme, mai con acquisti in attesa, sync
 dopo i cambi); hotel nel `say` della conferma del prezzo; porte `HofJPort` nuove e replay;
-migrazione 0014 (campi hotel sull'ordine, da approvare all'inizio della task); descrizioni
-MCP, `docs/rest.md`.
+migrazione 0014 (cinque campi hotel sull'ordine, approvata in M22-a); istruzioni del server
+MCP e descrizione di `reject_proposal` (nessuna domanda preventiva sulla preferenza; la
+risposta può essere di nuovo una conferma del prezzo); `docs/rest.md`; `scripts/rest_flow.py`
+se serve; nota su ElevenLabs: `response_timeout_secs` resta ≥ 120 anche per `reject_proposal`.
 **Test.** Quelli di UC-G nella bozza (§5).
 **Copre.** RF-15, RF-16, RF-25, RF-37, RF-39..41, RF-47, RF-49, RF-52, RF-72, RF-76..RF-82,
 RNF-04.
 **Taglia.** L. **Dipende da** M22-a (verdetto "sì"), M21-D (`orders.rooms`, `create_itinerary`
 con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
-**Da decidere nel brainstorm.** Le domande aperte di §10 della bozza non chiuse in M22-a.
+**Da decidere nel brainstorm.** Niente di aperto: le domande di §10 della bozza sono chiuse
+(`docs/decisions.md`, 2026-09-27, "M22-a"); restano i dettagli che dipendono dalla sonda.
 
 **Prompt** (M22-b).
 > Leggi docs/plans/2026-09-27-m22-hotel.md, docs/api/accommodations.md, docs/decisions.md
 > (2026-09-27, "M22-a"), docs/spec.md (RF-15, RF-16, RF-47, RF-49, RF-71..75), vela/domain/quota.py,
 > vela/domain/purchase.py, vela/domain/usecases.py, vela/domain/refine.py e docs/roadmap.md M22-b.
-> Obiettivo: UC-G con i suoi test. Prima chiudi le domande aperte e chiedi l'OK sulla
-> migrazione 0014. Nessuna chiamata a servizi esterni.
+> Obiettivo: UC-G con i suoi test. Proponi l'approccio e aspetta l'OK. Nessuna chiamata a
+> servizi esterni.
 
 ---
 
