@@ -55,6 +55,7 @@ NUMBER_WORDS = {
 MAX_PAX = 20
 MAX_NIGHTS = 30
 SPORTS = ("padel", "tennis", "any")
+BUDGET_SCOPES = ("per_person", "total")
 LLM_PERIOD_LABEL = "llm"
 FIELD_PERIOD_LABEL = "agent"
 
@@ -477,6 +478,12 @@ def validate_fields(raw: dict, today: date, label: str = FIELD_PERIOD_LABEL) -> 
             valid["duration_min_nights"], valid["duration_max_nights"] = low_n, high_n
         else:
             discarded.append(("duration", (low_n, high_n)))
+    scope = raw.get("budget_scope")
+    if scope is not None:
+        if isinstance(scope, str) and scope.strip().lower() in BUDGET_SCOPES:
+            valid["budget_scope"] = scope.strip().lower()
+        else:
+            discarded.append(("budget_scope", scope))
     return valid, tuple(discarded)
 
 

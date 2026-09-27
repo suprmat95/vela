@@ -386,6 +386,12 @@ class AgentToolSayTest(unittest.TestCase):
         self.assertEqual(say.say_discarded((("duration", (0, None)),), "en"),
                          "I couldn't use 0 - ? as the length in nights.")
 
+    def test_discarded_budget_scope(self):
+        self.assertEqual(say.say_discarded((("budget_scope", "each"),), "it"),
+                         "Non ho potuto usare each come lettura del budget, a persona o in tutto.")
+        self.assertEqual(say.say_discarded((("budget_scope", "each"),), "en"),
+                         "I couldn't use each as the budget reading, per person or in total.")
+
     def test_direction_discarded_names_the_direction(self):
         self.assertIn("nord", say.say_discarded((("direction", "north"),), "it"))
         self.assertIn("north", say.say_discarded((("direction", "north"),), "en"))

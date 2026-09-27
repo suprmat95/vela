@@ -147,14 +147,16 @@ _DISCARDED = {
            "pax": "Non ho potuto usare %s come numero di persone.",
            "budget": "Non ho potuto usare %s come budget.",
            "direction": "Non so spostare la ricerca verso %s.",
-           "duration": "Non ho potuto usare %s come durata in notti."},
+           "duration": "Non ho potuto usare %s come durata in notti.",
+           "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
            "pax": "I couldn't use %s as the number of people.",
            "budget": "I couldn't use %s as the budget.",
            "direction": "I can't move the search %s.",
-           "duration": "I couldn't use %s as the length in nights."},
+           "duration": "I couldn't use %s as the length in nights.",
+           "budget_scope": "I couldn't use %s as the budget reading, per person or in total."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
