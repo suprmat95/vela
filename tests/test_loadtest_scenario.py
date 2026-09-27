@@ -1,12 +1,16 @@
 """Scenario del load test (M13a): arrivi aperti, imbuto con seme, sentinelle, frasi valide."""
 import unittest
+from datetime import date
+from decimal import Decimal
 
+from support import NOW, FakeHofJ, inline_worker
 from loadtest.scenario import INTENTS, PROFILE, REASON, Funnel, arrivals, travelers
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
-from vela.domain.models import NoMatch, ProposalMade, profile_from_dict
+from vela.domain.models import Criteria, NoMatch, Proposal, ProposalMade, profile_from_dict
+from vela.domain.refine import refine
 from vela.domain.usecases import Vela
 
 
@@ -68,6 +72,42 @@ class IntentsTest(unittest.TestCase):
                 second = vela.reject_proposal(first.proposal.id, REASON)
                 self.assertNotIsInstance(second, NoMatch)
                 self.assertIsInstance(second, ProposalMade)
+
+
+class RejectionKindTest(unittest.TestCase):
+    """M21-F: il "troppo caro" del 30% del load test resta un rifiuto `price`, mai una domanda, e
+    il viaggio con il rifiuto spende su HofJ quanto quello senza (il rifiuto non chiama HofJ)."""
+
+    def journey(self, text, rejects):
+        repos = MemoryRepositories()
+        repos.products.upsert_many(ReplayHofJ().load_catalog())
+        hofj = FakeHofJ()
+        vela = Vela(repos, hofj, FakePayments(), DEFAULT_TRAVELER)
+        worker = inline_worker(vela)
+        worker.processor.refresh_quota()
+        created = vela.create_intent(text, profile_from_dict(PROFILE))
+        proposal = vela.get_proposal(created.intent_id)
+        if rejects:
+            before = len(hofj.calls)
+            proposal = vela.reject_proposal(proposal.proposal.id, REASON)
+            self.assertIsInstance(proposal, ProposalMade)
+            self.assertEqual(len(hofj.calls), before)   # il rifiuto non chiama HofJ
+            kinds = {r.kind for r in repos.rejections.list_for_intent(created.intent_id)}
+            self.assertEqual(kinds, {"price"})
+        vela.accept_proposal(proposal.proposal.id)
+        worker.drain()
+        return [c[0] for c in hofj.calls if c[0] != "get_quota"]
+
+    def test_too_expensive_is_price_and_costs_no_hofj_call(self):
+        proposal = Proposal("p", "i", "1", date(2026, 10, 1), date(2026, 10, 4), 2, Decimal("350"),
+                            "EUR", "r", NOW)
+        r = refine(Criteria("padel", pax=2, rooms=1), REASON, proposal, None, NOW.date())
+        self.assertEqual((r.kind, r.ask, r.keep_product), ("price", None, False))
+        for text, _ in INTENTS:
+            with self.subTest(text):
+                calls = self.journey(text, rejects=True)
+                self.assertEqual(len(calls), 5)   # i cinque passi fino al prezzo effettivo
+                self.assertEqual(calls, self.journey(text, rejects=False))
 
 
 if __name__ == "__main__":

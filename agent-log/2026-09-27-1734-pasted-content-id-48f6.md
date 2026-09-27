@@ -411,3 +411,19 @@ Suite and lint are green. Before committing I'm checking for old tests that now 
 That one still holds: the discarded-field sentence now comes before the question. I'll make the assertion state that explicitly:
 
 - 🔧 Bash: Strengthen assertion and commit steps 5-7
+
+Next: the load test and the price-cache (RF-84) tests.
+
+- 🔧 Bash: Read load test tests
+
+The load-test check: "troppo caro" stays `price`, never asks, and a journey with the rejection spends the same HofJ calls as one without.
+
+- 🔧 Bash: Add load test rejection kind test
+
+Making sure the comparison isn't between two empty lists, and moving the inline imports to the top:
+
+- 🔧 Bash: Tidy imports and assert five HofJ calls
+
+- 🔧 Bash: Add RF-84 rejection tests
+
+- 🔧 Bash: Full suite, lint, commit step 8

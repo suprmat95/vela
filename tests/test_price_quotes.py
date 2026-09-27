@@ -11,7 +11,8 @@ from decimal import Decimal
 from support import NOW, FakeHofJ, StubPayments, inline_worker, make_product
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.config import DEFAULT_TRAVELER, Settings
-from vela.domain.models import (Area, Criteria, Intent, JobKind, JobStatus, OrderQueued, OrderStatus,
+from vela.domain.models import (Area, Criteria, Intent, IntentQuestion, JobKind, JobStatus, OrderQueued,
+                                OrderStatus,
                                 OrderStatusResponse, Participant, Period, Proposal, QuoteKey,
                                 QuoteStatus, TravelerProfile)
 from vela.domain.usecases import Vela
@@ -308,6 +309,89 @@ class FallbackTest(unittest.TestCase):
         w.settle()
         self.assertEqual(w.order(pids[1]).status, OrderStatus.CANCELLED)
         self.assertEqual(w.order(pids[2]).status, OrderStatus.AWAITING_CONFIRMATION)
+
+
+class RejectionTest(unittest.TestCase):
+    """M21-F con RF-84: `reject_proposal` su un ordine leader o agganciato. Un rifiuto registrato
+    cancella (RF-49) e il leader passa il testimone come quando esce senza prezzo; la domanda chiusa
+    (RF-75) non tocca nessuno."""
+
+    def three(self):
+        w = World()
+        pids = [w.traveler() for _ in range(3)]
+        for pid in pids:
+            w.accept(pid)
+        return w, pids
+
+    def test_rejected_leader_hands_followers_their_own_jobs(self):
+        w, pids = self.three()
+        r = w.vela.reject_proposal(pids[0], "troppo caro")
+        self.assertNotIsInstance(r, IntentQuestion)
+        self.assertEqual(w.order(pids[0]).status, OrderStatus.CANCELLED)
+        self.assertIsNone(w.repos.quotes.get(KEY))
+        for pid in pids[1:]:   # subito, prima di ogni drain: job suo, al suo posto in coda
+            o = w.order(pid)
+            self.assertFalse(o.follows_quote)
+            self.assertEqual(w.repos.jobs.active_for_order(o.id, JobKind.PURCHASE).enqueued_at, o.enqueued_at)
+        w.settle()
+        for pid in pids[1:]:
+            self.assertEqual(w.order(pid).status, OrderStatus.AWAITING_CONFIRMATION)
+            self.assertIsNotNone(w.order(pid).itinerary_id)
+
+    def test_question_on_the_leader_detaches_nobody(self):
+        w, pids = self.three()
+        r = w.vela.reject_proposal(pids[0], "boh")
+        self.assertIsInstance(r, IntentQuestion)
+        self.assertEqual(r.proposal_id, pids[0])
+        leader = w.order(pids[0])
+        self.assertEqual(leader.status, OrderStatus.QUEUED)
+        self.assertIsNotNone(w.job(pids[0]))
+        quote = w.repos.quotes.get(KEY)
+        self.assertEqual((quote.status, quote.leader_order_id), (QuoteStatus.PENDING, leader.id))
+        for pid in pids[1:]:
+            self.assertTrue(w.order(pid).follows_quote)
+            self.assertIsNone(w.job(pid))
+        self.assertEqual(w.repos.rejections.list_for_intent("i1"), [])
+        w.settle()
+        self.assertEqual({w.order(pid).status for pid in pids}, {OrderStatus.AWAITING_CONFIRMATION})
+        self.assertEqual(w.carts(), 1)
+
+    def test_question_on_a_follower_keeps_it_attached(self):
+        w, pids = self.three()
+        self.assertIsInstance(w.vela.reject_proposal(pids[1], "mah"), IntentQuestion)
+        self.assertTrue(w.order(pids[1]).follows_quote)
+        self.assertEqual(w.order(pids[1]).status, OrderStatus.QUEUED)
+        w.settle()
+        self.assertEqual(w.order(pids[1]).status, OrderStatus.AWAITING_CONFIRMATION)
+        self.assertEqual(w.carts(), 1)
+
+    def reject_second_after_the_price(self, ttl):
+        """Il primo viaggiatore porta il prezzo; il secondo lo prende dalla cache (ttl > 0) o dal
+        suo carrello (ttl 0), poi rifiuta "troppo caro" in `awaiting_confirmation`."""
+        w = World(ttl=ttl)
+        first, second = w.traveler(), w.traveler()
+        w.accept(first)
+        w.settle()
+        w.accept(second)
+        w.settle()
+        self.assertEqual(w.order(second).status, OrderStatus.AWAITING_CONFIRMATION)
+        self.assertEqual(w.order(second).total, Decimal("700"))
+        return w, second, w.vela.reject_proposal(second, "troppo caro")
+
+    def test_rejection_on_a_cached_price_behaves_as_without_cache(self):
+        cached_w, cached_pid, cached = self.reject_second_after_the_price(900)
+        plain_w, plain_pid, plain = self.reject_second_after_the_price(0)
+        self.assertIsNone(cached_w.order(cached_pid).itinerary_id)   # prezzo dalla cache, niente carrello
+        self.assertIsNotNone(plain_w.order(plain_pid).itinerary_id)
+        self.assertEqual(cached.to_dict(), plain.to_dict())   # stesso esito, stessa frase
+        self.assertEqual(cached.failed_criterion, "price")    # tetto M7 = totale effettivo 700 (780 no)
+        self.assertTrue(cached.say.startswith("Ho annullato l'ordine. "))
+        for w, pid in ((cached_w, cached_pid), (plain_w, plain_pid)):
+            self.assertEqual(w.order(pid).status, OrderStatus.CANCELLED)
+            self.assertEqual(w.payments.links, [])
+            self.assertEqual({r.kind for r in w.repos.rejections.list_for_intent(w.order(pid).intent_id)},
+                             {"price"})
+        self.assertEqual(cached_w.repos.quotes.get(KEY).status, QuoteStatus.READY)   # vale per gli altri
 
 
 class RaceTest(unittest.TestCase):
