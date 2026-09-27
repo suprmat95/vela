@@ -266,6 +266,65 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it",
             % (product.title, where, hotel, when, people, fmt_money(p.price_from), p.reason))
 
 
+# M21-C (RF-64): livelli del catalogo detti ai giocatori
+_PLAYERS = {"it": {"beginner": "principianti", "intermediate": "intermedi", "advanced": "avanzati"},
+            "en": {"beginner": "beginner", "intermediate": "intermediate", "advanced": "advanced"}}
+_LEVEL_ORDER = ("beginner", "intermediate", "advanced")
+
+
+def _players(levels, lang: str = "it") -> str:
+    """"principianti", "giocatori intermedi e avanzati"; "beginners", "intermediate and advanced
+    players"."""
+    known = [lv for lv in _LEVEL_ORDER if lv in levels]
+    if lang == "en":
+        return "beginners" if known == ["beginner"] else "%s players" % _join(
+            [_PLAYERS["en"][lv] for lv in known], "en")
+    return "principianti" if known == ["beginner"] else "giocatori " + _join(
+        [_PLAYERS["it"][lv] for lv in known])
+
+
+def level_sentence(levels: frozenset, coaching: bool, c: Criteria) -> Optional[str]:
+    """RF-64 (UC-C): se il prodotto proposto rispetta livello e lezioni chiesti. Rispettati: "Il
+    programma è pensato anche per principianti e include lezioni o allenamenti." Non rispettati:
+    "Non ho trovato viaggi per principianti con lezioni: questo è pensato per giocatori intermedi
+    e avanzati e include lezioni o allenamenti." Niente se il viaggiatore non ha chiesto né
+    livello né lezioni; `wants_coaching=false` non si dichiara (non penalizza)."""
+    level, lessons = c.level, c.wants_coaching is True
+    if level not in _LEVEL_ORDER and not lessons:
+        return None
+    en = c.language == "en"
+    lang = "en" if en else "it"
+    facts, ok = [], True
+    if level in _LEVEL_ORDER:
+        known = {lv for lv in levels if lv in _LEVEL_ORDER}
+        if "all" in levels:
+            facts.append("is designed for players of every level" if en
+                         else "è pensato per giocatori di ogni livello")
+        elif not known:
+            facts.append("doesn't state a playing level" if en else "non indica un livello di gioco")
+        elif level in known:
+            only = known == {level}
+            facts.append(("is designed for %s" + ("" if only else " too")) % _players({level}, lang) if en
+                         else ("è pensato %sper %s" % ("" if only else "anche ", _players({level}, lang))))
+        else:
+            ok = False
+            facts.append(("is designed for %s" if en else "è pensato per %s") % _players(known, lang))
+    if lessons:
+        ok = ok and coaching
+        facts.append(("includes lessons or training" if en else "include lezioni o allenamenti") if coaching
+                     else ("doesn't include lessons" if en else "non prevede lezioni"))
+    joined = (" and " if en else " e ").join(facts)
+    if ok:
+        return ("The programme %s." if en else "Il programma %s.") % joined
+    wanted = []
+    if level in _LEVEL_ORDER:
+        wanted.append("for %s" % _players({level}, lang) if en else "per %s" % _players({level}, lang))
+    if lessons:
+        wanted.append("with lessons" if en else "con lezioni")
+    return (("I have no trips %s: this one %s." if en else "Non ho trovato viaggi %s: questo %s.")
+            % (" ".join(wanted), joined))
+
+
 def say_rooms_below_minimum(max_pax_per_room: int, pax: int, needed: int, lang: str = "it") -> str:
     """RF-65 su `accept_proposal`: la correzione delle camere è sotto il minimo del prodotto
     (RF-66); nessun ordine, la domanda di RF-04."""
@@ -300,6 +359,9 @@ _NO_MATCH = {
         # M21-D (RF-66): le camere minime che avrebbero salvato un prodotto
         "rooms_value": ("I viaggi compatibili hanno camere da massimo %s: per %s servono almeno %s. "
                         "Vuoi cambiare il numero di camere?"),
+        # M21-C (RF-64): i compatibili sono riservati ad altri livelli
+        "level": "I viaggi compatibili sono riservati a un altro livello di gioco. Vuoi cambiare qualcosa?",
+        "level_value": "I viaggi compatibili sono riservati a %s. Vuoi cambiare qualcosa?",
     },
     "en": {
         "archived": "Right now I have no bookable trips: please try again later.",
@@ -319,15 +381,19 @@ _NO_MATCH = {
         "pax_alone_sport": " %s",
         "rooms_value": ("The compatible trips have rooms for at most %s: %s need at least %s. "
                         "Do you want to change the number of rooms?"),
+        "level": "The compatible trips are reserved for another playing level. Do you want to change something?",
+        "level_value": "The compatible trips are reserved for %s. Do you want to change something?",
     },
 }
 
 
 def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
-                 rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None) -> str:
+                 rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None,
+                 levels: Optional[tuple] = None) -> str:
     """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
     nella lingua dei criteri. Con una persona sola il filtro `pax` cade solo per `minPax` ≥ 2
-    (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66)."""
+    (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66), per `level` i livelli a cui
+    sono riservati i prodotti esclusi (RF-64)."""
     c = criteria or Criteria()
     lang = c.language
     texts = _NO_MATCH.get(lang, _NO_MATCH["it"])
@@ -343,6 +409,8 @@ def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
     if criterion == "rooms" and c.pax and rooms_needed and max_pax_per_room:
         return texts["rooms_value"] % (_people(max_pax_per_room, lang), _people(c.pax, lang),
                                        fmt_rooms(rooms_needed, lang))
+    if criterion == "level" and levels and any(lv in _LEVEL_ORDER for lv in levels):
+        return texts["level_value"] % _players(levels, "en" if lang == "en" else "it")
     return texts.get(criterion, texts[None])
 
 

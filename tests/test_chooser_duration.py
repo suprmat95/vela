@@ -34,7 +34,7 @@ THREE = trip(2, 3, 400)        # più caro, un weekend
 
 class DurationOrderingTest(unittest.TestCase):
     def test_filters_are_unchanged(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level",
                                    "price", "rejected"))   # "rooms" da M21-D
 
     def test_weekend_prefers_the_weekend_even_if_more_expensive(self):

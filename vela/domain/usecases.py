@@ -178,7 +178,8 @@ class Vela:
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
                            say.say_no_match(result.failed_criterion, intent.criteria,
-                                            result.rooms_needed, result.max_pax_per_room))
+                                            result.rooms_needed, result.max_pax_per_room,
+                                            result.levels))
         proposal = Proposal(self.new_id(), intent.id, result.product.id, result.start_date,
                             result.end_date, intent.criteria.pax or 1, result.product.price,
                             result.product.currency, result.reason, self.now())

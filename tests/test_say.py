@@ -64,9 +64,10 @@ class SayTest(unittest.TestCase):
     def test_no_match_covers_every_criterion(self):
         from vela.domain.chooser import FILTERS
         texts = {c: say.say_no_match(c) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 7)   # archived, bookable e trip condividono la frase
+        self.assertEqual(len(set(texts.values())), 8)   # archived, bookable e trip condividono la frase
         self.assertIn("scartato", texts["rejected"])
         self.assertIn("camere", texts["rooms"])   # M21-D
+        self.assertIn("livello", texts["level"])   # M21-C
         self.assertIn("più economico", texts["price"])
         self.assertIn("periodo", texts["dates"])
 
@@ -204,9 +205,10 @@ class EnglishTest(unittest.TestCase):
         from vela.domain.chooser import FILTERS
         en = Criteria(language="en")
         texts = {c: say.say_no_match(c, en) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 7)   # archived, bookable e trip condividono la frase
+        self.assertEqual(len(set(texts.values())), 8)   # archived, bookable e trip condividono la frase
         self.assertIn("period", texts["dates"])
         self.assertIn("rooms", texts["rooms"])   # M21-D
+        self.assertIn("level", texts["level"])   # M21-C
         self.assertIn("cheaper", texts["price"])
         self.assertNotEqual(texts["dates"], say.say_no_match("dates"))
 

@@ -1,17 +1,20 @@
 """Chooser v3 (RF-06, RF-07, RF-09, RF-60, RF-61): una sola scelta deterministica.
 
 Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, camere
-(RF-66, M21-D: un prodotto con `max_pax_per_room` vuole almeno ceil(pax / limite) camere), prezzo
+(RF-66, M21-D: un prodotto con `max_pax_per_room` vuole almeno ceil(pax / limite) camere), livello
+(RF-64, M21-C: solo un prodotto riservato esplicitamente ad altri livelli), prezzo
 (dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Dei
 prodotti equivalenti (RF-61, M21-B) resta un solo candidato, quello con l'id più basso. Tra i
 restanti ordina come RF-60 (M21-B): aderenza all'area (dentro l'area 3, stessa regione 2,
-stesso paese 1), totale entro budget, durata compatibile (RF-58), [livello e lezioni: neutro
-fino a M21-C], partenza più vicina all'inizio del periodo (o a oggi senza periodo), `featured`
-o offerta speciale, prezzo crescente, id numerico. Area, budget e durata non escludono mai: se
-non sono rispettati la motivazione lo dichiara (RF-59); la motivazione dice anche il livello
+stesso paese 1), totale entro budget, durata compatibile (RF-58), livello e lezioni compatibili
+(RF-62..64, M21-C: prima il livello, poi le lezioni), partenza più vicina all'inizio del periodo
+(o a oggi senza periodo), `featured` o offerta speciale, prezzo crescente, id numerico. Area,
+budget, durata, livello e lezioni non escludono mai (tranne la riserva esplicita di RF-64): se
+non sono rispettati la motivazione lo dichiara (RF-59, RF-64); la motivazione dice anche il livello
 che ha deciso quando un prodotto più economico ha perso sulla partenza o su `featured`. Se un
 filtro azzera i candidati, `NoChoice` porta il nome di quel filtro (RF-09); per le camere anche
-le camere minime che avrebbero salvato un prodotto e il relativo massimo per camera.
+le camere minime che avrebbero salvato un prodotto e il relativo massimo per camera, per il
+livello i livelli a cui sono riservati i prodotti esclusi.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -20,10 +23,13 @@ from typing import Iterable, Optional, Set, Tuple, Union
 
 from vela.domain import geo
 from vela.domain.catalog import is_trip
+from vela.domain.labels import ALL, ordered
 from vela.domain.models import Area, Criteria, Period, Product
-from vela.domain.say import _people, fmt_money, fmt_nights, fmt_rooms, fmt_span, nights_range, on_date
+from vela.domain.say import (_people, fmt_money, fmt_nights, fmt_rooms, fmt_span, level_sentence,
+                             nights_range, on_date)
 
-FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "price", "rejected")
+FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "price",
+           "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
 
@@ -47,6 +53,7 @@ class NoChoice:
     failed_criterion: str
     rooms_needed: Optional[int] = None        # solo "rooms" (RF-66): camere minime per un candidato
     max_pax_per_room: Optional[int] = None    # solo "rooms": il limite per camera di quel candidato
+    levels: Optional[tuple] = None            # solo "level" (RF-64): i livelli dei prodotti esclusi
 
 
 @dataclass(frozen=True)
@@ -109,8 +116,30 @@ def _rooms_ok(product: Product, pax: Optional[int], rooms: Optional[int]) -> boo
     return rooms >= rooms_needed(product, pax)
 
 
+def level_allowed(product: Product, level: Optional[str]) -> bool:
+    """RF-64: escluso solo un prodotto `levels_exclusive` che non ammette il livello chiesto."""
+    if level is None or not product.levels_exclusive:
+        return True
+    return ALL in product.levels or level in product.levels
+
+
+def level_ok(product: Product, level: Optional[str]) -> bool:
+    """RF-60 livello 4 (UC-C): compatibile = livello non chiesto, sconosciuto (`levels` vuoto),
+    `all` o il livello chiesto."""
+    return level is None or not product.levels or ALL in product.levels or level in product.levels
+
+
+def coaching_ok(product: Product, wants_coaching: Optional[bool]) -> bool:
+    """Con `wants_coaching=true` servono le lezioni; `false` non penalizza nessuno (decisione
+    "Scelta v3": la descrizione non dice quando le lezioni sono obbligatorie)."""
+    return wants_coaching is not True or product.coaching
+
+
 def _no_choice(name: str, candidates: list, criteria: Criteria) -> NoChoice:
-    """Il filtro `name` ha azzerato `candidates`. Per le camere: il candidato che ne chiede meno."""
+    """Il filtro `name` ha azzerato `candidates`. Per le camere: il candidato che ne chiede meno;
+    per il livello: i livelli a cui sono riservati i candidati esclusi."""
+    if name == "level" and candidates:
+        return NoChoice(name, levels=tuple(ordered(frozenset().union(*(p.levels for p in candidates)))))
     if name != "rooms" or not candidates or criteria.pax is None:
         return NoChoice(name)
     best = min(candidates, key=lambda p: (rooms_needed(p, criteria.pax), id_key(p)))
@@ -290,6 +319,7 @@ def _reason(product: Product, criteria: Criteria, start: date, end: date, score:
     sentences = [_area_sentence(product, criteria.area, score, criteria.language)]
     if not duration_ok:
         sentences.append(_duration_sentence(criteria, start, end))
+    sentences.append(level_sentence(product.levels, product.coaching, criteria))   # RF-64
     sentences.append(_dates_budget_sentence(product, criteria, start, score, within, why))
     sentences.append(_rooms_sentence(product, criteria))
     return " ".join(s for s in sentences if s is not None)
@@ -346,6 +376,7 @@ def _hard_filters(criteria: Criteria, today: date, now: Optional[datetime]) -> t
         ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
         ("rooms", lambda p: _rooms_ok(p, criteria.pax, criteria.rooms)),
+        ("level", lambda p: level_allowed(p, criteria.level)),
     )
 
 
@@ -376,12 +407,14 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
     score_of = {p.id: area_score(p, criteria.area) for p in candidates}
     within_of = {p.id: _within_budget(p, criteria) for p in candidates}
     fits_of = {p.id: _duration_ok(nights_between(*trips[p.id]), criteria) for p in candidates}
+    # livello 4 (M21-C): prima il livello, poi le lezioni; tutto vero se nessuno dei due è chiesto
+    play_of = {p.id: (not level_ok(p, criteria.level), not coaching_ok(p, criteria.wants_coaching))
+               for p in candidates}
 
     def rank(p: Product) -> tuple:
         # RF-60. La partenza si ordina per data: ogni partenza valida è già all'inizio del periodo
         # o dopo (o a oggi o dopo), quindi la distanza dall'inizio cresce con la data.
-        return (-score_of[p.id], not within_of[p.id], not fits_of[p.id],
-                # livello 4, livello e lezioni: neutro fino a M21-C (RF-62..64)
+        return (-score_of[p.id], not within_of[p.id], not fits_of[p.id], play_of[p.id],
                 trips[p.id][0], not _promoted(p), p.price, id_key(p))
 
     candidates.sort(key=rank)
@@ -391,10 +424,12 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
     peers = [p for p in candidates[1:] if score_of[p.id] == score and within_of[p.id] == within]
     cheaper = [p for p in peers if p.price < best.price]
     same_length = [p for p in cheaper if fits_of[p.id] == fits]
+    # pari anche su livello e lezioni: solo tra questi partenza e `featured` hanno deciso
+    same_rank = [p for p in same_length if play_of[p.id] == play_of[best.id]]
     why = Why(cheapest=not same_length, cheaper_skipped=bool(cheaper) and not same_length,
-              departure_won=any(trips[p.id][0] > start for p in same_length),
+              departure_won=any(trips[p.id][0] > start for p in same_rank),
               featured_won=_promoted(best) and any(trips[p.id][0] == start and not _promoted(p)
-                                                   for p in same_length))
+                                                   for p in same_rank))
     reason = _reason(best, criteria, start, end, score, within, fits, why)
     return Choice(best, start, end, reason, score, within, nights_between(start, end), fits)
 
