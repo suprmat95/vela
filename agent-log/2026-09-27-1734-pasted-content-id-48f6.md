@@ -1,0 +1,223 @@
+# M21-F Rifiuti con motivo sempre capito
+
+- Sessione: `8ae2643d-4b5b-4f21-9f9a-c766bfec1c8f`
+- Inizio: 2026-09-27 17:34
+
+## Utente 17:34
+
+<pasted_content id="48f6">
+/superpowers:brainstorming
+
+
+Task M21-F — Rifiuti con motivo sempre capito (UC-F). È l'ultima di M21. Su master ci sono già
+M21-A, M21-E, M21-B, M21-D, M21-C e M23 (cache del prezzo con fanout, RF-84, migrazione 0015).
+M22 è chiusa con il verdetto di M22-a: il tipo di rifiuto `hotel` è solo RF-72 (altro viaggio,
+escluso quell'hotel), nessun cambio di hotel nello stesso viaggio.
+
+Leggi docs/spec.md (§4.12, RF-08, RF-09, RF-39..41, RF-49, RF-52..55, RF-71..75, RF-84),
+docs/usecases/scelta.md (UC-F e i casi delle altre task che toccano i rifiuti),
+docs/decisions.md (2026-09-26 "Scelta v3" e tutte le decisioni del 2026-09-27: M21-E, M21-B,
+M21-D, M21-C, M22-a, M23), docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md,
+vela/domain/refine.py, intent.py, chooser.py, say.py, usecases.py, models.py, orders.py,
+geo.py, vela/adapters/repo_postgres.py e schema.py, vela/surfaces/mcp.py e rest.py,
+loadtest/journey.py e loadtest/scenario.py, docs/roadmap.md M21 (regole comuni) e M21-F.
+
+Obiettivo: il caso UC-F con i suoi test.
+- Classificazione del rifiuto in refine.py (RF-71) e campo reject_kind.
+- rejections.kind e rejections.keep_product.
+- Esclusione per hotel ricavata dai rifiuti (RF-72).
+- excluded_areas e luogo negato (RF-73), Marbella aggiunta a geo.
+- Stesso prodotto con altre date (RF-74) in chooser.departure con finestre escluse, e
+  keep_product=false sulla stessa proposta che aggiorna il rifiuto (RF-55).
+- Domanda chiusa per il motivo non classificabile, senza rifiuto registrato né cancellazione
+  dell'ordine queued (RF-75, RF-49); risposta `question` con proposal_id su MCP e REST;
+  descrizione MCP di reject_proposal; docs/rest.md.
+
+Casi rimandati dalle task precedenti, da chiudere qui con i loro test:
+- Da M21-B: con la fixture di staging più la trappola 900078, un rifiuto del 78 per l'hotel
+  non propone né il 78 né il 900078 (stesso hotel).
+- Da M21-D: un rifiuto che porta le persone oltre 2 senza dire le camere diventa la
+</pasted_content id="48f6">
+
+## Agente 17:34
+
+Your message only contains the pasted task text, and it's cut off mid-sentence. It stops at "Da M21-D: un rifiuto che porta le persone oltre 2 senza dire le camere diventa la…", so I can't see the rest of the deferred cases or anything after them.
+
+Before I start anything, can you confirm two things?
+
+1. **Do you want me to start brainstorming M21-F (UC-F)** from this text? That means `/superpowers:brainstorming`: I read the listed docs and code, then propose an approach in a few bullets and wait for your OK before writing any code.
+2. **Can you paste the rest of the task?** I need the end of the M21-D case, plus any other deferred cases and constraints after it.
+
+## Utente 17:34
+
+<pasted_content id="48f6">
+/superpowers:brainstorming
+
+
+Task M21-F — Rifiuti con motivo sempre capito (UC-F). È l'ultima di M21. Su master ci sono già
+M21-A, M21-E, M21-B, M21-D, M21-C e M23 (cache del prezzo con fanout, RF-84, migrazione 0015).
+M22 è chiusa con il verdetto di M22-a: il tipo di rifiuto `hotel` è solo RF-72 (altro viaggio,
+escluso quell'hotel), nessun cambio di hotel nello stesso viaggio.
+
+Leggi docs/spec.md (§4.12, RF-08, RF-09, RF-39..41, RF-49, RF-52..55, RF-71..75, RF-84),
+docs/usecases/scelta.md (UC-F e i casi delle altre task che toccano i rifiuti),
+docs/decisions.md (2026-09-26 "Scelta v3" e tutte le decisioni del 2026-09-27: M21-E, M21-B,
+M21-D, M21-C, M22-a, M23), docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md,
+vela/domain/refine.py, intent.py, chooser.py, say.py, usecases.py, models.py, orders.py,
+geo.py, vela/adapters/repo_postgres.py e schema.py, vela/surfaces/mcp.py e rest.py,
+loadtest/journey.py e loadtest/scenario.py, docs/roadmap.md M21 (regole comuni) e M21-F.
+
+Obiettivo: il caso UC-F con i suoi test.
+- Classificazione del rifiuto in refine.py (RF-71) e campo reject_kind.
+- rejections.kind e rejections.keep_product.
+- Esclusione per hotel ricavata dai rifiuti (RF-72).
+- excluded_areas e luogo negato (RF-73), Marbella aggiunta a geo.
+- Stesso prodotto con altre date (RF-74) in chooser.departure con finestre escluse, e
+  keep_product=false sulla stessa proposta che aggiorna il rifiuto (RF-55).
+- Domanda chiusa per il motivo non classificabile, senza rifiuto registrato né cancellazione
+  dell'ordine queued (RF-75, RF-49); risposta `question` con proposal_id su MCP e REST;
+  descrizione MCP di reject_proposal; docs/rest.md.
+
+Casi rimandati dalle task precedenti, da chiudere qui con i loro test:
+- Da M21-B: con la fixture di staging più la trappola 900078, un rifiuto del 78 per l'hotel
+  non propone né il 78 né il 900078 (stesso hotel).
+- Da M21-D: un rifiuto che porta le persone oltre 2 senza dire le camere diventa la domanda
+  chiusa "In quante camere?" con proposal_id, senza rifiuto registrato, come RF-75 (oggi le
+  camere restano quelle di prima e il say le ripete). Aggiorna il test esplicito di M21-D.
+- Da M21-D: la question di accept_proposal sulle camere sotto il minimo oggi non ha
+  proposal_id; uniformala al formato della question di RF-75.
+
+Migrazione: NON usare 0013. La catena su master è 0012 → 0015 (decisions.md, M23): una 0013
+in mezzo romperebbe i database già a 0015. Usa 0016 con down_revision "0015", aggiorna la testa
+in tests/test_migrations.py e scrivi in decisions.md che 0013 e 0014 restano numeri non usati
+(0014 era la proposta archiviata di M22). Colonne: rejections.kind e rejections.keep_product;
+per le righe esistenti un default che rappresenti "vecchio rifiuto" senza inventare un tipo.
+
+Interazione con la cache del prezzo (M23): un rifiuto che cancella un ordine queued, o una
+domanda chiusa che NON lo cancella, può toccare un ordine leader o agganciato di una chiave in
+price_quotes. Verifica con test che: cancellare un leader passi il testimone come fa oggi
+"leader che esce senza prezzo"; la domanda chiusa non stacchi nessuno; un rifiuto in
+awaiting_confirmation su un prezzo dalla cache si comporti come senza cache.
+
+Vincoli:
+- Nessuna chiamata a servizi esterni. Classificazione con regole deterministiche (nessun LLM
+  nuovo; il fallback Haiku esistente resta com'è).
+- Il load test manda "troppo caro" nel 30% dei casi (loadtest/scenario.py): quel motivo deve
+  restare classificato come prezzo, senza domande chiuse, e il viaggio del load test non deve
+  cambiare numero di chiamate HofJ. Aggiungi un test che lo dimostri.
+- Il catalogo non ha cache (list_all() a ogni proposta): nessuna lettura in più.
+- I test che fissano "motivo non capito → proposta successiva" e gli altri comportamenti vecchi
+  si aggiornano senza indebolire le asserzioni e si elencano in decisions.md.
+- TDD, commit piccoli.
+
+Modalità autonoma per questa task: hai il mio OK in anticipo su tutto e non devi fermarti ad
+aspettarmi.
+- Decisione aperta della roadmap (motivo con più tipi, es. "troppo caro e troppo lontano"):
+  applica A, criteri aggiornati tutti, tipo registrato = il primo dell'elenco di RF-71.
+- Migrazione 0016: scrivila come sopra, senza aspettare approvazione; schema in decisions.md.
+- Ogni altra scelta non coperta dai documenti: prendi la tua raccomandazione e scrivila in
+  decisions.md con le alternative scartate.
+- Alla fine: suite e ruff verdi, poi i test Postgres con un database usa e getta (docker run
+  postgres:16 su una porta libera, DATABASE_URL solo per quel processo, nessun uso di .env),
+  compresi upgrade da zero fino a 0016, righe esistenti di rejections e downgrade. Se tutto è
+  verde, aggiorna lo stato di M21 in roadmap e spec (M21 completata) e fai il merge su master
+  in locale. Nessun push.
+- Fermati solo se: un test non diventa verde dopo tre tentativi, serve una chiamata a un
+  servizio esterno, o dovresti cambiare un'interfaccia pubblica oltre a quanto descritto nella
+  task.
+- Alla fine dammi il riepilogo: cosa hai fatto, cosa hai deciso, di cosa non sei sicuro.
+</pasted_content id="48f6">
+
+## Agente 17:34
+
+- 🔧 Skill superpowers:brainstorming
+
+- 🔧 Bash: Survey repo layout and file sizes
+
+- 🔧 Bash: Locate relevant spec sections
+
+- 🔧 Bash: Read relevant spec sections
+
+- 🔧 Bash: Outline scelta use cases doc
+
+Still reading context: spec done, now the UC-F use cases, then decisions, roadmap and code.
+
+- 🔧 Bash: Read UC-F and related cases
+
+- 🔧 Bash: Locate M21 sections in roadmap
+
+- 🔧 Bash: Read M21, M22, M23 roadmap
+
+Now decisions (the relevant 2026-09-26/27 entries).
+
+- 🔧 Bash: List decisions headings
+
+- 🔧 Bash: Read Scelta v3 and later decisions
+
+- 🔧 Read /Users/matteodospina/.claude/projects/-Users-matteodospina-orca-workspaces-vela-task-21f/8ae2643d-4b5b-4f21-9f9a-c766bfec1c8f/tool-results/b7b2tpoka.txt
+
+- 🔧 Read /Users/matteodospina/.claude/projects/-Users-matteodospina-orca-workspaces-vela-task-21f/8ae2643d-4b5b-4f21-9f9a-c766bfec1c8f/tool-results/b7b2tpoka.txt
+
+Now the code: refine and usecases first.
+
+- 🔧 Bash: Read refine.py
+
+- 🔧 Bash: Read usecases.py
+
+- 🔧 Bash: Read models.py
+
+- 🔧 Bash: Read chooser.py
+
+The domain picture is clear. Next: geo, the rejection storage, surfaces and load test.
+
+- 🔧 Bash: Read geo.py
+
+- 🔧 Bash: Scan intent.py structure
+
+- 🔧 Bash: Scan say.py structure
+
+- 🔧 Bash: Read say.py relevant parts
+
+- 🔧 Bash: Read orders.py, quotes.py and rejection uses
+
+- 🔧 Bash: Find rejection ports and adapters
+
+Still reading: rejection storage (memory and Postgres), schema and migrations, then MCP/REST and the load test. Design comes after that.
+
+- 🔧 Bash: Read rejection repos, schema, migrations
+
+- 🔧 Bash: Check remaining migration tests
+
+Now the surfaces and the load test.
+
+- 🔧 Bash: Find reject handling in MCP surface
+
+- 🔧 Bash: Read mcp.py
+
+- 🔧 Bash: Read rest.py
+
+- 🔧 Bash: Read load test scenario and journey
+
+- 🔧 Bash: Check scripts and test files touching rejections
+
+Baseline test run and lint before changing anything.
+
+- 🔧 Bash: Run baseline test suite and lint
+
+- 🔧 Bash: Find reject calls with non-price reasons in tests
+
+- 🔧 Bash: Read staging fixture test and add_trap
+
+`78` has no hotel, so for RF-72 "same hotel" has to fall back to "same equivalence key" or the trap slips through. Now the M23 cancellation tests, so I can reuse their helpers:
+
+- 🔧 Bash: Scan price quote tests
+
+- 🔧 Bash: Read price quote test helpers
+
+Last check before the design: availability windows in the fixtures, to decide what "another departure" means for open windows.
+
+- 🔧 Bash: Inspect availability windows in fixture
+
+I have the full picture. Here is the design; I'll write it into a spec in `docs/superpowers/specs/` and commit it before any code:
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md
