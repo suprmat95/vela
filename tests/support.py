@@ -16,7 +16,8 @@ def make_product(pid, price=500, sport="padel", country="ES", destination="Lanza
                  windows=(("2026-10-01", "2026-10-04"),), min_date="2026-09-25",
                  max_date="2026-12-31", min_pax=None, max_pax=None, archived=False,
                  bookable=True, hotel="Hotel Sole", title=None, brand=None,
-                 updated_at="2026-09-25T10:44:12.537Z", category="Vacanze", slug=None):
+                 updated_at="2026-09-25T10:44:12.537Z", category="Vacanze", slug=None,
+                 max_pax_per_room=None):
     return Product(
         id=str(pid), title=title or "Padel a %s %s" % (destination, pid), slug=slug or "p-%s" % pid,
         short_description="", sport=sport, category=category, destination=destination,
@@ -28,7 +29,7 @@ def make_product(pid, price=500, sport="padel", country="ES", destination="Lanza
                              for a, b in windows),
         duration_days=4, hofj_updated_at=updated_at, raw={},
         fetched_at=NOW, bookable=bookable, bookable_checked_at=None, archived=archived,
-        provider_id="t%s" % pid, brand=brand)
+        provider_id="t%s" % pid, brand=brand, max_pax_per_room=max_pax_per_room)
 
 
 def count_products(obj):

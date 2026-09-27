@@ -245,10 +245,17 @@ _NO_MATCH = {
         "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
         "pax": "Non trovo viaggi per il numero di persone indicato: prova a cambiare il numero di persone.",
         "price": "Non ho niente di più economico per la tua richiesta: prova a cambiare periodo o destinazione.",
+        "rooms": "Non trovo viaggi per il numero di camere indicato: prova a cambiare il numero di camere.",
         None: "Non trovo nessun viaggio compatibile: dimmi cosa vuoi cambiare.",
         "sport_value": "Non trovo nessun viaggio di %s: prova con l'altro sport o dimmi cosa vuoi cambiare.",
         "dates_value": "Non trovo partenze %s: prova con un altro periodo.",
         "pax_value": "Non trovo viaggi per %s: prova a cambiare il numero di persone.",
+        # M21-D (RF-68): da solo restano solo viaggi da 2 persone in su
+        "pax_alone": "I viaggi%s compatibili partono da 2 persone: da solo non posso prenotarli. Vuoi cambiare qualcosa?",
+        "pax_alone_sport": " di %s",
+        # M21-D (RF-66): le camere minime che avrebbero salvato un prodotto
+        "rooms_value": ("I viaggi compatibili hanno camere da massimo %s: per %s servono almeno %s. "
+                        "Vuoi cambiare il numero di camere?"),
     },
     "en": {
         "archived": "Right now I have no bookable trips: please try again later.",
@@ -259,25 +266,39 @@ _NO_MATCH = {
         "dates": "I can't find departures in the period you asked for: try another period.",
         "pax": "I can't find trips for that number of people: try changing the number of people.",
         "price": "I have nothing cheaper for your request: try another period or destination.",
+        "rooms": "I can't find trips for that number of rooms: try changing the number of rooms.",
         None: "I can't find any matching trip: tell me what you want to change.",
         "sport_value": "I can't find any %s trip: try the other sport or tell me what you want to change.",
         "dates_value": "I can't find departures %s: try another period.",
         "pax_value": "I can't find trips for %s: try changing the number of people.",
+        "pax_alone": "The compatible%s trips start from 2 people: I can't book them for you alone. Do you want to change something?",
+        "pax_alone_sport": " %s",
+        "rooms_value": ("The compatible trips have rooms for at most %s: %s need at least %s. "
+                        "Do you want to change the number of rooms?"),
     },
 }
 
 
-def say_no_match(criterion: str, criteria: Optional[Criteria] = None) -> str:
+def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
+                 rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None) -> str:
     """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
-    nella lingua dei criteri."""
+    nella lingua dei criteri. Con una persona sola il filtro `pax` cade solo per `minPax` ≥ 2
+    (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66)."""
     c = criteria or Criteria()
-    texts = _NO_MATCH.get(c.language, _NO_MATCH["it"])
+    lang = c.language
+    texts = _NO_MATCH.get(lang, _NO_MATCH["it"])
     if criterion == "sport" and c.sport:
         return texts["sport_value"] % c.sport
     if criterion == "dates" and c.period:
-        return texts["dates_value"] % _when(c.period, c.language)
+        return texts["dates_value"] % _when(c.period, lang)
+    if criterion == "pax" and c.pax == 1:
+        sport = texts["pax_alone_sport"] % c.sport if c.sport in ("padel", "tennis") else ""
+        return texts["pax_alone"] % sport
     if criterion == "pax" and c.pax:
-        return texts["pax_value"] % _people(c.pax, c.language)
+        return texts["pax_value"] % _people(c.pax, lang)
+    if criterion == "rooms" and c.pax and rooms_needed and max_pax_per_room:
+        return texts["rooms_value"] % (_people(max_pax_per_room, lang), _people(c.pax, lang),
+                                       fmt_rooms(rooms_needed, lang))
     return texts.get(criterion, texts[None])
 
 

@@ -71,7 +71,7 @@ class PriceCeilingTest(unittest.TestCase):
 
 class FilterTest(unittest.TestCase):
     def test_filter_order(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "price",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "price",
                                    "rejected"))
 
     def test_archived_bookable_rejected_are_never_chosen(self):
