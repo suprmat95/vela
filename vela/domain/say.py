@@ -219,6 +219,17 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
             % (product.title, where, hotel, when, _people(p.pax), fmt_money(p.price_from), p.reason))
 
 
+def say_details(product: ProductSummary, has_program: bool, lang: str = "it") -> str:
+    """RF-83: frase breve; i contenuti sono nei campi, da riassumere a chi li chiede."""
+    if lang == "en":
+        what = ("the day-by-day program, the hotel and the club" if has_program else
+                "the description, the hotel and the club; there is no day-by-day program")
+        return "Here are the details of %s: %s. What would you like to know?" % (product.title, what)
+    what = ("il programma giorno per giorno, l'hotel e il club" if has_program else
+            "la descrizione, l'hotel e il club; il programma giorno per giorno non c'è")
+    return "Ecco i dettagli di %s: %s. Cosa vuoi sapere?" % (product.title, what)
+
+
 _NO_MATCH = {
     "it": {
         "archived": "Al momento non ho nessun viaggio prenotabile: riprova più tardi.",

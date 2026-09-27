@@ -54,8 +54,8 @@ class McpHttpTest(unittest.TestCase):
         with TestClient(make_app()) as c:
             r = rpc(c, "tools/list", **{"MCP-Protocol-Version": "2025-06-18"})
         names = {t["name"] for t in r.json()["result"]["tools"]}
-        self.assertEqual(names, {"create_intent", "get_proposal", "reject_proposal",
-                                 "accept_proposal", "get_order_status"})
+        self.assertEqual(names, {"create_intent", "get_proposal", "get_proposal_details",
+                                 "reject_proposal", "accept_proposal", "get_order_status"})
 
     def test_tool_call_over_http(self):
         with TestClient(make_app()) as c:

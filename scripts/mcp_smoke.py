@@ -21,8 +21,8 @@ INTENT = "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 eur
 TRAVELER = {"first_name": "Prova", "last_name": "Smoke", "email": "smoke@example.com",
             "phone": "+390000000000",
             "participants": [{"first_name": "Seconda", "last_name": "Smoke"}]}
-TOOL_NAMES = {"create_intent", "get_proposal", "reject_proposal", "accept_proposal",
-              "get_order_status"}
+TOOL_NAMES = {"create_intent", "get_proposal", "get_proposal_details", "reject_proposal",
+              "accept_proposal", "get_order_status"}
 
 
 class SmokeFailure(Exception):
@@ -61,6 +61,7 @@ async def run_flow(client, open_url: Callable[[str], None], expected_base: Optio
         raise SmokeFailure("tool attesi %s, trovati %s" % (sorted(TOOL_NAMES), sorted(names)))
     intent = await call(client, "create_intent", {"text": INTENT}, "intent_id")
     first = await call(client, "get_proposal", {"intent_id": intent["intent_id"]}, "proposal_id")
+    await call(client, "get_proposal_details", {"proposal_id": first["proposal_id"]}, "program")
     second = await call(client, "reject_proposal",
                         {"proposal_id": first["proposal_id"], "reason": "troppo caro"}, "proposal_id")
     if second["product"]["product_id"] == first["product"]["product_id"]:

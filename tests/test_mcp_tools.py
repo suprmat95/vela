@@ -70,8 +70,9 @@ class ListToolsTest(McpCase):
         async with Client(self.server) as client:
             return {t.name: t for t in (await client.list_tools()).tools}
 
-    async def test_five_tools_named_as_rf39(self):
-        self.assertEqual(set(await self.tools()), {"create_intent", "get_proposal", "reject_proposal",
+    async def test_tools_named_as_rf39_and_rf83(self):
+        self.assertEqual(set(await self.tools()), {"create_intent", "get_proposal",
+                                                   "get_proposal_details", "reject_proposal",
                                                    "accept_proposal", "get_order_status"})
         self.assertEqual(set(TOOL_NAMES), set(await self.tools()))
 

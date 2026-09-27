@@ -381,6 +381,20 @@ class ProposalMade:
 
 
 @dataclass(frozen=True)
+class ProposalDetails:
+    """RF-83: programma e dettagli del pacchetto proposto, dal `raw` del prodotto. Stesso unico
+    prodotto della proposta (RF-10); `details` ha le chiavi di `vela.domain.details.details_of`."""
+    proposal_id: str
+    product: ProductSummary
+    details: dict
+    say: str
+
+    def to_dict(self) -> dict:
+        return {"proposal_id": self.proposal_id, "product": self.product.to_dict(),
+                **self.details, "say": self.say}
+
+
+@dataclass(frozen=True)
 class NoMatch:
     intent_id: str
     failed_criterion: str

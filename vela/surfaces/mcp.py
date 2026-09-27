@@ -1,4 +1,4 @@
-"""Superficie MCP (RF-41): i cinque casi d'uso di RF-39 come tool Streamable HTTP su ``/mcp``.
+"""Superficie MCP (RF-41): i casi d'uso di RF-39 e RF-83 come tool Streamable HTTP su ``/mcp``.
 
 Adapter sottile: argomenti piatti → ``TravelerProfile`` → caso d'uso → ``to_dict()``, restituito
 come ``structuredContent`` e come testo JSON. Gli errori diventano un risultato ``isError`` con
@@ -23,7 +23,8 @@ from vela.ports.payments import PaymentsError
 log = logging.getLogger("vela.mcp")
 
 MCP_PATH = "/mcp"
-TOOL_NAMES = ("create_intent", "get_proposal", "reject_proposal", "accept_proposal", "get_order_status")
+TOOL_NAMES = ("create_intent", "get_proposal", "get_proposal_details", "reject_proposal",
+              "accept_proposal", "get_order_status")
 LOCAL_HOSTS = ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*", "testserver"]
 LOCAL_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*"]
 CLAUDE_ORIGIN = "https://claude.ai"
@@ -98,6 +99,16 @@ DESCRIPTIONS = {
         "proposal exists yet, so ask the user which criterion to change and call create_intent "
         "with the changed criteria. After speaking the proposal, ask if the user likes it; from "
         "then on every change goes through reject_proposal, never a new create_intent." + _VOICE),
+    "get_proposal_details": (
+        "Call only when the user asks about the current proposal: the day-by-day program, what "
+        "is included, the hotel, the club, how many hours of play, the level or who the trip is "
+        "for. Returns `program` (sections of days with events, or null when the supplier has no "
+        "day-by-day program), `description`, `why_this_trip`, `hotel`, `venue`, `playing_hours`, "
+        "`style`, `goal`, `best_for_level` and `accepts_companions`, in the catalogue language. "
+        "Speak `say`, then answer the user's question in a few sentences from these fields, in "
+        "the user's language: never read everything, never read markdown symbols. Say nothing "
+        "the fields do not contain. It changes nothing: the proposal stays the same, and any "
+        "change still goes through reject_proposal." + _VOICE),
     "reject_proposal": (
         "The user said no to the current proposal or wants to change something about it (place, "
         "dates, length, sport, budget, people). Always use this tool for changes after a proposal, never "
@@ -195,7 +206,7 @@ def fail(sentence: str) -> CallToolResult:
 
 
 def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
-    """Server MCP con i cinque tool. ``get_vela`` è letto a ogni chiamata; alla costruzione
+    """Server MCP con i sei tool. ``get_vela`` è letto a ogni chiamata; alla costruzione
     sceglie i testi con o senza SMS da ``vela.sms_enabled`` (senza Vela: senza SMS)."""
     vela = get_vela()
     instructions, descriptions = texts(bool(vela is not None and vela.sms_enabled))
@@ -237,6 +248,10 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
     @server.tool(description=descriptions["get_proposal"])
     def get_proposal(intent_id: IntentId) -> CallToolResult:
         return run("get_proposal", lambda v: v.get_proposal(intent_id))
+
+    @server.tool(description=descriptions["get_proposal_details"])
+    def get_proposal_details(proposal_id: ProposalId) -> CallToolResult:
+        return run("get_proposal_details", lambda v: v.get_proposal_details(proposal_id))
 
     @server.tool(description=descriptions["reject_proposal"])
     def reject_proposal(proposal_id: ProposalId, reason: Reason = "", sport: Sport = None,

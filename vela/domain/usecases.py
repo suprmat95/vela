@@ -1,4 +1,4 @@
-"""Orchestratore dei cinque casi d'uso di RF-39, identici su ogni superficie.
+"""Orchestratore dei casi d'uso di RF-39 e di RF-83 (dettagli), identici su ogni superficie.
 
 Dipende solo dalle porte: repository, HofJ e pagamenti sono iniettati. `now` e `new_id` sono
 iniettabili per i test. Ogni risposta porta `say` (RF-42) e mai più di un prodotto (RF-10).
@@ -14,12 +14,13 @@ from typing import Callable, Optional, Tuple, Union
 
 from vela.domain import geo, phone, say
 from vela.domain.chooser import Choice, cheapest_total, choose
+from vela.domain.details import details_of
 from vela.domain.intent import parse_intent
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
-                                ProposalMade, Rejection, StructuredFields, TravelerDefaults,
-                                TravelerProfile)
+                                ProposalDetails, ProposalMade, Rejection, StructuredFields,
+                                TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
 from vela.domain.purchase import STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
@@ -202,6 +203,22 @@ class Vela:
         product = product or self.repos.products.get(proposal.product_id)
         summary = summary_of(product)
         return ProposalMade(proposal, summary, say.say_proposal(summary, proposal, lang))
+
+    # --- RF-83 ----------------------------------------------------------------
+
+    def get_proposal_details(self, proposal_id: str) -> ProposalDetails:
+        """Programma e dettagli del prodotto proposto, dal `raw` salvato dal sync: nessuna
+        chiamata a HofJ e nessun cambio di stato, anche su una proposta rifiutata."""
+        proposal = self.repos.proposals.get(proposal_id)
+        if proposal is None:
+            raise NotFound("proposal", proposal_id)
+        intent = self.repos.intents.get(proposal.intent_id)
+        lang = intent.criteria.language if intent is not None else "it"
+        product = self.repos.products.get(proposal.product_id)
+        summary = summary_of(product)
+        details = details_of(product.raw)
+        return ProposalDetails(proposal.id, summary, details,
+                               say.say_details(summary, details["program"] is not None, lang))
 
     # --- RF-12, RF-13, RF-17, RF-19, RF-45, RNF-03 ------------------------------
 
