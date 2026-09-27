@@ -120,9 +120,21 @@ def _describe(c: Criteria) -> str:
     if c.pax:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
     if c.budget is not None:
-        parts.append(("with a maximum budget of %s" if en else "con un budget massimo di %s")
-                     % fmt_money(c.budget, lang))
+        parts.append(_budget_reading(c))
     return " ".join(parts)
+
+
+def _budget_reading(c: Criteria) -> str:
+    """RF-70: "con un budget di 600 euro a persona, 1800 in tutto", "… di 600 euro in tutto";
+    un budget salvato prima di M21-E è un totale."""
+    lang = c.language
+    en = lang == "en"
+    if c.budget_scope == "per_person" and c.pax:
+        each = fmt_money(c.budget / c.pax, lang)
+        total = fmt_money(c.budget, lang).rsplit(" ", 1)[0]
+        return ("with a budget of %s per person, %s in total" if en
+                else "con un budget di %s a persona, %s in tutto") % (each, total)
+    return ("with a budget of %s in total" if en else "con un budget di %s in tutto") % fmt_money(c.budget, lang)
 
 
 def say_understood(c: Criteria) -> str:

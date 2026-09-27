@@ -362,3 +362,41 @@ class RejectReadsTheCatalogOnceTest(unittest.TestCase):
         vela.repos.products.list_calls = 0
         vela.reject_proposal(proposal.proposal.id, "a novembre")
         self.assertEqual(vela.repos.products.list_calls, 1)
+
+
+class SayTest(unittest.TestCase):
+    """RF-70: `create_intent` e `reject_proposal` dichiarano sempre la lettura del budget."""
+
+    def test_create_intent_says_the_reading_whatever_the_rule(self):
+        cases = [("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro", 400,       # regola 4
+                  "600 euro a persona, 1800 in tutto"),
+                 ("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro", 150,
+                  "600 euro in tutto"),
+                 ("Padel in Spagna a ottobre, siamo in tre, 600 euro a testa", 150,       # regola 2
+                  "600 euro a persona, 1800 in tutto"),
+                 ("Padel in Spagna a ottobre, siamo in tre, 1800 euro in tutto", 400,     # regola 3
+                  "1800 euro in tutto"),
+                 ("Padel in Spagna a ottobre, da solo, massimo 600 euro", 400,            # regola 5
+                  "600 euro in tutto")]
+        for text, price, reading in cases:
+            with self.subTest(text=text, price=price):
+                r = make_vela(price).create_intent(text)
+                self.assertIn("con un budget di %s." % reading, r.say)
+
+    def test_field_scope_is_said(self):
+        r = make_vela(150).create_intent("Padel in Spagna a ottobre", fields=StructuredFields(
+            sport="padel", pax=3, budget=600, budget_scope="per_person"))
+        self.assertIn("con un budget di 600 euro a persona, 1800 in tutto.", r.say)
+
+    def test_reject_says_the_new_reading(self):
+        vela = make_vela(150)
+        intent = vela.create_intent("Padel in Spagna a ottobre, siamo in tre, massimo 600 euro")
+        proposal = vela.get_proposal(intent.intent_id)
+        r = vela.reject_proposal(proposal.proposal.id, "intendevo a testa",
+                                 StructuredFields(budget_scope="per_person"))
+        self.assertIn("con un budget di 600 euro a persona, 1800 in tutto.", r.say)
+
+    def test_scope_without_budget_is_not_said(self):
+        r = make_vela(150).create_intent("Padel in Spagna a ottobre, siamo in tre",
+                                         fields=StructuredFields(budget_scope="per_person"))
+        self.assertNotIn("budget", r.say)

@@ -311,3 +311,13 @@ Green. Full suite and lint:
 Green, with all 11 tests unchanged. I'll add a test that pins this case explicitly in the UC-E file, then commit:
 
 - 🔧 Bash: Add regression test and commit rejection changes
+
+Commit 5: the RF-70 sentence. Tests first in `test_say.py`, plus the `say` of `create_intent` and `reject_proposal` in the UC-E file:
+
+- 🔧 Bash: Add failing RF-70 say tests
+
+Red. Implementing in `say.py`:
+
+- 🔧 Bash: Implement RF-70 sentence and run suite
+
+- 🔧 Bash: Update UC7 expectation, run suite, commit say changes
