@@ -98,9 +98,9 @@ class GroupTest(unittest.TestCase):
             {"group": "browse", "final": "site_only"},
             {"group": "proposal", "proposal_ms": 12, "final": "proposal_only"},
             {"group": "proposal", "proposal_ms": 30, "final": "no_proposal"},
-            {"group": "link", "proposal_ms": 10, "t_accept": 5, "t_link": 90, "final": "link_unpaid"},
+            {"group": "link", "arrival": 0, "proposal_ms": 10, "t_accept": 5, "t_link": 90, "final": "link_unpaid"},
             {"group": "link", "proposal_ms": 10, "t_accept": 6, "final": "open_queued"},
-            {"group": "pay", "proposal_ms": 10, "t_accept": 7, "t_link": 60, "t_paid": 61,
+            {"group": "pay", "arrival": 1, "proposal_ms": 10, "t_accept": 7, "t_link": 60, "t_paid": 61,
              "t_confirmed": 70, "final": "confirmed"},
             {"group": "pay", "role": "marco", "t_accept": 60, "final": "confirmed"},   # sentinella: fuori
         ]
@@ -113,6 +113,9 @@ class GroupTest(unittest.TestCase):
         self.assertEqual((g["pay"]["paid"], g["pay"]["confirmed"], g["pay"]["reached"]), (1, 1, 1))
         self.assertEqual(g["browse"]["reached"], 1)
         self.assertEqual(g["proposal"]["proposal_ms_p95"], 30)
+        self.assertEqual(g["link"]["arrival_to_link"], {"p50": 90, "p95": 90, "max": 90})
+        self.assertEqual(g["pay"]["arrival_to_paid"], {"p50": 60, "p95": 60, "max": 60})
+        self.assertIsNone(g["proposal"]["arrival_to_paid"])
 
 
 class EndToEndTest(unittest.TestCase):
@@ -149,7 +152,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(data["cost"]["purchase_calls"], 1)
         self.assertIn("Chiamate per link", text)
         self.assertIn("gruppi browse 50% / proposal 30% / link 18% / pay 2%", text)
-        self.assertIn("| Naviga solo il sito | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |", text)
+        self.assertIn("| Naviga solo il sito | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | — | — |", text)
 
 
 if __name__ == "__main__":

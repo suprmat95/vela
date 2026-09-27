@@ -194,8 +194,24 @@ def group_measures(travelers: List[dict]) -> Dict[str, dict]:
             "reached": sum(1 for t in people if t.get("final") == GROUP_TARGET[group]),
             "open": sum(1 for t in people if (t.get("final") or "").startswith("open")),
             "proposal_ms_p95": percentile((t["proposal_ms"] for t in people if "proposal_ms" in t), 95),
+            "arrival_to_link": _spread(t["t_link"] - t["arrival"] for t in people if "t_link" in t),
+            "arrival_to_paid": _spread(t["t_paid"] - t["arrival"] for t in people if "t_paid" in t),
         }
     return out
+
+
+def _spread(seconds: Iterable[float]) -> Optional[dict]:
+    """Mediana, p95 e massimo in secondi; None senza valori."""
+    data = list(seconds)
+    if not data:
+        return None
+    return {"p50": percentile(data, 50), "p95": percentile(data, 95), "max": max(data)}
+
+
+def _minutes(spread: Optional[dict]) -> str:
+    if not spread:
+        return "—"
+    return " / ".join("%.1f" % (spread[k] / 60) for k in ("p50", "p95", "max"))
 
 
 def _sentinel(travelers: List[dict], role: str) -> Optional[dict]:
@@ -266,12 +282,15 @@ def markdown(report: dict, label: str) -> str:
     groups = report.get("groups") or {}
     if any(g["travelers"] for g in groups.values()):
         lines += ["| Gruppo | Viaggiatori | Proposta | Accettazioni | Link | Pagati | Confermati "
-                  "| Esito del gruppo raggiunto | Ancora in corso alla fine |",
-                  "|---|---|---|---|---|---|---|---|---|"]
+                  "| Esito del gruppo raggiunto | Ancora in corso alla fine "
+                  "| Dall'arrivo al link, mediana / p95 / max (min) "
+                  "| Dall'arrivo al pagamento, mediana / p95 / max (min) |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|"]
         for group, g in groups.items():
-            lines.append("| %s | %d | %d | %d | %d | %d | %d | %d | %d |" % (
+            lines.append("| %s | %d | %d | %d | %d | %d | %d | %d | %d | %s | %s |" % (
                 GROUP_NAMES[group], g["travelers"], g["proposals"], g["accepted"], g["links"],
-                g["paid"], g["confirmed"], g["reached"], g["open"]))
+                g["paid"], g["confirmed"], g["reached"], g["open"],
+                _minutes(g.get("arrival_to_link")), _minutes(g.get("arrival_to_paid"))))
         lines.append("")
     for role, name in (("marco", "Marco (accetta a 60 s)"), ("anna", "Anna (arriva al 60% della finestra)")):
         s = t.get(role)

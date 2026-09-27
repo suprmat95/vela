@@ -84,3 +84,95 @@ Questi errori erano attesi: i test di run e proiezione descrivono ancora il vecc
 Suite verde (1698 test, 78 saltati per Postgres), lint pulito. Faccio un commit del codice prima del giro.
 
 - 🔧 Bash: Commit the load test changes
+
+Ora il giro da 10.000. Preparo l'override che toglie le porte host, per non entrare in conflitto con lo stack `master-*`:
+
+- 🔧 Bash: Create override without host ports and check config
+
+- 🔧 Bash: Build images and start the load test stack
+
+- 🔧 Bash: Run the 10,000-traveler load test (about 10 minutes)
+
+Mentre il giro gira (circa 10 minuti), aggiorno `loadtest/README.md`.
+
+- 🔧 Bash: Show README run and scenario sections
+
+- 🔧 Bash: Rewrite the run and scenario sections of the README
+
+- 🔧 Bash: Fix the faults example and check run progress
+
+Il giro è partito alle 17:19 con un catalogo di 190 prodotti (il README diceva 126, dato vecchio: lo correggo). Scrivo intanto la voce per `docs/decisions.md`.
+
+- 🔧 Bash: Fix catalogue size in README, find decisions format
+
+- 🔧 Bash: Append the decision record and check run progress
+
+Il giro è in corso: la voce in `docs/decisions.md` è scritta e aspetto la fine del run (circa 9 minuti dall'avvio) per scrivere `RESULTS.md` con i numeri veri.
+
+- 🔧 ToolSearch
+
+Il giro da 10.000 è partito alle 17:19 e dura circa 9 minuti. `RESULTS.md` non è ancora scritto: lo compilo solo con i numeri misurati, appena il giro finisce.
+
+**Già fatto e committato** (`c41a840`, 1698 test verdi, lint pulito):
+- **Gruppi da riga di comando**: il test si lancia indicando le quattro quote. I default sono il tuo scenario, e chi paga è il resto fino a 100. Se le percentuali superano 100 il comando si ferma subito, prima di partire.
+  ```sh
+  docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
+      --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
+  ```
+- **Numeri esatti per gruppo**: su 10.000 sono 5.000 / 3.000 / 1.800 / 200, mescolati lungo la finestra con il seme fisso. Il comando li stampa prima di partire.
+- **Esiti del viaggiatore finto**: chi naviga solo il sito non fa richieste (`site_only`), chi chiede la proposta si ferma lì (`proposal_only`), chi arriva al link non paga (`link_unpaid`), chi paga arriva a `confirmed`. Nessuno dice "troppo caro". Marco e Anna restano come sentinelle in più.
+- **Report**: una tabella per gruppo con proposta, link, pagati, confermati, esito raggiunto e ancora in corso.
+- **Proiezione**: `projection.py` usa le stesse quattro quote e dà coda, attese, tempo di smaltimento, link e pagati entro la fine del giro e richieste REST al secondo.
+
+**Da committare** (lo faccio insieme a `RESULTS.md`):
+- `loadtest/README.md` aggiornato, con la tabella delle opzioni per chi rilancia il test.
+- La voce in `docs/decisions.md` con le tue scelte.
+
+**Da sapere:**
+- Uno stack `master-*` occupa le porte 8000/8001. Ho lanciato il giro con un nome di progetto diverso e un override temporaneo nello scratchpad, senza fermare nulla e senza toccare il compose del repo.
+- Il catalogo ora ha 190 prodotti, non 126: ho corretto il README.
+- **Cosa mi aspetto**: 2.000 accettazioni in 5 minuti sono circa 400 al minuto, contro circa 47 link al minuto misurati dopo M19. Quindi la gran parte dei gruppi "link" e "paga" dovrebbe restare in coda a fine giro. Il report lo mostrerà per gruppo.
+
+## Utente 19:23
+
+Si nella tabella fai capire le persone dopo quanto tempo riescono a pagare
+
+## Agente 19:23
+
+- 🔧 Bash: Check load test progress
+
+Il giro è a metà (log in UTC, ora 17:23). Intanto aggiungo i tempi al report. Si rigenera da `travelers.jsonl`, quindi posso applicarlo anche a questo giro.
+
+- 🔧 Bash: Add arrival-to-link and arrival-to-payment times to report
+
+Ora la proiezione: una colonna "attesa per poter pagare" con Marco, la mediana e l'ultimo.
+
+- 🔧 Bash: Add time-to-pay columns to projection and test
+
+- 🔧 Bash: Wait for the load test run to finish
+
+Il giro è finito. Rigenero il report in locale con la versione finale di `report.py`, che ha i tempi:
+
+- 🔧 Bash: Regenerate and print the 10k run report
+
+- 🔧 Bash: Inspect REST failures and Vela error logs
+
+- 🔧 Bash: Find database pool configuration
+
+- 🔧 Bash: Project the measured rate to 10k and 50k
+
+- 🔧 Bash: Add pay-within projection table and measure it on the run
+
+- 🔧 Bash: Record machine specs and confirm vela code unchanged
+
+Sto scrivendo il nuovo `RESULTS.md` con i numeri del giro e la proiezione a 50.000.
+
+- 🔧 Write /Users/matteodospina/orca/workspaces/vela/last-load-test/loadtest/RESULTS.md
+
+Controllo i numeri citati nel testo e attenuo una frase che era un'ipotesi, non una misura:
+
+- 🔧 Bash: Soften unverified claim, run tests and lint
+
+Test verdi e lint pulito. Aggiungo alla voce delle decisioni i tempi di pagamento e l'errore del pool, poi faccio due commit e spengo il mio stack.
+
+- 🔧 Bash: Record decisions, commit, and tear down the load test stack
