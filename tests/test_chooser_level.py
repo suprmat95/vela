@@ -38,7 +38,7 @@ class HardFilterTest(unittest.TestCase):
 
     def test_level_filter_comes_after_rooms(self):
         self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms",
-                                   "level", "price", "rejected"))
+                                   "level", "place", "hotel", "price", "rejected"))
 
     def test_only_an_exclusive_product_of_another_level_is_excluded(self):
         only_advanced = prod(1, {A}, exclusive=True, price=100)

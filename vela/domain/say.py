@@ -111,6 +111,10 @@ def _when(period: Period, lang: str = "it") -> str:
 _ANY_SPORT = {"it": "padel o tennis", "en": "padel or tennis"}
 
 
+def _comma(part: str) -> str:
+    return part if part.endswith(",") else part + ","
+
+
 def _describe(c: Criteria) -> str:
     """I criteri capiti come frase: "un viaggio di padel in Spagna … per 2 persone …"."""
     lang = c.language
@@ -122,11 +126,19 @@ def _describe(c: Criteria) -> str:
         parts = ["un viaggio di %s" % sport if sport else "un viaggio"]
     if c.area:
         parts.append(geo.where(c.area, lang))
+    if c.excluded_areas:
+        # tra virgole come la durata: "…in Spagna, esclusi i viaggi a Estepona, a ottobre…" (RF-73)
+        parts[-1] = _comma(parts[-1])
+        places = [geo.display_name(a, lang) if en else geo.where(a, lang) for a in c.excluded_areas]
+        more = (c.period or c.duration_min_nights is not None or c.duration_max_nights is not None
+                or c.pax or rooms_said(c.pax, c.rooms) or _level_and_coaching(c) or c.budget is not None)
+        parts.append(("excluding %s" if en else "esclusi i viaggi %s") % _join(places, lang)
+                     + ("," if more else ""))
     if c.period:
         parts.append(_when(c.period, lang))
     if c.duration_min_nights is not None or c.duration_max_nights is not None:
         # tra virgole: "…a ottobre, da 1 a 3 notti, per 2 persone" (M21, RF-58)
-        parts[-1] += ","
+        parts[-1] = _comma(parts[-1])
         parts.append(nights_range(c.duration_min_nights, c.duration_max_nights, lang)
                      + ("," if c.pax or c.budget is not None else ""))
     if c.pax:
@@ -136,7 +148,7 @@ def _describe(c: Criteria) -> str:
     play = _level_and_coaching(c)
     if play:
         # tra virgole come la durata: "…per 2 persone, livello principiante, con lezioni, con un budget…"
-        parts[-1] += ","
+        parts[-1] = _comma(parts[-1])
         parts.append(", ".join(play) + ("," if c.budget is not None else ""))
     if c.budget is not None:
         parts.append(_budget_reading(c))
@@ -200,7 +212,9 @@ _DISCARDED = {
            "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto.",
            "rooms": "Non ho potuto usare %s come numero di camere.",
            "level": "Non ho potuto usare %s come livello di gioco: principiante, intermedio o avanzato.",
-           "wants_coaching": "Non ho potuto usare %s per sapere se vuoi lezioni: sì o no."},
+           "wants_coaching": "Non ho potuto usare %s per sapere se vuoi lezioni: sì o no.",
+           "reject_kind": "Non ho potuto usare %s come tipo di rifiuto.",
+           "keep_product": "Non ho potuto usare %s per sapere se tenere questo viaggio: sì o no."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
@@ -211,7 +225,9 @@ _DISCARDED = {
            "budget_scope": "I couldn't use %s as the budget reading, per person or in total.",
            "rooms": "I couldn't use %s as the number of rooms.",
            "level": "I couldn't use %s as the playing level: beginner, intermediate or advanced.",
-           "wants_coaching": "I couldn't use %s to know whether you want lessons: yes or no."},
+           "wants_coaching": "I couldn't use %s to know whether you want lessons: yes or no.",
+           "reject_kind": "I couldn't use %s as the kind of rejection.",
+           "keep_product": "I couldn't use %s to know whether to keep this trip: yes or no."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
@@ -236,6 +252,29 @@ def say_untranslatable(lang: str = "it") -> str:
     if lang == "en":
         return "I can't choose based on that: I've only excluded the previous proposal."
     return "Non so scegliere in base a questo: ho escluso solo la proposta di prima."
+
+
+# M21-F (RF-75): la domanda chiusa per un motivo di rifiuto che non si classifica
+QUESTION_REASON = {"it": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                   "en": "What doesn't convince you: the place, the hotel, the dates or the price?"}
+
+
+def question_reason(lang: str = "it") -> str:
+    return QUESTION_REASON.get(lang, QUESTION_REASON["it"])
+
+
+def say_hotel_excluded(hotel: Optional[str], lang: str = "it") -> str:
+    """RF-72: "Ho escluso i viaggi con l'hotel X."; senza hotel si esclude lo stesso viaggio."""
+    if lang == "en":
+        return ("I've left out the trips at %s." % hotel if hotel
+                else "This trip doesn't name its hotel: I've left out this trip.")
+    return ("Ho escluso i viaggi con l'hotel %s." % hotel if hotel
+            else "Questo viaggio non indica l'hotel: ho escluso questo viaggio.")
+
+
+def say_same_trip(lang: str = "it") -> str:
+    """RF-74: la proposta successiva è lo stesso prodotto con un'altra partenza."""
+    return "Same trip, with another departure." if lang == "en" else "Stesso viaggio, con un'altra partenza."
 
 
 def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it",
@@ -373,6 +412,12 @@ _NO_MATCH = {
         # M21-C (RF-64): i compatibili sono riservati ad altri livelli
         "level": "I viaggi compatibili sono riservati a un altro livello di gioco. Vuoi cambiare qualcosa?",
         "level_value": "I viaggi compatibili sono riservati a %s. Vuoi cambiare qualcosa?",
+        # M21-F (RF-72..74)
+        "place": "Senza i luoghi che hai escluso non trovo altri viaggi compatibili. Vuoi cambiare qualcosa?",
+        "place_value": "Esclusi i viaggi %s non trovo altri viaggi compatibili. Vuoi cambiare qualcosa?",
+        "hotel": "Gli altri viaggi compatibili sono negli hotel che hai scartato. Vuoi cambiare qualcosa?",
+        "same_trip": "Questo viaggio non ha altre partenze disponibili. Vuoi che cerchi un altro viaggio?",
+        "same_trip_value": "Questo viaggio non ha altre partenze %s. Vuoi che cerchi un altro viaggio?",
     },
     "en": {
         "archived": "Right now I have no bookable trips: please try again later.",
@@ -394,20 +439,33 @@ _NO_MATCH = {
                         "Do you want to change the number of rooms?"),
         "level": "The compatible trips are reserved for another playing level. Do you want to change something?",
         "level_value": "The compatible trips are reserved for %s. Do you want to change something?",
+        "place": "Without the places you excluded I can't find other matching trips. Do you want to change something?",
+        "place_value": "Excluding %s, I can't find other matching trips. Do you want to change something?",
+        "hotel": "The other matching trips are in the hotels you turned down. Do you want to change something?",
+        "same_trip": "This trip has no other departures. Shall I look for another trip?",
+        "same_trip_value": "This trip has no other departures %s. Shall I look for another trip?",
     },
 }
 
 
 def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
                  rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None,
-                 levels: Optional[tuple] = None) -> str:
+                 levels: Optional[tuple] = None, same_trip: bool = False) -> str:
     """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
     nella lingua dei criteri. Con una persona sola il filtro `pax` cade solo per `minPax` ≥ 2
     (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66), per `level` i livelli a cui
-    sono riservati i prodotti esclusi (RF-64)."""
+    sono riservati i prodotti esclusi (RF-64). `same_trip` (RF-74): lo stesso prodotto chiesto
+    con `keep_product` non ha altre partenze."""
     c = criteria or Criteria()
     lang = c.language
     texts = _NO_MATCH.get(lang, _NO_MATCH["it"])
+    if criterion == "dates" and same_trip:
+        return (texts["same_trip_value"] % _when(c.period, lang) if c.period
+                else texts["same_trip"])
+    if criterion == "place" and c.excluded_areas:
+        en = lang == "en"
+        places = [geo.display_name(a, lang) if en else geo.where(a, lang) for a in c.excluded_areas]
+        return texts["place_value"] % _join(places, lang)
     if criterion == "sport" and c.sport:
         return texts["sport_value"] % c.sport
     if criterion == "dates" and c.period:

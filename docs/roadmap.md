@@ -77,13 +77,13 @@ Traguardo B = M7 completata (codice di prenotazione reale).
 | M18 | Quota a ritmo costante | M | M5 | 5 / M13a, M20 |
 | M19 | Meno chiamate per link e ordini silenziosi (condizionata) | M | M18, M13b | 5 / — |
 | M20 | Accettazione con attesa breve quando la coda è vuota | S | M5 | 5 / M13a, M18; mergiare dopo M13b |
-| M21 | Scelta v3 (sei task: A, E, B, D, C, F in sequenza) | L | M17, M11, M10, M5 | 7 / nessuna che tocchi `chooser.py`, `intent.py`, `refine.py` |
+| M21 | Scelta v3 (sei task: A, E, B, D, C, F in sequenza; completata) | L | M17, M11, M10, M5 | 7 / nessuna che tocchi `chooser.py`, `intent.py`, `refine.py` |
 | M21-A | Durata | M | M17, M11 | 7 / — |
 | M21-E | Budget a testa o totale | S-M | M21-A | 7 / — |
 | M21-B | Ordinamento e prodotti equivalenti | M | M21-A | 7 / — |
 | M21-D | Persone e camere | M | M21-B, M5 | 7 / — |
 | M21-C | Livello e lezioni | M | M21-B, M10 | 7 / — |
-| M21-F | Rifiuti con motivo sempre capito | L | M21-A, M21-B, M21-C, M21-D | 7 / — |
+| M21-F | Rifiuti con motivo sempre capito (fatta) | L | M21-A, M21-B, M21-C, M21-D | 7 / — |
 | M22 | Scelta dell'hotel con degrado dinamico (due task: a, b) | L | M21-D, M21-F | 8 / — |
 | M22-a | Bozza, sonda su `/accommodations`, verdetto | S-M | — | 8 / tutte (niente codice in `vela/`) |
 | M22-b | Cambio di hotel a coda vuota (**non si fa**: verdetto di M22-a) | L | M22-a (verdetto "sì"), M21-D, M21-F | 8 / nessuna che tocchi `usecases.py`, `quota.py`, `purchase.py` |
@@ -969,6 +969,10 @@ confrontabili con M13a solo se questa modifica arriva dopo).
 
 ## M21 — Scelta v3
 
+**Stato (2026-09-27).** Completata: le sei task A, E, B, D, C, F sono su `master` (M21-F per
+ultima, dopo M23). Resta il test manuale di completamento (sotto), da registrare in
+`docs/acceptance.md`.
+
 **Risultato.** Vela capisce e rispetta la durata, il livello, le lezioni, le camere e se il
 budget è a testa o in tutto; senza budget non propone più "il più economico" ma il viaggio che
 parte quando il viaggiatore ha chiesto; ogni rifiuto viene capito (hotel, luogo escluso, stesso
@@ -983,7 +987,8 @@ d'uso in `docs/usecases/scelta.md` (UC-A..UC-F), requisiti in `docs/spec.md` §4
 - Ogni task aggiorna `docs/rest.md`, le descrizioni MCP che la riguardano e la riga dei criteri
   in `say` (RF-54). Campi nuovi validati come RF-53: invalido scartato e dichiarato.
 - Cambi di schema: una migrazione per task che ne ha bisogno (0010 in B, 0011 in D, 0012 in C,
-  0013 in F), ognuna da approvare all'inizio della task. I criteri nuovi stanno nel JSON di
+  0017 in F: dopo la 0015 di M23 e la 0016 di M19, 0013 e 0014 restano numeri non usati), ognuna da approvare
+  all'inizio della task. I criteri nuovi stanno nel JSON di
   `intents.criteria` senza migrazione.
 - I test esistenti che fissano l'ordinamento v2 o "motivo non capito → proposta successiva"
   si aggiornano ed elencano in `docs/decisions.md`, senza indebolire le asserzioni.
@@ -1085,7 +1090,7 @@ livello: il filtro duro di RF-64 oggi non esclude nulla.
 ### M21-F — Rifiuti con motivo sempre capito (UC-F)
 
 **Scope.** Classificazione del rifiuto in `refine.py` (RF-71) e campo `reject_kind`;
-`rejections.kind` e `rejections.keep_product` (migrazione 0013); esclusione per hotel ricavata
+`rejections.kind` e `rejections.keep_product` (migrazione 0017, prevista come 0013); esclusione per hotel ricavata
 dai rifiuti (RF-72); `excluded_areas` e luogo negato (RF-73), Marbella aggiunta a `geo`;
 stesso prodotto con altre date (RF-74) in `chooser.departure` con finestre escluse, e
 `keep_product=false` sulla stessa proposta che aggiorna il rifiuto (RF-55); domanda chiusa per
@@ -1102,6 +1107,14 @@ intento a 2 persone (`tests/test_usecases_rooms.py`) passa dalla domanda.
 **Da decidere nel brainstorm.** Motivo con più tipi ("troppo caro e troppo lontano"): **A)
 criteri aggiornati tutti, tipo registrato = il primo dell'elenco di RF-71**; B) domanda "cosa
 conta di più?".
+
+**Stato (2026-09-27).** Fatta in modalità autonoma con l'OK anticipato dell'utente: A, la
+migrazione 0017 (scritta come 0016 dopo la 0015 di M23, rinumerata al merge dopo la 0016 di M19), i casi rimandati da M21-B (rifiuto `hotel` del 78 → né 78
+né 900078) e da M21-D (domanda sulle camere nel rifiuto, `proposal_id` sulla domanda di
+`accept_proposal`), le verifiche con la cache del prezzo (RF-84) e con il load test. Design in
+`docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md`, piano in
+`docs/plans/2026-09-27-m21f-rifiuti.md`, scelte e test cambiati in `docs/decisions.md`
+("M21-F Rifiuti con motivo sempre capito").
 
 **Test di completamento di M21.** Tutti i test elencati in `docs/usecases/scelta.md`; suite e
 lint verdi; manuale: in claude.ai, in replay, UC-A, UC-D (cinque persone) e UC-F4 registrati in

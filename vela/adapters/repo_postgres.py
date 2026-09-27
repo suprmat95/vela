@@ -290,10 +290,16 @@ class PostgresRejections:
     def add(self, r: Rejection) -> None:
         stmt = pg_insert(rejections_t).values(
             intent_id=r.intent_id, proposal_id=r.proposal_id, product_id=r.product_id,
-            reason=r.reason, created_at=r.created_at).on_conflict_do_nothing(
+            reason=r.reason, created_at=r.created_at, kind=r.kind,
+            keep_product=r.keep_product).on_conflict_do_nothing(
             index_elements=[rejections_t.c.proposal_id])
         with self.engine.begin() as conn:
             conn.execute(stmt)
+
+    def update(self, r: Rejection) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(rejections_t.update().where(rejections_t.c.proposal_id == r.proposal_id)
+                         .values(kind=r.kind, keep_product=r.keep_product))
 
     def product_ids_for_intent(self, intent_id: str) -> Set[str]:
         with self.engine.connect() as conn:
@@ -312,7 +318,7 @@ class PostgresRejections:
             rows = conn.execute(select(rejections_t).where(rejections_t.c.intent_id == intent_id)
                                 .order_by(rejections_t.c.created_at)).mappings().all()
         return [Rejection(m["intent_id"], m["proposal_id"], m["product_id"], m["reason"],
-                          m["created_at"]) for m in rows]
+                          m["created_at"], m["kind"], m["keep_product"]) for m in rows]
 
 
 _QUOTE_FIELDS = ("status", "leader_order_id", "total", "priced_at", "updated_at")

@@ -341,6 +341,29 @@ class AgentToolContractTest(McpCase):
         self.assertEqual(intent["required"], ["text"])
         self.assertEqual(reject["required"], ["proposal_id"])
 
+    async def test_reject_kind_and_keep_product_are_optional_arguments(self):
+        """M21-F (RF-41, RF-52): solo su `reject_proposal`, con i tipi di RF-71 nella descrizione."""
+        tools = await self.tools()
+        reject = tools["reject_proposal"].input_schema
+        for field in ("reject_kind", "keep_product"):
+            self.assertIn(field, reject["properties"])
+            self.assertNotIn(field, reject["required"])
+            self.assertNotIn(field, tools["create_intent"].input_schema["properties"])
+        for kind in ("price", "place", "hotel", "dates", "duration", "sport", "pax", "level",
+                     "direction", "other"):
+            self.assertIn(kind, reject["properties"]["reject_kind"]["description"])
+
+    def test_reject_description_explains_kinds_question_and_other(self):
+        """RF-41 (M21): passare il tipo quando è chiaro, porre la domanda chiusa se torna, `other`
+        se il viaggiatore non sa dire cosa non va."""
+        for descriptions in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+            text = descriptions["reject_proposal"]
+            for piece in ("`reject_kind`", "`keep_product` true", "`question`", "`proposal_id`",
+                          "Ask the user exactly that question", "`reject_kind` other",
+                          "same trip with another departure", "every trip at that hotel",
+                          "`keep_product` false"):
+                self.assertIn(piece, text, piece)
+
     def test_proposal_description_says_how_vela_picks(self):
         """M21-B (RF-60): l'agente sa che la scelta non è "il più economico"."""
         text = DESCRIPTIONS["get_proposal"]
@@ -403,8 +426,32 @@ class AgentToolContractTest(McpCase):
         self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia")])
         intent = await self.ok("create_intent", text=INTENT)
         first = await self.ok("get_proposal", intent_id=intent["intent_id"])
-        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no")
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="no",
+                          reject_kind="other")
         self.assertEqual(d["rejected_proposal_id"], first["proposal_id"])
+
+    async def test_unclear_reason_is_a_question_on_the_same_proposal(self):
+        """M21-F (RF-75): `question` con `proposal_id`; la seconda chiamata con il tipo propone."""
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia", hotel="A"),
+                                        make_product(2, price=350, destination="Madrid", hotel="B")])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="mah")
+        self.assertEqual(d, {"question": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                             "say": "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?",
+                             "proposal_id": first["proposal_id"]})
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="mah, l'hotel",
+                          reject_kind="hotel")
+        self.assertEqual(d["product"]["product_id"], "2")
+
+    async def test_keep_product_gives_the_same_trip_with_another_departure(self):
+        self.vela = make_vela(products=[make_product(1, price=300, destination="Siviglia", windows=(
+            ("2026-10-01", "2026-10-04"), ("2026-10-08", "2026-10-11")))])
+        intent = await self.ok("create_intent", text=INTENT)
+        first = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("reject_proposal", proposal_id=first["proposal_id"], reason="ok",
+                          reject_kind="dates", keep_product=True)
+        self.assertEqual((d["product"]["product_id"], d["start_date"]), ("1", "2026-10-08"))
 
 
 def trip(pid, nights, price, **kw):

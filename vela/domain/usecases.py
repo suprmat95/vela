@@ -25,7 +25,7 @@ from vela.domain.orders import NotFound, OrderService
 from vela.domain.purchase import STEP_ITINERARY, STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
 from vela.domain.quotes import quote_key, release_quote, unstick
-from vela.domain.refine import Refinement, is_price_reason, refine
+from vela.domain.refine import Refinement, is_hotel_rejection, is_price_reason, refine
 from vela.ports.hofj import HofJRouter
 from vela.ports.llm import IntentExtractor
 from vela.ports.payments import PaymentsPort
@@ -113,30 +113,53 @@ class Vela:
             raise NotFound("intent", intent_id)
         return self._propose(intent)
 
-    def reject_proposal(self, proposal_id: str, reason: str,
-                        fields: Optional[StructuredFields] = None) -> Union[ProposalMade, NoMatch]:
-        """RF-08, RF-53..55. Un secondo rifiuto della stessa proposta (dopo un "niente di
-        compatibile") aggiorna i criteri senza registrare un nuovo rifiuto: il repository ignora
-        il duplicato (`uq_rejections_proposal_id`)."""
+    def reject_proposal(self, proposal_id: str, reason: str, fields: Optional[StructuredFields] = None
+                        ) -> Union[ProposalMade, NoMatch, IntentQuestion]:
+        """RF-08, RF-53..55, RF-71..75. Prima si capisce il rifiuto, poi si scrive: un motivo senza
+        tipo (RF-75), o più di 2 persone senza camere (da M21-D), è una domanda chiusa con l'id della
+        proposta, senza rifiuto, criteri né ordine toccati (RF-49). Altrimenti l'ordine non pagato si
+        cancella e il rifiuto si registra con tipo e `keep_product`. Un secondo rifiuto della stessa
+        proposta (dopo un "niente di compatibile") non ne registra un altro: aggiorna tipo e
+        `keep_product` di quello esistente (RF-55) e non chiede più il motivo."""
         proposal = self.repos.proposals.get(proposal_id)
         if proposal is None:
             raise NotFound("proposal", proposal_id)
         intent = self.repos.intents.get(proposal.intent_id)
-        cancelled = self._cancel_unpaid_order(proposal.id)
-        self.repos.rejections.add(Rejection(intent.id, proposal.id, proposal.product_id,
-                                            reason or "", self.now()))
+        lang = intent.criteria.language
+        existing = next((r for r in self.repos.rejections.list_for_intent(intent.id)
+                         if r.proposal_id == proposal.id), None)
         # una sola lettura del catalogo per regola 4 e scelta (decisione M21-E)
         products = functools.cache(self.repos.products.list_all)
-        intent, refinement = self._refined(intent, proposal, reason or "", fields, products)
+        product = self.repos.products.get(proposal.product_id)
+        refinement = self._refinement(intent, proposal, product, reason or "", fields, products)
+        if refinement.ask == "rooms" or (refinement.ask == "reason" and existing is None):
+            question = question_rooms(lang) if refinement.ask == "rooms" else say.question_reason(lang)
+            return IntentQuestion(question, say.prefixed(say.say_discarded(refinement.discarded, lang),
+                                                         question), proposal.id)
+        kind = refinement.kind or (existing.kind if existing is not None else None)
+        keep = refinement.keep_product
+        cancelled = self._cancel_unpaid_order(proposal.id)
+        rejection = Rejection(intent.id, proposal.id, proposal.product_id, reason or "", self.now(),
+                              kind, keep)
+        if existing is None:
+            self.repos.rejections.add(rejection)
+        elif (existing.kind, existing.keep_product) != (kind, keep):
+            self.repos.rejections.update(rejection)
+        if refinement.criteria != intent.criteria:
+            self.repos.intents.update_criteria(intent.id, refinement.criteria)
+            intent = replace(intent, criteria=refinement.criteria)
         _log_conflicts(intent.id, refinement.conflicts)
-        result = self._propose(intent, products)
+        result = self._propose(intent, products, same_trip=proposal.product_id if keep else None)
         if isinstance(result, NoMatch):
             result = replace(result, rejected_proposal_id=proposal.id)
-        lang = intent.criteria.language
         lead = [say.say_discarded(refinement.discarded, lang)]
-        if (reason or "").strip() and not refinement.understood:
+        if is_hotel_rejection(kind, reason):   # RF-72
+            lead.append(say.say_hotel_excluded(product.hotel if product else None, lang))
+        if kind == "other" and (reason or "").strip() and not refinement.understood:   # RF-54
             lead.append(say.say_untranslatable(lang))
         lead.append(say.say_understood(intent.criteria))
+        if keep and isinstance(result, ProposalMade):   # RF-74
+            lead.append(say.say_same_trip(lang))
         sentence = say.prefixed(" ".join(p for p in lead if p), result.say)
         if cancelled:   # RF-49
             sentence = say.say_cancelled_then(sentence, lang)
@@ -153,54 +176,61 @@ class Vela:
         release_quote(self.repos, order, self.now(), self.new_id)   # RF-84: ripiego
         return True
 
-    def _refined(self, intent: Intent, proposal: Proposal, reason: str,
-                 fields: Optional[StructuredFields], products: Callable[[], list]
-                 ) -> Tuple[Intent, Refinement]:
-        """RF-08: motivo e campi aggiornano i criteri dell'intento, persistiti prima della nuova
-        scelta."""
-        product = self.repos.products.get(proposal.product_id)
+    def _refinement(self, intent: Intent, proposal: Proposal, product: Optional[Product], reason: str,
+                    fields: Optional[StructuredFields], products: Callable[[], list]) -> Refinement:
+        """RF-08, RF-71: motivo e campi → criteri aggiornati e tipo; niente si scrive qui."""
         area = geo.area_of_destination(product.destination, product.country) if product else None
         now = self.now()
-        refinement = refine(intent.criteria, reason, proposal, area, now.date(), fields,
-                            cheapest_total=self._cheapest_total(now, products),
-                            product_levels=product.levels if product else frozenset())
-        if refinement.criteria == intent.criteria:
-            return intent, refinement
-        self.repos.intents.update_criteria(intent.id, refinement.criteria)
-        return replace(intent, criteria=refinement.criteria), refinement
+        return refine(intent.criteria, reason, proposal, area, now.date(), fields,
+                      cheapest_total=self._cheapest_total(now, products),
+                      product_levels=product.levels if product else frozenset())
 
-    def _propose(self, intent: Intent, products: Optional[Callable[[], list]] = None
-                 ) -> Union[ProposalMade, NoMatch]:
+    def _propose(self, intent: Intent, products: Optional[Callable[[], list]] = None,
+                 same_trip: Optional[str] = None) -> Union[ProposalMade, NoMatch]:
+        """`same_trip` (RF-74): subito dopo un rifiuto con `keep_product` si sceglie solo tra le
+        altre partenze di quel prodotto."""
         lang = intent.criteria.language
-        rejected_proposals = self.repos.rejections.proposal_ids_for_intent(intent.id)
-        open_proposals = [p for p in self.repos.proposals.list_for_intent(intent.id)
-                          if p.id not in rejected_proposals]
+        rejections = self.repos.rejections.list_for_intent(intent.id)
+        rejected_proposals = {r.proposal_id for r in rejections}
+        proposals = self.repos.proposals.list_for_intent(intent.id)
+        open_proposals = [p for p in proposals if p.id not in rejected_proposals]
         rooms = intent.criteria.rooms or 1   # None solo negli intenti salvati prima di M21-D
         if open_proposals:
             return self._made(open_proposals[-1], lang=lang, rooms=rooms)
-        rejected_products = self.repos.rejections.product_ids_for_intent(intent.id)
+        # M21-F: un rifiuto con `keep_product` esclude solo le sue date (RF-74); uno `hotel` anche
+        # i prodotti dello stesso hotel (RF-72)
+        rejected_products = {r.product_id for r in rejections if not r.keep_product}
+        dates_of = {p.id: (p.start_date, p.end_date) for p in proposals}
+        kept_windows = {}
+        for r in rejections:
+            if r.keep_product and r.proposal_id in dates_of:
+                kept_windows[r.product_id] = kept_windows.get(r.product_id, ()) + (dates_of[r.proposal_id],)
+        hotel_rejected = {r.product_id for r in rejections if is_hotel_rejection(r.kind, r.reason)}
+        catalog = (products or self.repos.products.list_all)()
+        if same_trip is not None:
+            catalog = [p for p in catalog if p.id == same_trip]
         now = self.now()
-        result = choose((products or self.repos.products.list_all)(), intent.criteria, rejected_products,
-                        today=now.date(), now=now, max_total=self._price_ceiling(intent.id))
+        result = choose(catalog, intent.criteria, rejected_products, today=now.date(), now=now,
+                        max_total=self._price_ceiling(rejections, proposals),
+                        hotel_rejected=hotel_rejected, kept_windows=kept_windows)
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
                            say.say_no_match(result.failed_criterion, intent.criteria,
                                             result.rooms_needed, result.max_pax_per_room,
-                                            result.levels))
+                                            result.levels, same_trip=same_trip is not None))
         proposal = Proposal(self.new_id(), intent.id, result.product.id, result.start_date,
                             result.end_date, intent.criteria.pax or 1, result.product.price,
                             result.product.currency, result.reason, self.now())
         self.repos.proposals.add(proposal)
         return self._made(proposal, result.product, lang, rooms)
 
-    def _price_ceiling(self, intent_id: str) -> Optional[Decimal]:
+    def _price_ceiling(self, rejections: list, proposals: list) -> Optional[Decimal]:
         """Decisione M7 (§10.1): dopo un rifiuto per prezzo si propone solo qualcosa che costa
         meno; il tetto è il totale più basso tra le proposte rifiutate per prezzo. Se l'ordine
-        aveva già il prezzo effettivo, il rifiuto è su quello (decisione 2026-09-26)."""
-        by_price = {r.proposal_id for r in self.repos.rejections.list_for_intent(intent_id)
-                    if is_price_reason(r.reason)}
-        totals = [self._rejected_total(p) for p in self.repos.proposals.list_for_intent(intent_id)
-                  if p.id in by_price]
+        aveva già il prezzo effettivo, il rifiuto è su quello (decisione 2026-09-26). Per prezzo:
+        tipo `price` (M21-F) o un motivo di prezzo, come prima."""
+        by_price = {r.proposal_id for r in rejections if r.kind == "price" or is_price_reason(r.reason)}
+        totals = [self._rejected_total(p) for p in proposals if p.id in by_price]
         return min(totals) if totals else None
 
     def _rejected_total(self, proposal: Proposal) -> Decimal:
@@ -263,9 +293,9 @@ class Vela:
         product = self.repos.products.get(proposal.product_id)
         needed = rooms_needed(product, proposal.pax) if product else 1
         prefix = say.say_discarded(discarded, lang)
-        if chosen < needed:
+        if chosen < needed:   # M21-F: con l'id della proposta, come la domanda di RF-75
             return IntentQuestion(question_rooms(lang), say.prefixed(prefix, say.say_rooms_below_minimum(
-                product.max_pax_per_room, proposal.pax, needed, lang)))
+                product.max_pax_per_room, proposal.pax, needed, lang)), proposal.id)
         if corrected is not None and corrected != intent.criteria.rooms:
             self.repos.intents.update_criteria(intent.id, replace(intent.criteria, rooms=corrected))
         now = self.now()

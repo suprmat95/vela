@@ -20,7 +20,7 @@ from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
 from vela.config import DEFAULT_TRAVELER
 from vela.domain.catalog import select_fixtures
-from vela.domain.models import NoMatch, ProposalMade
+from vela.domain.models import IntentQuestion, NoMatch, ProposalMade, StructuredFields
 from vela.domain.usecases import Vela
 from vela.fixtures import add_trap, write_catalog
 
@@ -147,8 +147,27 @@ class TrapFixtureTest(unittest.TestCase):
     def test_rejection_that_keeps_the_period_still_reaches_the_trap(self):
         vela = vela_on_staging(staging_with_trap(self.tmp.name))
         first = vela.get_proposal(vela.create_intent(rest_flow.INTENT_TRAP).intent_id)
-        second = vela.reject_proposal(first.proposal.id, "non mi piace")
+        # M21-F: "non mi piace" senza tipo è la domanda di RF-75; `other` è il rifiuto di prima
+        second = vela.reject_proposal(first.proposal.id, "non mi piace", StructuredFields(reject_kind="other"))
         self.assertEqual(second.product.product_id, TRAP)
+
+    def test_hotel_rejection_of_78_proposes_neither_78_nor_the_trap(self):
+        """Da M21-B (RF-72): il 78 non ha hotel, la trappola è lo stesso viaggio; un rifiuto `hotel`
+        del 78 li esclude entrambi, dal testo o dal campo."""
+        for reason, fields in (("l'hotel non mi piace", None),
+                               ("I'd like another hotel", None),
+                               ("no", StructuredFields(reject_kind="hotel"))):
+            with self.subTest(reason=reason):
+                vela = vela_on_staging(staging_with_trap(self.tmp.name))
+                first = vela.get_proposal(vela.create_intent(rest_flow.INTENT_TRAP).intent_id)
+                self.assertEqual(first.product.product_id, "78")
+                self.assertIsNone(vela.repos.products.get("78").hotel)
+                r = vela.reject_proposal(first.proposal.id, reason, fields)
+                self.assertNotIsInstance(r, IntentQuestion)
+                while isinstance(r, ProposalMade):
+                    self.assertNotIn(r.product.product_id, ("78", TRAP))
+                    r = vela.reject_proposal(r.proposal.id, "no", StructuredFields(reject_kind="other"))
+                self.assertIsInstance(r, NoMatch)
 
     def test_archived_template_lets_the_trap_come_first(self):
         vela = vela_on_staging(staging_with_trap(self.tmp.name, archive_template=True))

@@ -575,3 +575,26 @@ class RepositoryContract:
         reasons = {r.proposal_id: r.reason for r in self.repos.rejections.list_for_intent("i1")}
         self.assertEqual(reasons, {"p1": "troppo caro", "p2": ""})   # il primo motivo resta
         self.assertEqual(self.repos.rejections.list_for_intent("other"), [])
+        kinds = {r.proposal_id: (r.kind, r.keep_product)
+                 for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual(kinds, {"p1": (None, False), "p2": (None, False)})   # senza tipo
+
+    def test_rejection_kind_keep_product_and_update(self):
+        """M21-F (RF-71, RF-74, RF-55): tipo e `keep_product` si salvano; `update` cambia solo tipo
+        e `keep_product` del rifiuto della stessa proposta, mai il motivo né la data."""
+        self.seed()
+        self.repos.proposals.add(proposal("p1", product_id="1"))
+        self.repos.proposals.add(proposal("p2", product_id="2"))
+        self.repos.rejections.add(Rejection("i1", "p1", "1", "stesse date no", NOW, "dates", True))
+        self.repos.rejections.add(Rejection("i1", "p2", "2", "l'hotel no", NOW, "hotel"))
+        got = {r.proposal_id: r for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual((got["p1"].kind, got["p1"].keep_product), ("dates", True))
+        self.assertEqual((got["p2"].kind, got["p2"].keep_product), ("hotel", False))
+        later = NOW + timedelta(minutes=5)
+        self.repos.rejections.update(Rejection("i1", "p1", "1", "un altro viaggio", later, "price", False))
+        got = {r.proposal_id: r for r in self.repos.rejections.list_for_intent("i1")}
+        self.assertEqual((got["p1"].kind, got["p1"].keep_product, got["p1"].reason, got["p1"].created_at),
+                         ("price", False, "stesse date no", NOW))
+        self.assertEqual(len(got), 2)
+        self.repos.rejections.update(Rejection("i1", "p9", "9", "", NOW, "other"))   # nessuna riga: no-op
+        self.assertEqual(len(self.repos.rejections.list_for_intent("i1")), 2)

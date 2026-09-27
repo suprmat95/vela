@@ -12,7 +12,7 @@ La superficie REST (RF-40) espone i casi d'uso di RF-39 e RF-83 sotto `/v1`. Ogn
 | `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
 | `GET /v1/proposals/{proposal_id}/details` | — | 200 `proposal_details` (RF-83) |
-| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
+| `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str, "reject_kind"?: str, "keep_product"?: bool}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`), 200 `question` (M21-F: con `proposal_id`, nessun rifiuto registrato) |
 | `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile, "rooms"?: int}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data`, 200 `question` (M21-D: `rooms` sotto il minimo del prodotto, nessun ordine) |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
 
@@ -42,6 +42,8 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `level` | `beginner` ("principianti", "mai giocato", "beginners"), `intermediate`, `advanced` ("agonisti", "esperti", "competitive") (M21-C, RF-62) | altro valore |
 | `wants_coaching` | booleano: `true` se il viaggiatore vuole lezioni, un maestro o un coach; `false` se ha detto niente lezioni (M21-C, RF-62) | tipo JSON non booleano: 422 |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
+| `reject_kind` (solo rifiuto) | tipo del rifiuto (M21-F, RF-71): `price`, `place`, `hotel`, `dates`, `duration`, `sport`, `pax`, `level`, `direction`, `other` (solo se il viaggiatore non sa dire cosa non va) | fuori elenco |
+| `keep_product` (solo rifiuto) | booleano (M21-F, RF-74): `true` se il viaggio piace e cambiano solo le date; `false` per cercare un altro viaggio dopo "nessuna altra partenza" | tipo JSON non booleano: 422 |
 
 - **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
   creazione). Se testo e campo non coincidono vince il campo e il conflitto va nei log (logger
@@ -86,10 +88,11 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   minimo nel `say` ("camere da massimo 2 persone: per 5 persone servono almeno 3 camere"). La
   `reason` della proposta dice il limite quando obbliga a più di una camera. Con una persona sola
   e soli viaggi da 2 in su, `failed_criterion` è `pax` e il `say` lo spiega. Nel rifiuto le
-  camere si cambiano da testo o campo, sempre entro le persone; se cambiano solo le persone le
-  camere restano (limitate alle persone) e il `say` le ripete ("per 5 persone in 1 camera"). Su
+  camere si cambiano da testo o campo, sempre entro le persone; se le persone cambiano e superano
+  2 senza camere dette la risposta è `question` "In quante camere?" con `proposal_id` e nessun
+  rifiuto (M21-F); per un intento salvato prima di M21-D le camere restano non dette. Su
   `accept` il campo `rooms` corregge le camere: sotto il minimo del prodotto la risposta è
-  `question` e nessun ordine nasce; valido, aggiorna ordine e criteri dell'intento; ignorato
+  `question` con `proposal_id` e nessun ordine nasce; valido, aggiorna ordine e criteri dell'intento; ignorato
   sulla conferma del prezzo. Il job d'acquisto manda le camere dell'ordine a HofJ (RF-67).
 - **Livello e lezioni** (RF-62..64, M21-C): dal campo o dal testo ("siamo principianti,
   vorremmo lezioni", "advanced players, no coaching needed"); con più livelli nel testo vale il
@@ -107,12 +110,32 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   abbassa il livello di uno, "troppo facile"/"too easy" lo alza (dal livello dell'intento o, se
   non detto, dai livelli del viaggio rifiutato); `level` e `wants_coaching` si cambiano anche
   come campi. I criteri di `intent_created` hanno `level` e `wants_coaching` (`null` se non detti).
+- **Tipo del rifiuto** (RF-71..75, M21-F): ogni rifiuto ha un tipo, dal campo `reject_kind`,
+  altrimenti dal motivo (regole it/en), altrimenti dai campi; con più tipi ("troppo caro e troppo
+  lontano") cambiano tutti i criteri e si registra il primo nell'ordine della tabella. Effetti:
+  `hotel` esclude tutti i viaggi con lo stesso hotel (senza hotel: lo stesso viaggio, anche a
+  un altro prezzo), `failed_criterion` `hotel` se non resta nulla; `place` con un luogo negato
+  ("Estepona no, ma la Spagna va bene", "not Estepona", "anywhere but Estepona") lo aggiunge a
+  `excluded_areas` nei criteri e tiene l'area, senza luogo esclude quello del viaggio rifiutato,
+  con `area` cambia luogo come prima; `failed_criterion` `place` se non resta nulla; `dates` con
+  `keep_product` (campo, o "mi piace ma", "stesso viaggio", "when else", "same trip") propone lo
+  stesso viaggio con la prima partenza diversa, e senza altre partenze `no_match` `dates` con
+  `rejected_proposal_id` ("Questo viaggio non ha altre partenze… Vuoi che cerchi un altro
+  viaggio?"): un nuovo `reject` su quella proposta con `keep_product` `false` aggiorna lo stesso
+  rifiuto e cerca un altro viaggio. Un motivo senza tipo e senza `reject_kind` (anche un corpo
+  vuoto) è `question` "Cosa non ti convince: il posto, l'hotel, le date o il prezzo?" con
+  `proposal_id`: nessun rifiuto, criteri invariati, un ordine in coda resta in coda. Si richiama
+  `reject` sulla stessa proposta con la risposta e il tipo; `reject_kind` `other` esclude solo
+  quel viaggio, come prima di M21-F. "Troppo caro" è `price`: il tetto di prezzo resta.
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
-  capiti ("Ho capito: …"); un motivo di rifiuto che non cambia nessun criterio viene dichiarato.
+  capiti ("Ho capito: …", da M21-F con i luoghi esclusi: "…in Spagna, esclusi i viaggi a
+  Estepona, …"); con `reject_kind` `other` un motivo che non cambia nessun criterio viene
+  dichiarato; un rifiuto `hotel` dice quale hotel è escluso.
 - **Dopo una proposta** (RF-55) ogni cambiamento passa da `reject`, mai da un nuovo
   `POST /v1/intents`. Un `no_match` restituito da `reject` porta `rejected_proposal_id`: un
   nuovo `reject` su quella proposta con i campi cambiati aggiorna i criteri e propone di nuovo,
-  senza registrare un secondo rifiuto.
+  senza registrare un secondo rifiuto (da M21-F ne aggiorna tipo e `keep_product`; un motivo
+  senza tipo lì non produce la domanda, la proposta è già rifiutata).
 
 ## Risposte
 
@@ -122,11 +145,11 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 
 | `outcome` | HTTP | Significato |
 |---|---|---|
-| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`; da M21-C `level` e `wants_coaching`) |
-| `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto: leggere `say`, nulla è stato salvato |
+| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`; da M21-C `level` e `wants_coaching`; da M21-F `excluded_areas`, lista di aree `{kind, name, country_code}`, vuota alla creazione) |
+| `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto, oppure (M21-F, su `reject`) il motivo va chiarito o servono le camere: leggere `say`, nulla è stato salvato. Su `accept` e `reject` porta `proposal_id`: la proposta resta aperta |
 | `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A); `rooms` = camere dell'intento (M21-D) |
 | `proposal_details` | 200 | dettagli del prodotto proposto (RF-83): `proposal_id`, `product`, `description`, `why_this_trip`, `program` (`{description, sections: [{title, days: [{title, description, events: [{time, text}]}]}]}` o `null`), `hotel` (`{name, stars, description, address}` o `null`), `venue` (`{name, description}` o `null`), `playing_hours`, `style`, `goal`, `best_for_level`, `accepts_companions`. Testi nella lingua del catalogo; nessun cambio di stato |
-| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché (da M21-D anche `rooms`, da M21-C `level`); `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
+| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché (da M21-D anche `rooms`, da M21-C `level`, da M21-F `place` e `hotel`); `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
 | `order_status` | 200 | stato dell'ordine con campi fissi, `null` quando non pertinenti (tabella sotto) |

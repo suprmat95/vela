@@ -47,6 +47,7 @@ class Criteria:
     rooms: Optional[int] = None   # M21-D, RF-65: 1..pax; None solo negli intenti salvati prima di M21-D
     level: Optional[str] = None   # M21-C, RF-62: `beginner` | `intermediate` | `advanced`; morbido
     wants_coaching: Optional[bool] = None   # M21-C, RF-62: None = non detto; False non penalizza
+    excluded_areas: tuple = ()   # M21-F, RF-73: tuple[Area, ...] dai rifiuti `place`; filtro duro
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,8 @@ class StructuredFields:
     rooms: Optional[object] = None
     level: Optional[object] = None
     wants_coaching: Optional[object] = None
+    reject_kind: Optional[object] = None    # M21-F (RF-71): solo sul rifiuto, validato in `refine`
+    keep_product: Optional[object] = None   # M21-F (RF-74): solo sul rifiuto
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
@@ -79,8 +82,7 @@ class StructuredFields:
 def criteria_to_dict(c: Criteria) -> dict:
     return {
         "sport": c.sport,
-        "area": None if c.area is None else {"kind": c.area.kind, "name": c.area.name,
-                                             "country_code": c.area.country_code},
+        "area": None if c.area is None else _area_dict(c.area),
         "period": None if c.period is None else {"start": c.period.start.isoformat(),
                                                  "end": c.period.end.isoformat(),
                                                  "label": c.period.label},
@@ -92,8 +94,17 @@ def criteria_to_dict(c: Criteria) -> dict:
         "rooms": c.rooms,
         "level": c.level,
         "wants_coaching": c.wants_coaching,
+        "excluded_areas": [_area_dict(a) for a in c.excluded_areas],
         "language": c.language,
     }
+
+
+def _area_dict(a: Area) -> dict:
+    return {"kind": a.kind, "name": a.name, "country_code": a.country_code}
+
+
+def _area(d: dict) -> Area:
+    return Area(d["kind"], d["name"], d["country_code"])
 
 
 def criteria_from_dict(d: dict) -> Criteria:
@@ -102,7 +113,7 @@ def criteria_from_dict(d: dict) -> Criteria:
     budget = d.get("budget")
     return Criteria(
         sport=d.get("sport"),
-        area=None if area is None else Area(area["kind"], area["name"], area["country_code"]),
+        area=None if area is None else _area(area),
         period=None if period is None else Period(date.fromisoformat(period["start"]),
                                                   date.fromisoformat(period["end"]),
                                                   period["label"]),
@@ -114,6 +125,7 @@ def criteria_from_dict(d: dict) -> Criteria:
         rooms=d.get("rooms"),
         level=d.get("level"),
         wants_coaching=d.get("wants_coaching"),
+        excluded_areas=tuple(_area(a) for a in d.get("excluded_areas") or ()),
         language=d.get("language") or "it",
     )
 
@@ -358,6 +370,10 @@ class Job:
     last_error: Optional[str] = None
 
 
+REJECT_KINDS = ("price", "place", "hotel", "dates", "duration", "sport", "pax", "level",
+                "direction", "other")   # RF-71, in quest'ordine: con più tipi si registra il primo
+
+
 @dataclass(frozen=True)
 class Rejection:
     intent_id: str
@@ -365,6 +381,8 @@ class Rejection:
     product_id: str
     reason: str
     created_at: datetime
+    kind: Optional[str] = None     # M21-F (RF-71): None = senza tipo (prima di M21-F, o RF-17)
+    keep_product: bool = False     # M21-F (RF-74): il prodotto resta, escluse solo le sue date
 
 
 @dataclass(frozen=True)
@@ -407,9 +425,13 @@ class IntentCreated:
 class IntentQuestion:
     question: str
     say: str
+    proposal_id: Optional[str] = None   # M21-F: la domanda chiusa su una proposta che resta aperta
 
     def to_dict(self) -> dict:
-        return {"question": self.question, "say": self.say}
+        d = {"question": self.question, "say": self.say}
+        if self.proposal_id is not None:
+            d["proposal_id"] = self.proposal_id
+        return d
 
 
 @dataclass(frozen=True)
