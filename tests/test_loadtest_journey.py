@@ -1,4 +1,4 @@
-"""Percorso del viaggiatore (M13a) contro una REST finta a copione, con orologio finto."""
+"""Percorso del viaggiatore contro una REST finta a copione, con orologio finto."""
 import unittest
 
 from loadtest.journey import run_journey
@@ -40,10 +40,19 @@ def status(s, **extra):
 
 
 class JourneyTest(unittest.TestCase):
-    def test_browser_stops_after_the_proposal(self):
+    def test_site_only_makes_no_request(self):
+        s = Script()
+        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, False, False, group="browse"),
+                          s, s.clock, s.sleep, 900, {})
+        self.assertEqual((rec["final"], rec["group"]), ("site_only", "browse"))
+        self.assertEqual(s.calls, [])
+
+    def test_proposal_group_stops_after_the_proposal(self):
         s = Script(create_intent=[INTENT], get_proposal=[PROPOSAL])
-        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, False, False), s, s.clock, s.sleep, 900, {})
-        self.assertEqual(rec["final"], "browsed")
+        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, False, False, group="proposal"),
+                          s, s.clock, s.sleep, 900, {})
+        self.assertEqual(rec["final"], "proposal_only")
+        self.assertEqual([c[0] for c in s.calls], ["create_intent", "get_proposal"])
         self.assertEqual(rec["t_end"], round(s.t, 3))
         self.assertEqual(s.calls[0][2]["sport"], "padel")
         self.assertIn("proposal_ms", rec)
@@ -102,7 +111,8 @@ class JourneyTest(unittest.TestCase):
     def test_non_payer_leaves_at_the_link(self):
         s = Script(create_intent=[INTENT], get_proposal=[PROPOSAL], accept_proposal=[QUEUED],
                    get_order_status=[status("awaiting_payment", payment_url="http://x/replay/checkout/o1")])
-        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, True, False), s, s.clock, s.sleep, 900, {})
+        rec = run_journey(Traveler(1, 0, TEXT, "padel", False, True, False, group="link"),
+                          s, s.clock, s.sleep, 900, {})
         self.assertEqual(rec["final"], "link_unpaid")
         self.assertNotIn("replay_checkout", [c[0] for c in s.calls])
 

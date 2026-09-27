@@ -1,4 +1,4 @@
-"""Report di un giro del load test (M13a): registro del finto HofJ + eventi dei viaggiatori +
+"""Report di un giro del load test: registro del finto HofJ + eventi dei viaggiatori +
 statistiche di Locust → Markdown e JSON.
 
 Le misure sulla quota vengono dal registro del finto, non dai log di Vela (seconda lettura §3.5).
@@ -172,6 +172,32 @@ def traveler_measures(travelers: List[dict], duration: float) -> dict:
     }
 
 
+GROUP_NAMES = {"browse": "Naviga solo il sito", "proposal": "Chiede la proposta",
+               "link": "Arriva al link, non paga", "pay": "Paga"}
+GROUP_TARGET = {"browse": "site_only", "proposal": "proposal_only", "link": "link_unpaid",
+                "pay": "confirmed"}
+
+
+def group_measures(travelers: List[dict]) -> Dict[str, dict]:
+    """Per gruppo (sentinelle escluse): quanti sono, fin dove sono arrivati e quanti hanno
+    raggiunto l'esito del loro gruppo entro il giro."""
+    out = {}
+    for group in GROUP_TARGET:
+        people = [t for t in travelers if t.get("group") == group and not t.get("role")]
+        out[group] = {
+            "travelers": len(people),
+            "proposals": sum(1 for t in people if "proposal_ms" in t and t.get("final") != "no_proposal"),
+            "accepted": sum(1 for t in people if "t_accept" in t),
+            "links": sum(1 for t in people if "t_link" in t),
+            "paid": sum(1 for t in people if "t_paid" in t),
+            "confirmed": sum(1 for t in people if "t_confirmed" in t),
+            "reached": sum(1 for t in people if t.get("final") == GROUP_TARGET[group]),
+            "open": sum(1 for t in people if (t.get("final") or "").startswith("open")),
+            "proposal_ms_p95": percentile((t["proposal_ms"] for t in people if "proposal_ms" in t), 95),
+        }
+    return out
+
+
 def _sentinel(travelers: List[dict], role: str) -> Optional[dict]:
     t = next((t for t in travelers if t.get("role") == role), None)
     if t is None:
@@ -194,6 +220,7 @@ def build(calls: List[dict], events: List[dict], stats: Dict[str, dict]) -> dict
     bookings = booking_measures(calls, start + duration)
     people = traveler_measures(travelers, duration)
     return {"run": run, "quota": quota, "bookings": bookings, "travelers": people,
+            "groups": group_measures(travelers),
             "cost": cost_measures(quota["by_endpoint"], people["links"], bookings["booked_itineraries"]),
             "use_cases": {name: stats.get(name) for name in USE_CASES + ("replay_checkout",)}}
 
@@ -211,8 +238,10 @@ def _fmt(value, digits=1) -> str:
 def markdown(report: dict, label: str) -> str:
     q, b, t, run = report["quota"], report["bookings"], report["travelers"], report["run"]
     lines = ["## %s" % label, "",
-             "%d viaggiatori in %g minuti + %g di coda, seme %s." % (
-                 run["travelers"], run["arrival_minutes"], run["tail_minutes"], run["seed"]), "",
+             "%d viaggiatori in %g minuti + %g di coda, seme %s%s." % (
+                 run["travelers"], run["arrival_minutes"], run["tail_minutes"], run["seed"],
+                 "; gruppi " + " / ".join("%s %g%%" % kv for kv in run["mix"].items())
+                 if run.get("mix") else ""), "",
              "| Misura | Valore |", "|---|---|",
              "| Massimo di chiamate Vela → HofJ in 60 s | %d (limite di Vela %d, di HofJ 120) |"
              % (q["max_in_60s_vela"], QUOTA_LINE),
@@ -234,6 +263,16 @@ def markdown(report: dict, label: str) -> str:
              "| Chiamate per link (carrello) / per ordine prenotato (cliente, pax, booking) | %s / %s |"
              % (_fmt(report["cost"]["calls_per_link"], 2), _fmt(report["cost"]["calls_per_paid_order"], 2)),
              ""]
+    groups = report.get("groups") or {}
+    if any(g["travelers"] for g in groups.values()):
+        lines += ["| Gruppo | Viaggiatori | Proposta | Accettazioni | Link | Pagati | Confermati "
+                  "| Esito del gruppo raggiunto | Ancora in corso alla fine |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for group, g in groups.items():
+            lines.append("| %s | %d | %d | %d | %d | %d | %d | %d | %d |" % (
+                GROUP_NAMES[group], g["travelers"], g["proposals"], g["accepted"], g["links"],
+                g["paid"], g["confirmed"], g["reached"], g["open"]))
+        lines.append("")
     for role, name in (("marco", "Marco (accetta a 60 s)"), ("anna", "Anna (arriva al 60% della finestra)")):
         s = t.get(role)
         if s:

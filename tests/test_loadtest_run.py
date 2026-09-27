@@ -1,8 +1,11 @@
-"""Comando di un giro (M13a): attesa del sync, comando Locust."""
+"""Comando di un giro: attesa del sync, gruppi, comando Locust."""
 import argparse
+import contextlib
+import io
 import unittest
 
-from loadtest.run import durations, expected_products, locust_command, wait_for_catalog
+from loadtest.run import describe, durations, expected_products, locust_command, main, wait_for_catalog
+from loadtest.scenario import Mix
 
 
 class RunTest(unittest.TestCase):
@@ -34,13 +37,24 @@ class RunTest(unittest.TestCase):
 
     def test_locust_command(self):
         args = argparse.Namespace(arrival_minutes=10.0, tail_minutes=5.0, vela="http://vela:8000",
-                                  travelers=50000, seed=13, pay=0.02)
+                                  travelers=50000, seed=13, browse=50.0, proposal=30.0, link=18.0)
         cmd = locust_command(args, "/out/50k")
-        self.assertEqual(cmd[cmd.index("--pay") + 1], "0.02")               # M19
+        self.assertEqual([cmd[cmd.index(o) + 1] for o in ("--browse", "--proposal", "--link")],
+                         ["50.0", "30.0", "18.0"])
         self.assertEqual(cmd[cmd.index("--run-time") + 1], "960s")   # giro + 60 s per chiudere
         self.assertEqual(cmd[cmd.index("--travelers") + 1], "50000")
         self.assertIn("--headless", cmd)
         self.assertEqual(cmd[cmd.index("--events-out") + 1], "/out/50k/travelers.jsonl")
+
+    def test_describe_the_groups(self):
+        self.assertEqual(describe(10_000, Mix()),
+                         "10000 viaggiatori: browse 50% (5000), proposal 30% (3000), link 18% (1800), pay 2% (200)")
+
+    def test_percentages_over_one_hundred_are_refused_before_the_run(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            main(["--browse", "50", "--proposal", "40", "--link", "18"])
+        self.assertIn("somma ≤ 100", err.getvalue())
 
 
 
