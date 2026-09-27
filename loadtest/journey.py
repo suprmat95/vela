@@ -25,8 +25,10 @@ def run_journey(tr: Traveler, call: Call, clock: Callable[[], float],
 
 def _journey(tr: Traveler, call: Call, clock, sleep, deadline: float, record: dict,
              rng: random.Random) -> dict:
-    record.update(index=tr.index, role=tr.role, arrival=round(clock(), 3), sport=tr.sport,
-                  rejects=tr.rejects, accepts=tr.accepts, pays=tr.pays, final=None)
+    record.update(index=tr.index, role=tr.role, group=tr.group, arrival=round(clock(), 3),
+                  sport=tr.sport, rejects=tr.rejects, accepts=tr.accepts, pays=tr.pays, final=None)
+    if tr.group == "browse":   # la landing è statica e non chiama Vela: nessuna richiesta
+        return _end(record, "site_only")
 
     status, body = call("POST", "/v1/intents", "create_intent",
                         {"text": tr.text, "sport": tr.sport, "profile": PROFILE})
@@ -46,7 +48,7 @@ def _journey(tr: Traveler, call: Call, clock, sleep, deadline: float, record: di
             return _end(record, "no_match_after_reject")
         proposal_id = second["proposal_id"]
     if not tr.accepts:
-        return _end(record, "browsed")
+        return _end(record, "proposal_only")
 
     if tr.accept_at is not None and clock() < tr.accept_at:
         sleep(tr.accept_at - clock())

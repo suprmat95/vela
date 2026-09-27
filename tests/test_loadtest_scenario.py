@@ -1,10 +1,10 @@
-"""Scenario del load test (M13a): arrivi aperti, imbuto con seme, sentinelle, frasi valide."""
+"""Scenario del load test: arrivi aperti, quattro gruppi con seme, sentinelle, frasi valide."""
 import unittest
 from datetime import date
 from decimal import Decimal
 
 from support import NOW, FakeHofJ, inline_worker
-from loadtest.scenario import INTENTS, PROFILE, REASON, Funnel, arrivals, travelers
+from loadtest.scenario import INTENTS, POLL, PROFILE, REASON, Mix, arrivals, group_counts, travelers
 from vela.adapters.hofj_replay import ReplayHofJ
 from vela.adapters.repo_memory import MemoryRepositories
 from vela.adapters.stripe_fake import FakePayments
@@ -28,29 +28,42 @@ class ScenarioTest(unittest.TestCase):
         for count in per_minute:
             self.assertAlmostEqual(count, 1000, delta=120)
 
-    def test_funnel_fractions(self):
-        crowd = [t for t in travelers(20_000, seed=2) if t.role is None]
-        def share(flag):
-            return sum(1 for t in crowd if getattr(t, flag)) / len(crowd)
-        self.assertAlmostEqual(share("rejects"), 0.30, delta=0.02)
-        self.assertAlmostEqual(share("accepts"), 0.20, delta=0.02)
-        self.assertAlmostEqual(share("pays"), 0.60, delta=0.02)
-        self.assertEqual({t.poll for t in crowd}, {Funnel().poll})
+    def test_groups_have_exact_counts(self):
+        crowd = [t for t in travelers(10_000, seed=2) if t.role is None]
+        counts = {g: sum(1 for t in crowd if t.group == g) for g in ("browse", "proposal", "link", "pay")}
+        self.assertEqual(counts, {"browse": 5000, "proposal": 3000, "link": 1800, "pay": 200})
+        self.assertEqual({t.poll for t in crowd}, {POLL})
+        self.assertFalse(any(t.rejects for t in crowd))           # nessuno dice "troppo caro"
 
-    def test_pay_share_changes_only_who_pays(self):
-        """M19: `--pay` cambia chi paga, non arrivi, frasi né chi accetta: giri confrontabili."""
-        base = travelers(20_000, seed=2)
-        few = travelers(20_000, seed=2, funnel=Funnel(pay=0.02))
-        strip = lambda ts: [(t.arrival, t.text, t.rejects, t.accepts, t.role) for t in ts]   # noqa: E731
-        self.assertEqual(strip(few), strip(base))
-        crowd = [t for t in few if t.role is None]
-        self.assertAlmostEqual(sum(t.pays for t in crowd) / len(crowd), 0.02, delta=0.005)
-        self.assertTrue(all(t.pays for t in few if t.role))                  # le sentinelle pagano
+    def test_group_flags(self):
+        for t in travelers(1000, seed=3, sentinels=False):
+            with self.subTest(t.group):
+                self.assertEqual(t.accepts, t.group in ("link", "pay"))
+                self.assertEqual(t.pays, t.group == "pay")
+
+    def test_groups_are_spread_over_the_window(self):
+        crowd = travelers(10_000, minutes=5, seed=2, sentinels=False)
+        for half in (0, 1):
+            part = [t for t in crowd if half * 150 <= t.arrival < (half + 1) * 150]
+            self.assertAlmostEqual(sum(t.group == "browse" for t in part) / len(part), 0.5, delta=0.03)
+
+    def test_group_counts_sum_to_n(self):
+        self.assertEqual(group_counts(7, Mix(50, 30, 18)), {"browse": 4, "proposal": 2, "link": 1, "pay": 0})
+        self.assertEqual(sum(group_counts(10_001, Mix(33.3, 33.3, 33.3)).values()), 10_001)
+        self.assertEqual(group_counts(100, Mix(0, 0, 0)), {"browse": 0, "proposal": 0, "link": 0, "pay": 100})
+
+    def test_pay_is_the_rest_and_percentages_are_checked(self):
+        self.assertAlmostEqual(Mix(50, 30, 18).pay, 2)
+        self.assertEqual(Mix(40, 40, 20).pay, 0)
+        for bad in ((50, 40, 18), (-1, 30, 18), (0, 0, 101)):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                Mix(*bad)
 
     def test_sentinels(self):
         roles = {t.role: t for t in travelers(100) if t.role}
         marco, anna = roles["marco"], roles["anna"]
         self.assertEqual((marco.arrival, marco.accept_at, marco.accepts, marco.pays), (55.0, 60.0, True, True))
+        self.assertEqual(len(travelers(100, mix=Mix(100, 0, 0))), 102)   # anche se tutti navigano
         self.assertEqual((anna.arrival, anna.rejects, anna.accepts), (360.0, True, True))
         self.assertEqual(len(travelers(100)), 102)
         self.assertEqual(len(travelers(100, sentinels=False)), 100)
@@ -65,8 +78,8 @@ class ScenarioTest(unittest.TestCase):
 
 
 class IntentsTest(unittest.TestCase):
-    """Le frasi devono dare una proposta e, dopo "troppo caro", un'altra: altrimenti l'imbuto
-    del load test si fermerebbe prima dell'accettazione."""
+    """Le frasi devono dare una proposta e, dopo "troppo caro", un'altra: Anna rifiuta e poi
+    accetta."""
 
     def test_every_intent_reaches_a_second_proposal(self):
         repos = MemoryRepositories()
