@@ -274,23 +274,25 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 
 ### 4.9 Superfici: casi d'uso, REST, MCP
 
-- **RF-39** Il dominio espone cinque casi d'uso, identici su ogni superficie:
+- **RF-39** Il dominio espone cinque casi d'uso, identici su ogni superficie (più
+  `get_proposal_details`, di sola lettura, RF-83):
 
   | Caso d'uso | Ingresso | Uscita |
   |---|---|---|
   | `create_intent` | testo, profilo opzionale, campi strutturati opzionali (RF-52) | id intento, criteri estratti, oppure la domanda mancante (RF-04) |
   | `get_proposal` | id intento | una proposta (RF-06) oppure "niente di compatibile" (RF-09) |
+  | `get_proposal_details` (RF-83) | id proposta | programma e dettagli del prodotto proposto, frase da leggere |
   | `reject_proposal` | id proposta, motivo, campi strutturati, direzione, tipo di rifiuto e `keep_product` opzionali (RF-52) | la proposta successiva (RF-08) oppure "niente di compatibile" con l'id della proposta da cui ripartire (RF-55) oppure (M21) una domanda chiusa con l'id della proposta, che resta aperta (RF-75) |
   | `accept_proposal` | id proposta, dati viaggiatore mancanti, camere opzionali (M21, RF-65) | lo stato dell'ordine dopo l'attesa: prezzo effettivo da confermare, oppure link dopo la conferma (RF-16), oppure `queued` con posizione e attesa stimata; frase da leggere (RF-45) |
   | `get_order_status` | id ordine | stato, attesa stimata oppure link e importo oppure codice oppure proposta sostitutiva, frase da leggere (RF-25) |
 
 - **RF-40** REST: `POST /v1/intents`, `GET /v1/intents/{id}/proposal`,
-  `POST /v1/proposals/{id}/reject`, `POST /v1/proposals/{id}/accept`,
+  `GET /v1/proposals/{id}/details` (RF-83), `POST /v1/proposals/{id}/reject`, `POST /v1/proposals/{id}/accept`,
   `GET /v1/orders/{id}`. JSON, errori in formato RFC 7807, `GET /health` senza autenticazione.
   I corpi di `POST /v1/intents` e `POST /v1/proposals/{id}/reject` accettano i campi
   strutturati di RF-52, con gli stessi nomi e valori del tool MCP; (M21) il corpo di
   `POST /v1/proposals/{id}/accept` accetta `rooms`.
-- **RF-41** MCP: server remoto con trasporto Streamable HTTP su `/mcp`, cinque tool con gli
+- **RF-41** MCP: server remoto con trasporto Streamable HTTP su `/mcp`, sei tool con gli
   stessi nomi di RF-39, descrizioni scritte per un modello che parla con un umano a voce:
   ogni tool dice esplicitamente di non elencare alternative e di leggere la frase pronta.
   La descrizione di `create_intent` dice di chiedere lo sport prima di chiamarlo se il
@@ -306,6 +308,18 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   La descrizione di `accept_proposal` dice che la risposta è un'attesa, non un link, e che il
   link va letto con `get_order_status` dopo l'attesa dichiarata o quando il viaggiatore lo
   chiede. Compatibile con Claude (claude.ai, Claude Desktop) ed ElevenLabs Conversational AI.
+- **RF-83** `get_proposal_details` restituisce, per la proposta indicata (anche già
+  rifiutata), il prodotto della proposta e i suoi dettagli letti dal dettaglio esteso salvato dal
+  sync, senza chiamate a HofJ e senza cambiare stato: `description`, `why_this_trip`, `program`
+  (`travelProgram`: descrizione e sezioni di giorni con titolo, descrizione ed eventi
+  `{time, text}`; `null` se il fornitore non ha un programma), `hotel` (nome, stelle, descrizione
+  in testo semplice, indirizzo), `venue` (nome, descrizione breve), `playing_hours`, `style`,
+  `goal`, `best_for_level`, `accepts_companions`. I testi restano nella lingua del catalogo del
+  brand; il `say` è una frase breve nella lingua dell'intento che dice se il programma c'è. La
+  descrizione MCP dice di chiamarlo solo quando il viaggiatore chiede dettagli, di rispondere in
+  poche frasi senza leggere tutto e senza aggiungere nulla che i campi non dicano, e che ogni
+  cambiamento passa ancora da `reject_proposal`. Il sync conserva `travelProgram` nel `raw`;
+  `python -m vela.sync --full` riscarica anche i dettagli invariati.
 - **RF-42** Ogni risposta dei casi d'uso include un campo `say`: una frase in lingua
   dell'intento, pronta per essere letta ad alta voce, senza markdown, senza URL letti per
   esteso (l'URL sta in un campo separato). Il `say` di `create_intent` e `reject_proposal`
