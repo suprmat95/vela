@@ -1,7 +1,8 @@
-# Load test del twist (M13a, M13b)
+# Load test
 
-Il test dimostra un confine: con 1.000, 10.000 e 50.000 viaggiatori in dieci minuti, le chiamate
-di Vela a HofJ in qualsiasi intervallo di 60 s restano sotto 108 (120 × 0,9). Gira tutto in
+Il test lancia N viaggiatori divisi in quattro gruppi (solo sito, proposta, link senza pagare,
+pagamento) e verifica un confine: le chiamate di Vela a HofJ in qualsiasi intervallo di 60 s
+restano sotto 108 (120 × 0,9). Gira tutto in
 locale con Docker: **mai contro HofJ vero, mai contro Render, mai Stripe**. Contesto:
 `docs/plans/2026-09-26-twist-seconda-lettura.md` §3.5, decisioni in `docs/decisions.md`
 ("Twist, seconda lettura" e "M13a: banco di prova"). Risultati in `loadtest/RESULTS.md`.
@@ -17,42 +18,59 @@ locale con Docker: **mai contro HofJ vero, mai contro Render, mai Stripe**. Cont
 
 ## Un giro
 
+Il giro di `RESULTS.md`: 10.000 viaggiatori in 5 minuti + 3 di coda, 50% naviga solo il sito,
+30% chiede la proposta, 18% arriva al link senza pagare, paga il resto (2%).
+
 ```sh
 docker compose up -d --build
-docker compose run --rm locust --travelers 1000 --label 1k --duration 10
+docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
+    --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
 docker compose down -v        # ogni giro parte da DB, coda e quota pulite
+python loadtest/projection.py --rate <link/min misurati> --sizes 10000,50000
 ```
 
-`run.py` aspetta che `/health` di Vela abbia tutto il catalogo (126 prodotti, caricati al boot),
-lancia Locust per `--duration` minuti (default 10: 2/3 di arrivi, 1/3 di coda), poi scrive in
-`loadtest/out/<label>/` (ignorata da git):
+| Opzione di `run.py` | Default | Cosa fa |
+|---|---|---|
+| `--travelers` | 10000 | viaggiatori in arrivo (più le due sentinelle) |
+| `--browse` | 50 | % che naviga solo il sito: contato, nessuna richiesta a Vela (la landing è statica e separata) |
+| `--proposal` | 30 | % che fa `create_intent` e `get_proposal` e si ferma |
+| `--link` | 18 | % che accetta, conferma il prezzo, arriva al link e non paga |
+| (resto) | 2 | % che paga: 100 − le tre sopra; somma oltre 100 → errore prima del giro |
+| `--duration` | 10 | minuti dell'intero giro, arrivi + coda (2/3 e 1/3 se non si divide a mano) |
+| `--arrival-minutes`, `--tail-minutes` | — | la divisione a mano; la somma non supera `--duration` |
+| `--seed` | 13 | seme di arrivi, gruppi e frasi |
+| `--label` | `<N>` | nome del giro e della sua cartella |
 
-- `report.md`, `report.json`: le misure del giro;
+I gruppi hanno numeri esatti (10.000 al 50/30/18 → 5.000, 3.000, 1.800, 200), mescolati con il
+seme lungo tutta la finestra degli arrivi; il comando li stampa prima di partire. Se sulla
+macchina gira già un altro stack del banco (porte 8000/8001 occupate), si usa un nome di progetto
+diverso (`docker compose -p <nome>`) e un override che toglie `ports:` dai servizi.
+
+`run.py` aspetta che `/health` di Vela abbia tutto il catalogo delle fixture dei brand (190 prodotti al 2026-09-27, caricati al boot),
+lancia Locust, poi scrive in `loadtest/out/<label>/` (ignorata da git):
+
+- `report.md`, `report.json`: le misure del giro, con una tabella per gruppo (quanti hanno avuto
+  la proposta, il link, pagato, confermato, raggiunto l'esito del gruppo, ancora in corso);
 - `calls.jsonl`, `fake_stats.json`: il registro del finto, da cui vengono le misure sulla quota;
-- `travelers.jsonl`: una riga per viaggiatore (arrivo, accettazione, attesa dichiarata, link,
-  pagamento, conferma, esito);
+- `travelers.jsonl`: una riga per viaggiatore (gruppo, arrivo, accettazione, attesa dichiarata,
+  link, pagamento, conferma, esito);
 - `locust_stats.csv` e compagni: p50/p95/p99 dei casi d'uso.
 
-Opzioni di `run.py`: `--travelers`, `--label`, `--duration` (minuti dell'intero giro, default 10),
-`--arrival-minutes` e `--tail-minutes` per dividerlo a mano (la somma non supera `--duration`),
-`--seed` (13), `--pay` (quota di chi riceve il link e paga, default 0,60; M19). Anna arriva al 60%
-della finestra degli arrivi, Marco a 55 s. `--pay` cambia solo chi paga: arrivi, frasi e chi
-accetta restano quelli del seme, quindi i giri restano confrontabili.
+Dopo una modifica a `vela/` serve `docker compose --profile loadtest build`. Il report di un giro
+già fatto si rigenera con `python loadtest/report.py`.
 
-I giri di `RESULTS.md` (colonne "prima", M13a, e "dopo", M13b) sono cinque, tutti con
-`--duration 8 --arrival-minutes 5 --tail-minutes 3` e un `docker compose down -v` tra l'uno e
-l'altro: A-500, B-1000, C-2500 (`--travelers` 500, 1000, 2500), D-1000-guasti (sotto) ed
-E-1000-rolling (`FAKE_HOFJ_WINDOW=rolling`). Il giro con la cache del prezzo (RF-84, 2026-09-27) è C-2500 con gli stessi parametri e
-`--label 2500-cache`. Il giro di M19 (2026-09-27) è C-2500 con gli stessi parametri e `--pay
-0.02 --label 2500-m19-pay2`. Dopo una modifica a `vela/` serve
-`docker compose --profile loadtest build`. Il report di un giro già fatto si rigenera con `python loadtest/report.py`.
+`loadtest/projection.py` porta il giro a più viaggiatori con gli stessi gruppi (modello a coda
+satura, `--rate` = link al minuto misurati a regime); opzioni `--browse`, `--proposal`, `--link`,
+`--minutes`, `--tail-minutes`, `--sizes`, `--json`.
 
 ## Scenario (modello aperto)
 
 Gli arrivi sono fissati dallo scenario (`loadtest/scenario.py`, seme fisso), non dalle risposte di
-Vela: 100% riceve una proposta, 30% dice "troppo caro", 20% accetta, chi ha accettato chiede lo
-stato ogni 30-60 s, 60% di chi riceve il link paga (`--pay`). Due sentinelle in più: **Marco** accetta a
-60 s e paga appena ha il link; **Anna** arriva al minuto 6, rifiuta e accetta.
+Vela. Esiti per gruppo nel `travelers.jsonl`: `site_only`, `proposal_only`, `link_unpaid`,
+`confirmed`; chi è ancora in coda alla fine è `open_<stato>`. Nessuno dice "troppo caro". Chi ha
+accettato chiede lo stato ogni 30-60 s. Due sentinelle in più, fuori dai gruppi: **Marco** accetta
+a 60 s e paga appena ha il link; **Anna** arriva al 60% della finestra degli arrivi, rifiuta e
+accetta. Entrambe chiedono lo stato ogni 5 s.
 
 Con la cache del prezzo (RF-84) chi accetta un viaggio già prezzato riceve subito
 `200 awaiting_confirmation`: il viaggiatore finto lo tratta come un prezzo arrivato e conferma al
@@ -75,13 +93,13 @@ timeout di 15 s del client), `hang` (appeso senza effetto), `5xx` (503), `produc
 prodotto). Una chiamata respinta con 429 conta nella finestra (ipotesi pessimista).
 `GET /_fake/stats` e `POST /_fake/reset` non consumano quota.
 
-Il giro con guasti di `RESULTS.md`:
+Un giro con guasti (non in `RESULTS.md`), per esempio:
 
 ```sh
 FAKE_HOFJ_LATENCY=pessimistic \
 FAKE_HOFJ_FAULTS="POST /v1/itineraries=hang_then_execute:0.03;POST /v1/itineraries=5xx:0.02;POST /v1/bookings=hang_then_execute:0.05;GET /v1/itineraries/{id}=5xx:0.02" \
 docker compose up -d --build
-docker compose run --rm locust --travelers 50000 --label 50k-guasti
+docker compose run --rm locust --travelers 10000 --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k-guasti
 ```
 
 ## Note

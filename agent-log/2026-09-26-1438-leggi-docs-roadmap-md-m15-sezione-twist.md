@@ -1380,3 +1380,7 @@ ok leggi master ho appena mergiato il branch di nome last-load-test con i risult
 - 🔧 Bash: Merge master into the branch
 
 - 🔧 Bash: Commit session log, then merge master
+
+- 🔧 Bash: Resolve decisions log conflict keeping both sides
+
+- 🔧 Bash: Verify and commit the merge

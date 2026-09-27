@@ -1,12 +1,12 @@
-"""Report del load test (M13a): misure pure su registro del finto, eventi e statistiche Locust."""
+"""Report del load test: misure pure su registro del finto, eventi e statistiche Locust."""
 import json
 import os
 import tempfile
 import unittest
 
 from loadtest.fake_hofj.log import max_in_window
-from loadtest.report import (booking_measures, cost_measures, main, percentile, quota_measures,
-                             read_stats, traveler_measures)
+from loadtest.report import (booking_measures, cost_measures, group_measures, main, percentile,
+                             quota_measures, read_stats, traveler_measures)
 
 S = 1_000_000.0
 
@@ -77,7 +77,7 @@ class TravelerTest(unittest.TestCase):
             {"index": 1, "t_accept": 20, "wait_seconds": 30, "t_link": 65, "final": "link_unpaid"},
             {"index": 2, "t_accept": 30, "wait_seconds": 10, "final": "open_queued"},
             {"index": 3, "t_accept": 40, "final": "replaced", "t_end": 90},
-            {"index": 4, "final": "browsed", "role": "anna", "proposal_ms": 40},
+            {"index": 4, "final": "proposal_only", "role": "anna", "proposal_ms": 40},
         ]
         t = traveler_measures(travelers, 180)
         self.assertEqual((t["accepted"], t["links"], t["paid"], t["confirmed"]), (4, 2, 1, 1))
@@ -92,6 +92,32 @@ class TravelerTest(unittest.TestCase):
         self.assertFalse(t["anna"]["confirmed_by_minute_7"])
 
 
+class GroupTest(unittest.TestCase):
+    def test_how_far_each_group_got(self):
+        travelers = [
+            {"group": "browse", "final": "site_only"},
+            {"group": "proposal", "proposal_ms": 12, "final": "proposal_only"},
+            {"group": "proposal", "proposal_ms": 30, "final": "no_proposal"},
+            {"group": "link", "arrival": 0, "proposal_ms": 10, "t_accept": 5, "t_link": 90, "final": "link_unpaid"},
+            {"group": "link", "proposal_ms": 10, "t_accept": 6, "final": "open_queued"},
+            {"group": "pay", "arrival": 1, "proposal_ms": 10, "t_accept": 7, "t_link": 60, "t_paid": 61,
+             "t_confirmed": 70, "final": "confirmed"},
+            {"group": "pay", "role": "marco", "t_accept": 60, "final": "confirmed"},   # sentinella: fuori
+        ]
+        g = group_measures(travelers)
+        self.assertEqual({k: v["travelers"] for k, v in g.items()},
+                         {"browse": 1, "proposal": 2, "link": 2, "pay": 1})
+        self.assertEqual((g["proposal"]["proposals"], g["proposal"]["reached"]), (1, 1))
+        self.assertEqual((g["link"]["accepted"], g["link"]["links"], g["link"]["reached"], g["link"]["open"]),
+                         (2, 1, 1, 1))
+        self.assertEqual((g["pay"]["paid"], g["pay"]["confirmed"], g["pay"]["reached"]), (1, 1, 1))
+        self.assertEqual(g["browse"]["reached"], 1)
+        self.assertEqual(g["proposal"]["proposal_ms_p95"], 30)
+        self.assertEqual(g["link"]["arrival_to_link"], {"p50": 90, "p95": 90, "max": 90})
+        self.assertEqual(g["pay"]["arrival_to_paid"], {"p50": 60, "p95": 60, "max": 60})
+        self.assertIsNone(g["proposal"]["arrival_to_paid"])
+
+
 class EndToEndTest(unittest.TestCase):
     def test_files_to_markdown_and_json(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,8 +127,10 @@ class EndToEndTest(unittest.TestCase):
                     fh.write(json.dumps(c) + "\n")
             with open(paths["ev.jsonl"], "w") as fh:
                 fh.write(json.dumps({"type": "run", "epoch_start": S, "travelers": 1,
-                                     "arrival_minutes": 1, "tail_minutes": 1, "seed": 1}) + "\n")
-                fh.write(json.dumps({"type": "traveler", "index": 0, "role": "marco", "final": "browsed"}) + "\n")
+                                     "arrival_minutes": 1, "tail_minutes": 1, "seed": 1,
+                                     "mix": {"browse": 50, "proposal": 30, "link": 18, "pay": 2}}) + "\n")
+                fh.write(json.dumps({"type": "traveler", "index": 0, "role": "marco", "final": "proposal_only"}) + "\n")
+                fh.write(json.dumps({"type": "traveler", "index": 1, "group": "browse", "final": "site_only"}) + "\n")
             with open(paths["s_stats.csv"], "w") as fh:
                 fh.write("Type,Name,Request Count,Failure Count,50%,95%,99%\n"
                          "POST,create_intent,10,0,20,45,60\n,Aggregated,10,0,20,45,60\n")
@@ -123,6 +151,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(data["quota"]["calls_vela"], 2)
         self.assertEqual(data["cost"]["purchase_calls"], 1)
         self.assertIn("Chiamate per link", text)
+        self.assertIn("gruppi browse 50% / proposal 30% / link 18% / pay 2%", text)
+        self.assertIn("| Naviga solo il sito | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 | — | — |", text)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,15 @@
-"""Un giro del load test (M13a), il comando del servizio compose `locust`.
+"""Un giro del load test, il comando del servizio compose `locust`.
 
 1. aspetta che Vela risponda con tutto il catalogo (caricato al boot dalle fixture dei brand);
 2. lancia Locust headless (`loadtest/locustfile.py`) contro Vela;
 3. copia il registro del finto e le sue statistiche nella cartella del giro e scrive il report.
 
-  docker compose run --rm locust --travelers 10000 --label 10k --duration 10
+  docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
+      --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
+
+`--browse`, `--proposal`, `--link` sono le percentuali sul totale di chi naviga solo il sito, chi
+chiede solo la proposta e chi arriva al link senza pagare; paga il resto fino a 100
+(`loadtest/scenario.py`). Default 50/30/18: paga il 2%.
 
 `--duration` (minuti, default 10) è la durata dell'intero giro: 2/3 di arrivi e 1/3 di coda, oppure
 la divisione data con `--arrival-minutes`/`--tail-minutes`, che insieme non la superano.
@@ -25,6 +30,7 @@ import httpx
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from loadtest import report  # noqa: E402
+from loadtest.scenario import Mix, group_counts  # noqa: E402
 
 FIXTURES = os.path.join(ROOT, "fixtures")
 DEFAULT_BRANDS = "weebora.com,terrarossa.com"
@@ -94,21 +100,31 @@ def locust_command(args, run_dir: str) -> List[str]:
             "--csv", os.path.join(run_dir, "locust"),
             "--travelers", str(args.travelers), "--arrival-minutes", str(args.arrival_minutes),
             "--tail-minutes", str(args.tail_minutes), "--scenario-seed", str(args.seed),
-            "--pay", str(args.pay),
+            "--browse", str(args.browse), "--proposal", str(args.proposal), "--link", str(args.link),
             "--events-out", os.path.join(run_dir, "travelers.jsonl")]
+
+
+def describe(travelers: int, mix: Mix) -> str:
+    counts = group_counts(travelers, mix)
+    return ("%d viaggiatori: " % travelers) + ", ".join(
+        "%s %g%% (%d)" % (g, share, counts[g]) for g, share in mix.shares().items())
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--travelers", type=int, default=1000)
+    ap.add_argument("--travelers", type=int, default=10000, help="viaggiatori (default 10000)")
+    ap.add_argument("--browse", type=float, default=50.0,
+                    help="%% che naviga solo il sito, nessuna richiesta a Vela (default 50)")
+    ap.add_argument("--proposal", type=float, default=30.0,
+                    help="%% che chiede la proposta e si ferma (default 30)")
+    ap.add_argument("--link", type=float, default=18.0,
+                    help="%% che accetta, arriva al link e non paga (default 18); paga il resto")
     ap.add_argument("--label", help="nome del giro e della sua cartella (default: <N>)")
     ap.add_argument("--duration", type=float, default=10.0,
                     help="minuti dell'intero giro, arrivi + coda (default 10)")
     ap.add_argument("--arrival-minutes", type=float, help="default: 2/3 di --duration")
     ap.add_argument("--tail-minutes", type=float, help="default: il resto di --duration")
     ap.add_argument("--seed", type=int, default=13)
-    ap.add_argument("--pay", type=float, default=0.60,
-                    help="quota di chi riceve il link e paga (default 0,60; M19: 0,02)")
     ap.add_argument("--vela", default=os.environ.get("VELA_URL", "http://vela:8000"))
     ap.add_argument("--fake", default=os.environ.get("FAKE_HOFJ_URL", "http://fake-hofj:8001"))
     ap.add_argument("--calls", default=os.path.join(ROOT, "loadtest", "out", "calls.jsonl"),
@@ -119,8 +135,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         args.arrival_minutes, args.tail_minutes = durations(args.duration, args.arrival_minutes,
                                                             args.tail_minutes)
+        mix = Mix(args.browse, args.proposal, args.link)
     except ValueError as exc:
         ap.error(str(exc))
+    print(describe(args.travelers, mix), flush=True)
     label = args.label or str(args.travelers)
     run_dir = os.path.join(args.out, label)
     os.makedirs(run_dir, exist_ok=True)
