@@ -9,8 +9,9 @@ class StripMediaTest(unittest.TestCase):
     def test_removes_media_keys_at_any_depth_without_touching_input(self):
         detail = detail_of(item(12))
         out = cat.strip_media(detail)
-        for key in ("gallery", "image", "travelProgram"):
+        for key in ("gallery", "image"):
             self.assertNotIn(key, out)
+        self.assertEqual(out["travelProgram"], detail["travelProgram"])   # RF-83: il programma resta
         self.assertNotIn("gallery", out["rawAttributes"])
         self.assertNotIn("cover", out["rawAttributes"])
         hotel = out["rawAttributes"]["hotels"]["data"][0]["attributes"]

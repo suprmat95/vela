@@ -28,7 +28,7 @@ fixture dello stesso brand sullo stesso host fanno fallire la selezione (`select
 | `base_url` | host dell'API |
 | `products` | item della lista così come li restituisce l'API, nell'ordine delle pagine |
 | `details[id].catalog` | campi di RF-28 con i nomi dell'API: `id, title, slug, shortDescription, price, currency, minPax, maxPax, minDate, maxDate, availabilities, defaultDurationInDays, updatedAt, category, venue, destination, hotels` (`hotels` = `rawAttributes.hotels` senza media), più `featured` e `isSpecialOffer` (M21-B, RF-60; aggiunti il 2026-09-27 riproiettando `catalog` da `raw` con `project_detail`, senza chiamate) |
-| `details[id].raw` | dettaglio esteso senza `gallery`, `image`, `images`, `cover`, `media`, `travelProgram` a qualsiasi profondità |
+| `details[id].raw` | dettaglio esteso senza `gallery`, `image`, `images`, `cover`, `media` a qualsiasi profondità. Fino al 2026-09-27 veniva tolto anche `travelProgram`: le fixture registrate prima non hanno il programma (RF-83); una nuova registrazione lo conserva |
 
 La proiezione (`project_detail`, `strip_media`) sta in `vela/domain/catalog.py` ed è la stessa
 che il sync scrive in `products`.
