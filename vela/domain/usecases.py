@@ -157,7 +157,8 @@ class Vela:
         area = geo.area_of_destination(product.destination, product.country) if product else None
         now = self.now()
         refinement = refine(intent.criteria, reason, proposal, area, now.date(), fields,
-                            cheapest_total=self._cheapest_total(now, products))
+                            cheapest_total=self._cheapest_total(now, products),
+                            product_levels=product.levels if product else frozenset())
         if refinement.criteria == intent.criteria:
             return intent, refinement
         self.repos.intents.update_criteria(intent.id, refinement.criteria)
@@ -179,7 +180,8 @@ class Vela:
         if not isinstance(result, Choice):
             return NoMatch(intent.id, result.failed_criterion,
                            say.say_no_match(result.failed_criterion, intent.criteria,
-                                            result.rooms_needed, result.max_pax_per_room))
+                                            result.rooms_needed, result.max_pax_per_room,
+                                            result.levels))
         proposal = Proposal(self.new_id(), intent.id, result.product.id, result.start_date,
                             result.end_date, intent.criteria.pax or 1, result.product.price,
                             result.product.currency, result.reason, self.now())

@@ -87,7 +87,9 @@ DESCRIPTIONS = {
         "divided by the people) with `budget_scope` (per_person or total) only if the user said "
         "it explicitly, and the trip length in nights as `duration_min_nights` and "
         "`duration_max_nights` (a weekend is 1 to 3, a long weekend 2 to 4, a week 6 to 8, N days "
-        "is N-1 nights), and the hotel rooms as `rooms`. With more than 2 people, if the user "
+        "is N-1 nights), the playing level as `level` (beginner, intermediate or advanced) and "
+        "`wants_coaching` (true if the user wants lessons or a coach, false if they said no "
+        "lessons), and the hotel rooms as `rooms`. With more than 2 people, if the user "
         "has not said how many rooms, first ask \"In quante camere?\" / \"How many rooms?\" and "
         "wait for the answer; with 1 or 2 people leave `rooms` out unless the user said it, Vela "
         "assumes one room. Leave out what the user did not say: never guess. Add "
@@ -98,7 +100,8 @@ DESCRIPTIONS = {
         "through reject_proposal." + _VOICE),
     "get_proposal": (
         "Get the single trip Vela proposes for an intent. Vela picks it by area, budget, trip "
-        "length, earliest departure in the period, featured trips, then price, so do not present "
+        "length, level and lessons, earliest departure in the period, featured trips, then price, "
+        "so do not present "
         "it as the cheapest option: the `say` explains the choice. Returns one proposal (`proposal_id`, "
         "`product`, dates, price from) or, when nothing fits, `failed_criterion`: then no "
         "proposal exists yet, so ask the user which criterion to change and call create_intent "
@@ -116,12 +119,15 @@ DESCRIPTIONS = {
         "change still goes through reject_proposal." + _VOICE),
     "reject_proposal": (
         "The user said no to the current proposal or wants to change something about it (place, "
-        "dates, length, sport, budget, people, rooms). Always use this tool for changes after a proposal, never "
+        "dates, length, sport, budget, people, rooms, level, lessons). Always use this tool for "
+        "changes after a proposal, never "
         "a new create_intent: the intent keeps what the user already turned down. Pass the "
         "user's reason in their own words in `reason`, plus only the criteria that changed as "
         "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget` as the user said "
         "it, `budget_scope` when the user says the budget was per person or in total, "
-        "`duration_min_nights`, `duration_max_nights`, `rooms`), and "
+        "`duration_min_nights`, `duration_max_nights`, `rooms`, `level`, `wants_coaching`; when "
+        "the user only says the trip is too hard or too easy, pass the reason and Vela moves the "
+        "level by one), and "
         "`direction`: north when the user wants somewhere cooler, south when they want somewhere "
         "warmer. Returns the next single proposal, or `failed_criterion` with "
         "`rejected_proposal_id` when nothing else fits: ask what to change, then call "
@@ -183,6 +189,12 @@ DurationMax = Annotated[Optional[int], Field(
     description="Longest trip the user wants, in nights, only if they said a length: weekend 3, "
                 "long weekend 4, a week 8, N days N-1, N nights N. Leave out for 'at least N "
                 "nights'.")]
+Level = Annotated[Optional[str], Field(
+    description="Playing level the user said: beginner (never played, first steps), intermediate "
+                "or advanced (competitive players). Only if the user said it.")]
+WantsCoaching = Annotated[Optional[bool], Field(
+    description="true if the user wants lessons, a coach or a clinic; false if they said they "
+                "want no lessons. Leave it out otherwise.")]
 Direction = Annotated[Optional[str], Field(
     description="north when the user wants somewhere cooler, south when somewhere warmer.")]
 Rooms = Annotated[Optional[int], Field(
@@ -249,6 +261,7 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                       duration_min_nights: DurationMin = None,
                       duration_max_nights: DurationMax = None,
                       budget_scope: BudgetScope = None, rooms: Rooms = None,
+                      level: Level = None, wants_coaching: WantsCoaching = None,
                       first_name: FirstName = None, last_name: LastName = None,
                       email: Email = None, phone: Phone = None,
                       participants: Participants = None) -> CallToolResult:
@@ -256,7 +269,8 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget,
                                   duration_min_nights=duration_min_nights,
                                   duration_max_nights=duration_max_nights,
-                                  budget_scope=budget_scope, rooms=rooms)
+                                  budget_scope=budget_scope, rooms=rooms, level=level,
+                                  wants_coaching=wants_coaching)
         return run("create_intent", lambda v: v.create_intent(text, profile, fields))
 
     @server.tool(description=descriptions["get_proposal"])
@@ -273,9 +287,11 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                         period_end: PeriodEnd = None, pax: Pax = None, budget: Budget = None,
                         direction: Direction = None, duration_min_nights: DurationMin = None,
                         duration_max_nights: DurationMax = None,
-                        budget_scope: BudgetScope = None, rooms: Rooms = None) -> CallToolResult:
+                        budget_scope: BudgetScope = None, rooms: Rooms = None,
+                        level: Level = None, wants_coaching: WantsCoaching = None) -> CallToolResult:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction,
-                                  duration_min_nights, duration_max_nights, budget_scope, rooms)
+                                  duration_min_nights, duration_max_nights, budget_scope, rooms,
+                                  level, wants_coaching)
         return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
     @server.tool(description=descriptions["accept_proposal"])

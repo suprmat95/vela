@@ -38,7 +38,7 @@ class EquivalentProductsTest(unittest.TestCase):
     un solo candidato, quello con l'id numerico più basso. La trappola 900078 non vince sul 78."""
 
     def test_grouping_is_not_a_filter(self):
-        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "price",
+        self.assertEqual(FILTERS, ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "level", "price",
                                    "rejected"))
 
     def test_trap_with_a_lower_price_loses_to_the_lowest_id(self):
@@ -129,7 +129,13 @@ class OrderingLevelsTest(unittest.TestCase):
         ("3 durata", crit(**WEEKEND),
          prod(1, start="2026-10-10"),
          prod(2, start="2026-10-01", nights=7, price=100, featured=True)),
-        # 4 livello e lezioni: neutro fino a M21-C (RF-62..64)
+        # 4 livello e lezioni (M21-C): prima il livello, poi le lezioni
+        ("4 livello", crit(level="beginner"),
+         replace(prod(1, start="2026-10-10"), levels=frozenset({"beginner"})),
+         replace(prod(2, start="2026-10-01", price=100, featured=True), levels=frozenset({"advanced"}))),
+        ("4 lezioni", crit(wants_coaching=True),
+         replace(prod(1, start="2026-10-10"), coaching=True),
+         prod(2, start="2026-10-01", price=100, featured=True)),
         ("5 partenza", crit(),
          prod(1, start="2026-10-05"),
          prod(2, start="2026-10-20", price=100, featured=True)),

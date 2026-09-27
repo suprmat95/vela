@@ -22,8 +22,9 @@ La superficie REST (RF-40) espone i casi d'uso di RF-39 e RF-83 sotto `/v1`. Ogn
 ### Campi strutturati (M17, RF-52..55)
 
 `Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?,
-"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?, "rooms"?}` (la durata da M21-A, la
-lettura del budget da M21-E, le camere da M21-D), gli stessi
+"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?, "rooms"?, "level"?,
+"wants_coaching"?}` (la durata da M21-A, la lettura del budget da M21-E, le camere da M21-D,
+livello e lezioni da M21-C), gli stessi
 nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
 già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
 viaggiatore. Un client che manda solo testo funziona come prima.
@@ -38,6 +39,8 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `budget_scope` | `per_person` (il viaggiatore ha detto "a testa", "each"), `total` ("in tutto", "in total"). Solo se il viaggiatore l'ha detto in modo esplicito | altro valore |
 | `duration_min_nights`, `duration_max_nights` | interi, notti del viaggio (M21-A, RF-58): weekend 1..3, ponte o weekend lungo 2..4, una settimana 6..8, N giorni = N−1 notti. Basta uno dei due; uno solo sostituisce tutta la durata letta nel testo | fuori da 1..30, minimo maggiore del massimo, non interi |
 | `rooms` | intero, camere dell'hotel (M21-D, RF-65): da 1 al numero di persone. Su `accept` è una correzione dell'ultimo momento | fuori da 1..pax (le persone dopo la precedenza campo > testo > profilo), non intero |
+| `level` | `beginner` ("principianti", "mai giocato", "beginners"), `intermediate`, `advanced` ("agonisti", "esperti", "competitive") (M21-C, RF-62) | altro valore |
+| `wants_coaching` | booleano: `true` se il viaggiatore vuole lezioni, un maestro o un coach; `false` se ha detto niente lezioni (M21-C, RF-62) | tipo JSON non booleano: 422 |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
 
 - **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
@@ -64,8 +67,8 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   totale. `budget_scope` senza nessun budget non ha effetto.
 - **Ordinamento** (RF-60, RF-61, M21-B): dopo i filtri duri la proposta è il primo prodotto per
   area, totale entro budget, durata compatibile, partenza più vicina all'inizio del periodo (o a
-  oggi senza periodo), `featured` o offerta speciale di HofJ, prezzo crescente, id numerico
-  (livello e lezioni da M21-C). Senza budget il prezzo non decide prima della partenza: un viaggio
+  oggi senza periodo), `featured` o offerta speciale di HofJ, prezzo crescente, id numerico;
+  da M21-C livello e lezioni compatibili vengono subito dopo la durata. Senza budget il prezzo non decide prima della partenza: un viaggio
   che parte il 2 novembre batte uno che parte il 25 anche se costa di più. Prodotti equivalenti
   (stesso hotel, stesso titolo, stessa destinazione, prezzo entro il 5%) contano come uno: resta
   quello con l'id più basso. La `reason` della `proposal` dice il livello che ha deciso ("la
@@ -88,6 +91,22 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   `accept` il campo `rooms` corregge le camere: sotto il minimo del prodotto la risposta è
   `question` e nessun ordine nasce; valido, aggiorna ordine e criteri dell'intento; ignorato
   sulla conferma del prezzo. Il job d'acquisto manda le camere dell'ordine a HofJ (RF-67).
+- **Livello e lezioni** (RF-62..64, M21-C): dal campo o dal testo ("siamo principianti,
+  vorremmo lezioni", "advanced players, no coaching needed"); con più livelli nel testo vale il
+  più basso, una frase negata ("niente corsi per principianti") non conta. Il sync etichetta ogni
+  prodotto dalle descrizioni: livelli (`beginner`, `intermediate`, `advanced`, `all`), riserva
+  esplicita ("solo per avanzati", "advanced players only") e lezioni. Criteri morbidi: dopo la
+  durata vince un prodotto con il livello compatibile (livello sconosciuto, "tutti i livelli" o il
+  livello chiesto), poi, con `wants_coaching` `true`, uno con le lezioni; `false` non penalizza
+  nessuno. Unico filtro duro: un prodotto riservato esplicitamente ad altri livelli è escluso, e se
+  non resta nulla `no_match` ha `failed_criterion` `level` ("I viaggi compatibili sono riservati a
+  giocatori avanzati. Vuoi cambiare qualcosa?"). La `reason` della proposta dice se livello e
+  lezioni chiesti sono rispettati ("Il programma è pensato anche per principianti e include
+  lezioni o allenamenti." oppure "Non ho trovato viaggi per principianti con lezioni: questo è
+  pensato per giocatori intermedi e avanzati…"). Nel rifiuto "troppo difficile"/"too hard"
+  abbassa il livello di uno, "troppo facile"/"too easy" lo alza (dal livello dell'intento o, se
+  non detto, dai livelli del viaggio rifiutato); `level` e `wants_coaching` si cambiano anche
+  come campi. I criteri di `intent_created` hanno `level` e `wants_coaching` (`null` se non detti).
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
   capiti ("Ho capito: …"); un motivo di rifiuto che non cambia nessun criterio viene dichiarato.
 - **Dopo una proposta** (RF-55) ogni cambiamento passa da `reject`, mai da un nuovo
@@ -103,11 +122,11 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 
 | `outcome` | HTTP | Significato |
 |---|---|---|
-| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`) |
+| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`; da M21-C `level` e `wants_coaching`) |
 | `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto: leggere `say`, nulla è stato salvato |
 | `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A); `rooms` = camere dell'intento (M21-D) |
 | `proposal_details` | 200 | dettagli del prodotto proposto (RF-83): `proposal_id`, `product`, `description`, `why_this_trip`, `program` (`{description, sections: [{title, days: [{title, description, events: [{time, text}]}]}]}` o `null`), `hotel` (`{name, stars, description, address}` o `null`), `venue` (`{name, description}` o `null`), `playing_hours`, `style`, `goal`, `best_for_level`, `accepts_companions`. Testi nella lingua del catalogo; nessun cambio di stato |
-| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
+| `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché (da M21-D anche `rooms`, da M21-C `level`); `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |
 | `order_status` | 200 | stato dell'ordine con campi fissi, `null` quando non pertinenti (tabella sotto) |

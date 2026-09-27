@@ -1069,6 +1069,13 @@ abbassa il livello.
 **Da decidere nel brainstorm.** Descrizioni in inglese nei cataloghi `it`: **A) stesse regole
 it/en su ogni catalogo**; B) regole per lingua del catalogo.
 
+**Stato (2026-09-27).** Fatta in modalità autonoma con l'OK anticipato dell'utente: A, la
+migrazione 0012 con il backfill che riusa `labels_of` del sync, le etichette riproiettate nelle
+fixture (`vela_levels`, `vela_levels_exclusive`, `vela_coaching`). Regole, conteggi, falsi positivi
+e negativi, scelte di dettaglio, differenza sulla regola 4 del budget e test cambiati in
+`docs/decisions.md` ("M21-C Livello e lezioni"). Nessun prodotto delle fixture si riserva a un
+livello: il filtro duro di RF-64 oggi non esclude nulla.
+
 ### M21-F — Rifiuti con motivo sempre capito (UC-F)
 
 **Scope.** Classificazione del rifiuto in `refine.py` (RF-71) e campo `reject_kind`;

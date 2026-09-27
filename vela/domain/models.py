@@ -45,6 +45,8 @@ class Criteria:
     duration_max_nights: Optional[int] = None
     budget_scope: Optional[str] = None   # M21-E, RF-69: `per_person` | `total`; `budget` resta il totale
     rooms: Optional[int] = None   # M21-D, RF-65: 1..pax; None solo negli intenti salvati prima di M21-D
+    level: Optional[str] = None   # M21-C, RF-62: `beginner` | `intermediate` | `advanced`; morbido
+    wants_coaching: Optional[bool] = None   # M21-C, RF-62: None = non detto; False non penalizza
 
 
 @dataclass(frozen=True)
@@ -62,13 +64,16 @@ class StructuredFields:
     duration_max_nights: Optional[object] = None
     budget_scope: Optional[object] = None
     rooms: Optional[object] = None
+    level: Optional[object] = None
+    wants_coaching: Optional[object] = None
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
                 "period_end": self.period_end, "pax": self.pax, "budget": self.budget,
                 "duration_min_nights": self.duration_min_nights,
                 "duration_max_nights": self.duration_max_nights,
-                "budget_scope": self.budget_scope, "rooms": self.rooms}
+                "budget_scope": self.budget_scope, "rooms": self.rooms, "level": self.level,
+                "wants_coaching": self.wants_coaching}
 
 
 def criteria_to_dict(c: Criteria) -> dict:
@@ -85,6 +90,8 @@ def criteria_to_dict(c: Criteria) -> dict:
         "duration_max_nights": c.duration_max_nights,
         "budget_scope": c.budget_scope,
         "rooms": c.rooms,
+        "level": c.level,
+        "wants_coaching": c.wants_coaching,
         "language": c.language,
     }
 
@@ -105,6 +112,8 @@ def criteria_from_dict(d: dict) -> Criteria:
         duration_max_nights=d.get("duration_max_nights"),
         budget_scope=d.get("budget_scope"),
         rooms=d.get("rooms"),
+        level=d.get("level"),
+        wants_coaching=d.get("wants_coaching"),
         language=d.get("language") or "it",
     )
 
@@ -213,6 +222,10 @@ class Product:
     featured: bool = False       # M21-B (RF-60): `featured` di HofJ, letto dal sync
     special_offer: bool = False  # M21-B (RF-60): `isSpecialOffer` di HofJ
     max_pax_per_room: Optional[int] = None   # M21-D (RF-66): `maxPaxPerRoom` di HofJ; None = nessun limite
+    # M21-C (RF-63): etichette di Vela dalle descrizioni (`labels.labels_of`), calcolate dal sync
+    levels: frozenset = frozenset()   # ⊆ {beginner, intermediate, advanced, all}; vuoto = sconosciuto
+    levels_exclusive: bool = False    # riserva esplicita: ammessi solo `levels` (RF-64)
+    coaching: bool = False            # lezioni, coach o allenamenti
 
 
 # --- proposta, ordine, rifiuto -------------------------------------------------

@@ -141,6 +141,24 @@ class SyncTest(unittest.TestCase):
         limits = {pid: p.max_pax_per_room for pid, p in self.products().items()}
         self.assertEqual(limits, {"1": 2, "2": None})
 
+    def test_level_labels_are_written_from_the_detail(self):
+        """M21-C (RF-63): livelli, esclusività e lezioni letti dalle descrizioni del dettaglio, e
+        ricalcolati da un nuovo sync quando il dettaglio cambia."""
+        source = FakeSource({"weebora.com": [[
+            item(1, description="Per **giocatori di livello intermedio e avanzato**, con coach."),
+            item(2, shortDescription="Solo per avanzati", description="Mare."), item(3)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        labels = {pid: (p.levels, p.levels_exclusive, p.coaching) for pid, p in self.products().items()}
+        self.assertEqual(labels, {"1": (frozenset({"intermediate", "advanced"}), False, True),
+                                  "2": (frozenset({"advanced"}), True, False),
+                                  "3": (frozenset(), False, False)})
+        changed = FakeSource({"weebora.com": [[
+            item(1, description="Per tutti i livelli.", updatedAt="2026-09-27T10:00:00.000Z"),
+            item(2, shortDescription="Solo per avanzati", description="Mare."), item(3)]]})
+        self.sync(changed, brands={"padel": "weebora.com"}).run()
+        p = self.products()["1"]
+        self.assertEqual((p.levels, p.levels_exclusive, p.coaching), (frozenset({"all"}), False, False))
+
     def test_follows_the_cursor_across_pages(self):
         source = FakeSource({"weebora.com": [[item(1)], [item(2)], [item(3)]]})
         report = self.sync(source, {"padel": "weebora.com"}).run()

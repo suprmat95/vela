@@ -3443,6 +3443,9 @@
     "featured": true,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -3745,6 +3748,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -4067,6 +4073,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -4403,6 +4412,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -4676,6 +4688,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -5012,6 +5027,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -5292,6 +5310,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -5564,6 +5585,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": 2,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -5914,6 +5938,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -6186,6 +6213,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -6459,6 +6489,13 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "beginner",
+     "advanced",
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -6857,6 +6894,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -7297,6 +7339,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -7611,6 +7656,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -7913,6 +7961,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -8258,6 +8309,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -8677,6 +8731,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -9045,6 +9104,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -9321,6 +9383,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -9570,6 +9635,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -9819,6 +9887,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -10008,6 +10079,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -10336,6 +10410,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -10687,6 +10766,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -11034,6 +11118,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -11426,6 +11515,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "intermediate"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -11738,6 +11832,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "intermediate"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -12038,6 +12137,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -12402,6 +12506,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -12732,6 +12841,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -12979,6 +13091,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -13324,6 +13441,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -13702,6 +13824,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -14076,6 +14203,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -14457,6 +14589,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -14811,6 +14948,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -15315,6 +15455,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -15747,6 +15892,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -16119,6 +16267,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -16526,6 +16677,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -16871,6 +17027,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -17240,6 +17401,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -17611,6 +17775,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -18031,6 +18200,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -18364,6 +18538,9 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -18703,6 +18880,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "17",
      "name": "Accademie",
@@ -19039,6 +19221,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -19381,6 +19568,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": true,
     "category": {
      "id": "23",
      "name": "Tornei",
@@ -19897,6 +20089,11 @@
     "featured": false,
     "isSpecialOffer": false,
     "maxPaxPerRoom": null,
+    "vela_levels": [
+     "all"
+    ],
+    "vela_levels_exclusive": false,
+    "vela_coaching": false,
     "category": {
      "id": "20",
      "name": "Vacanze",

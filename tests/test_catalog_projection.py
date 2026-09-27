@@ -32,7 +32,7 @@ class ProjectDetailTest(unittest.TestCase):
             "id", "title", "slug", "shortDescription", "price", "currency", "minPax", "maxPax",
             "minDate", "maxDate", "availabilities", "defaultDurationInDays", "updatedAt",
             "category", "venue", "destination", "hotels", "featured", "isSpecialOffer",
-            "maxPaxPerRoom"]))
+            "maxPaxPerRoom", "vela_levels", "vela_levels_exclusive", "vela_coaching"]))
         self.assertEqual(catalog["category"]["slug"], "padel")
         self.assertEqual(catalog["destination"]["geohierarchy"], "IT_123")
         self.assertEqual(catalog["hotels"]["data"][0]["attributes"], {"name": "Hotel Uno"})
@@ -48,6 +48,18 @@ class ProjectDetailTest(unittest.TestCase):
         catalog = cat.project_detail(detail_of(item(12, maxPaxPerRoom=2)))
         self.assertEqual(catalog["maxPaxPerRoom"], 2)
 
+    def test_computes_level_and_coaching_labels_from_the_descriptions(self):
+        """M21-C (RF-63): le tre etichette di Vela, calcolate da `description` e
+        `shortDescription` con `labels_of`; il prefisso `vela_` le separa dai campi dell'API."""
+        catalog = cat.project_detail(detail_of(item(
+            12, description="Per **giocatori di livello intermedio e avanzato**, con coach.",
+            shortDescription="Solo per avanzati")))
+        self.assertEqual((catalog["vela_levels"], catalog["vela_levels_exclusive"],
+                          catalog["vela_coaching"]), (["advanced"], True, True))
+        catalog = cat.project_detail(detail_of(item(12, description="Mare e sole.")))
+        self.assertEqual((catalog["vela_levels"], catalog["vela_levels_exclusive"],
+                          catalog["vela_coaching"]), ([], False, False))
+
     def test_missing_fields_become_none(self):
         catalog = cat.project_detail({"id": "1"})
         self.assertIsNone(catalog["venue"])
@@ -55,3 +67,5 @@ class ProjectDetailTest(unittest.TestCase):
         self.assertIsNone(catalog["price"])
         self.assertIsNone(catalog["featured"])
         self.assertIsNone(catalog["maxPaxPerRoom"])
+        self.assertEqual((catalog["vela_levels"], catalog["vela_levels_exclusive"],
+                          catalog["vela_coaching"]), ([], False, False))   # nessun testo

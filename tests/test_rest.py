@@ -619,3 +619,53 @@ class RoomsContractTest(unittest.TestCase):
         proposal = self.five_proposal(c)
         r = c.post("/v1/proposals/%s/accept" % proposal["proposal_id"], headers=AUTH, json={"rooms": "due"})
         self.assertEqual(r.status_code, 422)
+
+
+class LevelContractTest(unittest.TestCase):
+    """M21-C (UC-C, RF-52, RF-62): `level` e `wants_coaching` nel corpo e nei criteri."""
+
+    UC_C = "Siamo principianti, vorremmo lezioni di padel in Spagna a ottobre, in due."
+    PRODUCTS = [replace(make_product(1, price=300), levels=frozenset({"intermediate", "advanced"})),
+                replace(make_product(2, price=400), levels=frozenset({"beginner"}), coaching=True)]
+
+    def test_fields_reach_the_criteria_and_the_proposal(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.UC_C, "level": "beginner",
+                                                      "wants_coaching": True})
+        self.assertEqual(r.status_code, 201, r.text)
+        crit = r.json()["criteria"]
+        self.assertEqual((crit["level"], crit["wants_coaching"]), ("beginner", True))
+        p = c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+        self.assertEqual(p["product"]["product_id"], "2")
+        self.assertIn("pensato per principianti", p["say"])
+
+    def test_invalid_level_is_declared_not_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        r = c.post("/v1/intents", headers=AUTH, json={"text": INTENT, "level": "expert"})
+        self.assertEqual(r.status_code, 201, r.text)
+        self.assertTrue(r.json()["say"].startswith("Non ho potuto usare expert come livello di gioco"))
+
+    def test_wrong_types_are_422(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        for body in ({"text": INTENT, "wants_coaching": "forse"}, {"text": INTENT, "level": ["beginner"]}):
+            with self.subTest(body=body):
+                self.assertEqual(c.post("/v1/intents", headers=AUTH, json=body).status_code, 422)
+
+    def test_reject_with_wants_coaching(self):
+        c, _ = make_client(products=self.PRODUCTS)
+        intent = new_intent(c, text="padel in Spagna a ottobre, in due")
+        first = c.get("/v1/intents/%s/proposal" % intent["intent_id"], headers=AUTH).json()
+        r = c.post("/v1/proposals/%s/reject" % first["proposal_id"], headers=AUTH,
+                   json={"reason": "vorremmo un maestro", "wants_coaching": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("con lezioni", r.json()["say"])
+
+    def test_replay_fixture_uc_c(self):
+        """UC-C sul catalogo delle fixture: la proposta dice se rispetta livello e lezioni."""
+        c, _ = make_client()
+        r = c.post("/v1/intents", headers=AUTH, json={"text": self.UC_C})
+        self.assertEqual(r.status_code, 201, r.text)
+        p = c.get("/v1/intents/%s/proposal" % r.json()["intent_id"], headers=AUTH).json()
+        self.assertEqual(p["outcome"], "proposal")
+        self.assertTrue("Il programma" in p["say"] or "Non ho trovato viaggi per principianti" in p["say"],
+                        p["say"])
