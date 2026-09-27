@@ -80,7 +80,9 @@ DESCRIPTIONS = {
         "or that either is fine, first ask \"Padel or tennis?\" and wait for the answer. Pass "
         "the user's sentence verbatim in `text`, plus every criterion you already understood as "
         "a field: `sport` (padel, tennis, or any when either is fine), `area`, `period_start` and "
-        "`period_end`, `pax`, `budget`, and the trip length in nights as `duration_min_nights` and "
+        "`period_end`, `pax`, `budget` (the figure as the user said it, never multiplied or "
+        "divided by the people) with `budget_scope` (per_person or total) only if the user said "
+        "it explicitly, and the trip length in nights as `duration_min_nights` and "
         "`duration_max_nights` (a weekend is 1 to 3, a long weekend 2 to 4, a week 6 to 8, N days "
         "is N-1 nights). Leave out what the user did not say: never guess. Add "
         "traveler details only if the user already gave them. Returns either `intent_id` (then "
@@ -99,7 +101,8 @@ DESCRIPTIONS = {
         "dates, length, sport, budget, people). Always use this tool for changes after a proposal, never "
         "a new create_intent: the intent keeps what the user already turned down. Pass the "
         "user's reason in their own words in `reason`, plus only the criteria that changed as "
-        "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget`, "
+        "fields (`sport`, `area`, `period_start`, `period_end`, `pax`, `budget` as the user said "
+        "it, `budget_scope` when the user says the budget was per person or in total, "
         "`duration_min_nights`, `duration_max_nights`), and "
         "`direction`: north when the user wants somewhere cooler, south when they want somewhere "
         "warmer. Returns the next single proposal, or `failed_criterion` with "
@@ -149,7 +152,12 @@ Area = Annotated[Optional[str], Field(
 PeriodStart = Annotated[Optional[str], Field(description="First day of the period, YYYY-MM-DD.")]
 PeriodEnd = Annotated[Optional[str], Field(description="Last day of the period, YYYY-MM-DD.")]
 Budget = Annotated[Optional[float], Field(
-    description="Maximum total budget in euros for the whole group, only if the user said it.")]
+    description="Maximum budget in euros, the figure exactly as the user said it: never multiply "
+                "or divide it by the number of people. Only if the user said it.")]
+BudgetScope = Annotated[Optional[str], Field(
+    description="per_person when the user explicitly said the budget is per person (each, a "
+                "testa), total when they explicitly said it is for everyone (in total, in tutto). "
+                "Leave it out otherwise: Vela reads the figure and says how it read it.")]
 DurationMin = Annotated[Optional[int], Field(
     description="Shortest trip the user wants, in nights, only if they said a length: weekend 1, "
                 "long weekend 2, a week 6, N days N-1, N nights N.")]
@@ -213,13 +221,15 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                       period_start: PeriodStart = None, period_end: PeriodEnd = None,
                       pax: Pax = None, budget: Budget = None,
                       duration_min_nights: DurationMin = None,
-                      duration_max_nights: DurationMax = None, first_name: FirstName = None,
+                      duration_max_nights: DurationMax = None,
+                      budget_scope: BudgetScope = None, first_name: FirstName = None,
                       last_name: LastName = None, email: Email = None, phone: Phone = None,
                       participants: Participants = None) -> CallToolResult:
         profile = traveler_profile(first_name, last_name, email, phone, pax, participants)
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget,
                                   duration_min_nights=duration_min_nights,
-                                  duration_max_nights=duration_max_nights)
+                                  duration_max_nights=duration_max_nights,
+                                  budget_scope=budget_scope)
         return run("create_intent", lambda v: v.create_intent(text, profile, fields))
 
     @server.tool(description=descriptions["get_proposal"])
@@ -231,9 +241,10 @@ def build_mcp(get_vela: Callable[[], Optional[Vela]]) -> MCPServer:
                         area: Area = None, period_start: PeriodStart = None,
                         period_end: PeriodEnd = None, pax: Pax = None, budget: Budget = None,
                         direction: Direction = None, duration_min_nights: DurationMin = None,
-                        duration_max_nights: DurationMax = None) -> CallToolResult:
+                        duration_max_nights: DurationMax = None,
+                        budget_scope: BudgetScope = None) -> CallToolResult:
         fields = StructuredFields(sport, area, period_start, period_end, pax, budget, direction,
-                                  duration_min_nights, duration_max_nights)
+                                  duration_min_nights, duration_max_nights, budget_scope)
         return run("reject_proposal", lambda v: v.reject_proposal(proposal_id, reason, fields))
 
     @server.tool(description=descriptions["accept_proposal"])

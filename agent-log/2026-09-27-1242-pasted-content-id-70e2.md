@@ -321,3 +321,27 @@ Red. Implementing in `say.py`:
 - 🔧 Bash: Implement RF-70 sentence and run suite
 
 - 🔧 Bash: Update UC7 expectation, run suite, commit say changes
+
+Commit 6: MCP and REST surfaces. Looking at how M21-A tested the contract on both:
+
+- 🔧 Bash: Read MCP and REST duration contract tests
+
+- 🔧 Bash: Read MCP tool descriptions and signatures
+
+Tests for both surfaces first:
+
+- 🔧 Bash: Check imports and helpers in surface tests
+
+- 🔧 Bash: Add failing MCP and REST contract tests
+
+- 🔧 Bash: Fix assertion and show failure reasons
+
+- 🔧 Bash: Make surface tests depend on the field and rerun
+
+All red for the right reasons. Implementing the surfaces, with the `budget` description you specified:
+
+- 🔧 Bash: Add budget_scope to MCP tools and REST body
+
+`DESCRIPTIONS_SMS` inherits the two tool texts. Full suite and lint:
+
+- 🔧 Bash: Run full suite and lint
