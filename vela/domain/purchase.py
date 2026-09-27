@@ -100,8 +100,8 @@ class PurchaseJob:
         hofj = self.hofj.client_for(product) if job.step < STEP_LINK else None
         if job.step == STEP_ITINERARY:
             proposal = self.repos.proposals.get(order.proposal_id)
-            itinerary_id = hofj.create_itinerary(product, proposal.start_date, order.pax, 1,
-                                                 order.currency)
+            itinerary_id = hofj.create_itinerary(product, proposal.start_date, order.pax,
+                                                 order.rooms, order.currency)   # RF-67
             if not product.bookable:
                 self.repos.products.set_bookable(product.id, True, self.now())   # RF-34
             self._save_order(replace(order, itinerary_id=itinerary_id))

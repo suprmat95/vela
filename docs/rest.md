@@ -12,7 +12,7 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 | `POST /v1/intents` | `{"text": str, "profile"?: Profile, ...Fields}` | 201 `intent_created`, 200 `question` |
 | `GET /v1/intents/{intent_id}/proposal` | — | 200 `proposal`, 200 `no_match` |
 | `POST /v1/proposals/{proposal_id}/reject` | opzionale `{"reason"?: str, ...Fields, "direction"?: str}` | 200 `proposal`, 200 `no_match` (con `rejected_proposal_id`) |
-| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data` |
+| `POST /v1/proposals/{proposal_id}/accept` | opzionale `{"traveler"?: Profile, "rooms"?: int}` | 200 `order_status` (`awaiting_confirmation` alla prima chiamata, `awaiting_payment` alla conferma), 202 `order_queued` (con `Location`) se l'attesa scade, 200 `missing_traveler_data`, 200 `question` (M21-D: `rooms` sotto il minimo del prodotto, nessun ordine) |
 | `GET /v1/orders/{order_id}` | — | 200 `order_status` |
 
 `Profile` = `{"first_name"?, "last_name"?, "email"?, "phone"?, "pax"? (≥ 1), "participants"?: [{"first_name"?, "last_name"?}]}`.
@@ -21,8 +21,8 @@ La superficie REST (RF-40) espone i cinque casi d'uso di RF-39 sotto `/v1`. Ogni
 ### Campi strutturati (M17, RF-52..55)
 
 `Fields` = `{"sport"?, "area"?, "period_start"?, "period_end"?, "pax"?, "budget"?,
-"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?}` (la durata da M21-A, la
-lettura del budget da M21-E), gli stessi
+"duration_min_nights"?, "duration_max_nights"?, "budget_scope"?, "rooms"?}` (la durata da M21-A, la
+lettura del budget da M21-E, le camere da M21-D), gli stessi
 nomi e valori degli argomenti dei tool MCP `create_intent` e `reject_proposal`. Sono i criteri
 già capiti dall'agente; `text` e `reason` restano e si passano sempre con le parole del
 viaggiatore. Un client che manda solo testo funziona come prima.
@@ -36,6 +36,7 @@ viaggiatore. Un client che manda solo testo funziona come prima.
 | `budget` | numero, budget massimo in euro: la cifra così come l'ha detta il viaggiatore, mai moltiplicata o divisa per il numero di persone | non positivo |
 | `budget_scope` | `per_person` (il viaggiatore ha detto "a testa", "each"), `total` ("in tutto", "in total"). Solo se il viaggiatore l'ha detto in modo esplicito | altro valore |
 | `duration_min_nights`, `duration_max_nights` | interi, notti del viaggio (M21-A, RF-58): weekend 1..3, ponte o weekend lungo 2..4, una settimana 6..8, N giorni = N−1 notti. Basta uno dei due; uno solo sostituisce tutta la durata letta nel testo | fuori da 1..30, minimo maggiore del massimo, non interi |
+| `rooms` | intero, camere dell'hotel (M21-D, RF-65): da 1 al numero di persone. Su `accept` è una correzione dell'ultimo momento | fuori da 1..pax (le persone dopo la precedenza campo > testo > profilo), non intero |
 | `direction` (solo rifiuto) | `north` ("più fresco"), `south` ("più caldo") | altro valore, o `geo.move` non sa spostare l'area |
 
 - **Precedenza** (RF-53): campo valido > parser del testo > fallback Haiku (solo sulla
@@ -70,7 +71,22 @@ viaggiatore. Un client che manda solo testo funziona come prima.
   prima partenza nel periodo che hai chiesto", "è tra i viaggi in evidenza del catalogo") e "la
   più economica" solo quando è vero. Nessun campo nuovo.
 - **Sport** (RF-04): sempre indispensabile. Senza sport da campo, testo o fallback la risposta
-  è `question` "Padel o tennis?" e nessun intento viene salvato.
+  è `question` "Padel o tennis?" e nessun intento viene salvato. Le domande, una alla volta, in
+  quest'ordine: sport, persone, camere.
+- **Persone e camere** (RF-65..68, M21-D): con più di 2 persone e nessuna camera nel campo
+  `rooms` né nel testo ("tre camere", "two rooms", "due coppie", "una matrimoniale e una
+  doppia") la risposta è `question` "In quante camere?" / "How many rooms?" e nulla viene
+  salvato; con 1 o 2 persone la camera è una, senza domanda e senza dirlo nel `say`. Un prodotto
+  con `maxPaxPerRoom` vuole almeno ceil(persone / massimo) camere: con meno è escluso (filtro
+  duro dopo le persone), e se non resta nulla `no_match` ha `failed_criterion` `rooms` con il
+  minimo nel `say` ("camere da massimo 2 persone: per 5 persone servono almeno 3 camere"). La
+  `reason` della proposta dice il limite quando obbliga a più di una camera. Con una persona sola
+  e soli viaggi da 2 in su, `failed_criterion` è `pax` e il `say` lo spiega. Nel rifiuto le
+  camere si cambiano da testo o campo, sempre entro le persone; se cambiano solo le persone le
+  camere restano (limitate alle persone) e il `say` le ripete ("per 5 persone in 1 camera"). Su
+  `accept` il campo `rooms` corregge le camere: sotto il minimo del prodotto la risposta è
+  `question` e nessun ordine nasce; valido, aggiorna ordine e criteri dell'intento; ignorato
+  sulla conferma del prezzo. Il job d'acquisto manda le camere dell'ordine a HofJ (RF-67).
 - **`say`** (RF-54): `intent_created`, `proposal` e `no_match` di un rifiuto ripetono i criteri
   capiti ("Ho capito: …"); un motivo di rifiuto che non cambia nessun criterio viene dichiarato.
 - **Dopo una proposta** (RF-55) ogni cambiamento passa da `reject`, mai da un nuovo
@@ -86,9 +102,9 @@ al viaggiatore, e contiene al massimo un prodotto (RF-10).
 
 | `outcome` | HTTP | Significato |
 |---|---|---|
-| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget) |
-| `question` | 200 | manca un dato indispensabile: leggere `say`, nulla è stato salvato |
-| `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A) |
+| `intent_created` | 201 | intento salvato con i criteri estratti (da M21-E anche `budget_scope`: `per_person`, `total`, `null` senza budget; da M21-D `rooms`) |
+| `question` | 200 | manca un dato indispensabile, oppure (M21-D, su `accept`) le camere sono sotto il minimo del prodotto: leggere `say`, nulla è stato salvato |
+| `proposal` | 200 | una proposta; `nights` = notti del viaggio (`end_date` − `start_date`, M21-A); `rooms` = camere dell'intento (M21-D) |
 | `no_match` | 200 | niente di compatibile; `failed_criterion` dice perché; `rejected_proposal_id` se arriva da un rifiuto (RF-55) |
 | `order_queued` | 202 | ordine ancora in coda allo scadere dell'attesa (RF-45, 100 s): `order_id`, `status` `queued`, `position`, `wait_seconds`. Prezzo e link arrivano con lo stato. Header `Location: /v1/orders/{order_id}` |
 | `missing_traveler_data` | 200 | mancano dati del viaggiatore; `missing` li elenca |

@@ -1,6 +1,7 @@
 """Chooser v3 (RF-06, RF-07, RF-09, RF-60, RF-61): una sola scelta deterministica.
 
-Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, prezzo
+Filtri duri in sequenza: archiviati, non prenotabili, non-viaggi, sport, date, pax, camere
+(RF-66, M21-D: un prodotto con `max_pax_per_room` vuole almeno ceil(pax / limite) camere), prezzo
 (dopo un rifiuto per prezzo solo totali minori del rifiutato, decisione M7), rifiutati (ultimi, così `NoChoice("rejected")` significa "i compatibili li hai scartati tutti"). Dei
 prodotti equivalenti (RF-61, M21-B) resta un solo candidato, quello con l'id più basso. Tra i
 restanti ordina come RF-60 (M21-B): aderenza all'area (dentro l'area 3, stessa regione 2,
@@ -9,7 +10,8 @@ fino a M21-C], partenza più vicina all'inizio del periodo (o a oggi senza perio
 o offerta speciale, prezzo crescente, id numerico. Area, budget e durata non escludono mai: se
 non sono rispettati la motivazione lo dichiara (RF-59); la motivazione dice anche il livello
 che ha deciso quando un prodotto più economico ha perso sulla partenza o su `featured`. Se un
-filtro azzera i candidati, `NoChoice` porta il nome di quel filtro (RF-09).
+filtro azzera i candidati, `NoChoice` porta il nome di quel filtro (RF-09); per le camere anche
+le camere minime che avrebbero salvato un prodotto e il relativo massimo per camera.
 """
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -19,9 +21,9 @@ from typing import Iterable, Optional, Set, Tuple, Union
 from vela.domain import geo
 from vela.domain.catalog import is_trip
 from vela.domain.models import Area, Criteria, Period, Product
-from vela.domain.say import fmt_money, fmt_nights, fmt_span, nights_range, on_date
+from vela.domain.say import _people, fmt_money, fmt_nights, fmt_rooms, fmt_span, nights_range, on_date
 
-FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "price", "rejected")
+FILTERS = ("archived", "bookable", "trip", "sport", "dates", "pax", "rooms", "price", "rejected")
 
 INSIDE, SAME_REGION, SAME_COUNTRY, ELSEWHERE = 3, 2, 1, 0
 
@@ -43,6 +45,8 @@ class Choice:
 @dataclass(frozen=True)
 class NoChoice:
     failed_criterion: str
+    rooms_needed: Optional[int] = None        # solo "rooms" (RF-66): camere minime per un candidato
+    max_pax_per_room: Optional[int] = None    # solo "rooms": il limite per camera di quel candidato
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,27 @@ def _pax_ok(product: Product, pax: Optional[int]) -> bool:
     if product.max_pax and pax > product.max_pax:
         return False
     return True
+
+
+def rooms_needed(product: Product, pax: int) -> int:
+    """RF-66: ceil(pax / `max_pax_per_room`); senza limite (None o 0) una camera basta."""
+    limit = product.max_pax_per_room
+    return -(-pax // limit) if limit else 1
+
+
+def _rooms_ok(product: Product, pax: Optional[int], rooms: Optional[int]) -> bool:
+    """Senza persone o senza camere (intenti salvati prima di M21-D) nessun filtro."""
+    if pax is None or rooms is None:
+        return True
+    return rooms >= rooms_needed(product, pax)
+
+
+def _no_choice(name: str, candidates: list, criteria: Criteria) -> NoChoice:
+    """Il filtro `name` ha azzerato `candidates`. Per le camere: il candidato che ne chiede meno."""
+    if name != "rooms" or not candidates or criteria.pax is None:
+        return NoChoice(name)
+    best = min(candidates, key=lambda p: (rooms_needed(p, criteria.pax), id_key(p)))
+    return NoChoice(name, rooms_needed(best, criteria.pax), best.max_pax_per_room)
 
 
 def place_of(product: Product) -> Optional[Area]:
@@ -242,12 +267,31 @@ def _dates_budget_sentence(product: Product, criteria: Criteria, start: date, sc
     return text + "."
 
 
+def _rooms_sentence(product: Product, criteria: Criteria) -> Optional[str]:
+    """RF-66: "Le camere di questo viaggio ospitano al massimo 2 persone: per 5 servono almeno 3
+    camere, come hai chiesto." Solo quando il limite obbliga a più di una camera."""
+    if criteria.pax is None or criteria.rooms is None or not product.max_pax_per_room:
+        return None
+    needed = rooms_needed(product, criteria.pax)
+    if needed < 2:
+        return None
+    limit, pax, rooms = product.max_pax_per_room, criteria.pax, criteria.rooms
+    if criteria.language == "en":
+        tail = "as you asked" if rooms == needed else "you asked for %d" % rooms
+        return ("The rooms of this trip hold at most %s: %s need at least %s, %s."
+                % (_people(limit, "en"), _people(pax, "en"), fmt_rooms(needed, "en"), tail))
+    tail = "come hai chiesto" if rooms == needed else "tu ne hai chieste %d" % rooms
+    return ("Le camere di questo viaggio ospitano al massimo %s: per %d servono almeno %s, %s."
+            % (_people(limit), pax, fmt_rooms(needed), tail))
+
+
 def _reason(product: Product, criteria: Criteria, start: date, end: date, score: int,
             within: bool, duration_ok: bool, why: Why) -> str:
     sentences = [_area_sentence(product, criteria.area, score, criteria.language)]
     if not duration_ok:
         sentences.append(_duration_sentence(criteria, start, end))
     sentences.append(_dates_budget_sentence(product, criteria, start, score, within, why))
+    sentences.append(_rooms_sentence(product, criteria))
     return " ".join(s for s in sentences if s is not None)
 
 
@@ -301,6 +345,7 @@ def _hard_filters(criteria: Criteria, today: date, now: Optional[datetime]) -> t
         ("sport", lambda p: criteria.sport in (None, "any") or p.sport == criteria.sport),
         ("dates", lambda p: departure(p, criteria.period, today) is not None),
         ("pax", lambda p: _pax_ok(p, criteria.pax)),
+        ("rooms", lambda p: _rooms_ok(p, criteria.pax, criteria.rooms)),
     )
 
 
@@ -323,9 +368,9 @@ def choose(products: Iterable[Product], criteria: Criteria, rejected_ids: Set[st
         ("rejected", lambda p: p.id not in rejected_ids),
     )
     for name, keep in steps:
-        candidates = [p for p in candidates if keep(p)]
+        before, candidates = candidates, [p for p in candidates if keep(p)]
         if not candidates:
-            return NoChoice(name)
+            return _no_choice(name, before, criteria)
     candidates = one_per_equivalence_group(candidates)   # RF-61: mai vuoto
     trips = {p.id: departure(p, criteria.period, today) for p in candidates}   # mai None: filtro "dates"
     score_of = {p.id: area_score(p, criteria.area) for p in candidates}

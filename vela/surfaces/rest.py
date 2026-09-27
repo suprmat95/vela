@@ -2,7 +2,7 @@
 
 Bearer statico ``VELA_API_TOKEN``; senza token configurato ogni endpoint risponde 503. Ogni
 risposta di successo è ``{"outcome": ..., **to_dict()}``: gli esiti previsti (domanda, niente di
-compatibile, dati mancanti) sono 200, non errori. L'accettazione è asincrona (RF-45): 202
+compatibile, dati mancanti, camere sotto il minimo) sono 200, non errori. L'accettazione è asincrona (RF-45): 202
 ``order_queued`` con ``Location`` verso lo stato dell'ordine; un doppio accept risponde 200 con lo
 stato attuale. Gli errori sono RFC 7807
 (``vela/surfaces/problems.py``). Ordine dei controlli: token, validazione, dominio.
@@ -84,11 +84,12 @@ class FieldsIn(BaseModel):
     duration_min_nights: Optional[int] = None
     duration_max_nights: Optional[int] = None
     budget_scope: Optional[str] = None
+    rooms: Optional[int] = None
 
     def fields(self, direction: Optional[str] = None) -> StructuredFields:
         return StructuredFields(self.sport, self.area, self.period_start, self.period_end,
                                 self.pax, self.budget, direction, self.duration_min_nights,
-                                self.duration_max_nights, self.budget_scope)
+                                self.duration_max_nights, self.budget_scope, self.rooms)
 
 
 class IntentIn(FieldsIn):
@@ -103,6 +104,7 @@ class RejectIn(FieldsIn):
 
 class AcceptIn(BaseModel):
     traveler: Optional[ProfileIn] = None
+    rooms: Optional[int] = None   # M21-D (RF-65): correzione facoltativa delle camere
 
 
 router = APIRouter(prefix="/v1", tags=["v1"], dependencies=[Depends(require_token)])
@@ -130,7 +132,8 @@ def reject_proposal(proposal_id: str, body: Optional[RejectIn] = None,
 def accept_proposal(proposal_id: str, body: Optional[AcceptIn] = None,
                     vela: Vela = Depends(get_vela)) -> JSONResponse:
     traveler = to_profile(body.traveler) if body is not None else None
-    return reply(vela.accept_proposal(proposal_id, traveler))
+    rooms = body.rooms if body is not None else None
+    return reply(vela.accept_proposal(proposal_id, traveler, rooms))
 
 
 @router.get("/orders/{order_id}")

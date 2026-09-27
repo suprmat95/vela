@@ -38,6 +38,7 @@ def _product_row(p: Product) -> dict:
         "bookable_checked_at": p.bookable_checked_at, "archived": p.archived,
         "provider_id": p.provider_id, "brand": p.brand,
         "featured": p.featured, "special_offer": p.special_offer,
+        "max_pax_per_room": p.max_pax_per_room,
     }
 
 
@@ -54,7 +55,8 @@ def _product(m, raw: Optional[dict]) -> Product:
         raw=raw if raw is not None else {}, fetched_at=m["fetched_at"], bookable=m["bookable"],
         bookable_checked_at=m["bookable_checked_at"], archived=m["archived"],
         provider_id=m["provider_id"], brand=m["brand"],
-        featured=bool(m["featured"]), special_offer=bool(m["special_offer"]))
+        featured=bool(m["featured"]), special_offer=bool(m["special_offer"]),
+        max_pax_per_room=m["max_pax_per_room"])
 
 
 class PostgresProducts:
@@ -191,7 +193,7 @@ def _order_row(o: Order) -> dict:
         "booking_code": o.booking_code, "failure_reason": o.failure_reason,
         "created_at": o.created_at, "updated_at": o.updated_at, "paid_at": o.paid_at,
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
-        "orphan_itineraries": o.orphan_itineraries,
+        "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
     }
 
 
@@ -203,7 +205,7 @@ def _order(m) -> Order:
                  payment_ref=m["payment_ref"], booking_code=m["booking_code"],
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
                  enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
-                 orphan_itineraries=m["orphan_itineraries"])
+                 orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"])
 
 
 class PostgresOrders:

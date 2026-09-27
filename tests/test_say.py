@@ -36,6 +36,24 @@ class SayTest(unittest.TestCase):
         self.assertNotIn("http", s)
         self.assertNotIn("*", s)
 
+    def test_proposal_says_the_rooms_for_a_group(self):
+        """M21-D (RF-06): "per 5 persone in 3 camere"; con 1 o 2 persone in 1 camera niente."""
+        five = replace(PROPOSAL, pax=5)
+        self.assertIn("per 5 persone in 3 camere", say.say_proposal(PRODUCT, five, rooms=3))
+        self.assertIn("for 5 people in 3 rooms", say.say_proposal(PRODUCT, five, "en", rooms=3))
+        self.assertIn("per 2 persone in 2 camere", say.say_proposal(PRODUCT, PROPOSAL, rooms=2))
+        self.assertNotIn("camer", say.say_proposal(PRODUCT, PROPOSAL, rooms=1))
+        self.assertNotIn("camer", say.say_proposal(PRODUCT, PROPOSAL))
+
+    def test_rooms_below_minimum(self):
+        """M21-D (RF-65): la domanda di `accept_proposal` con il minimo del prodotto."""
+        self.assertEqual(say.say_rooms_below_minimum(2, 5, 3),
+                         "Le camere di questo viaggio ospitano al massimo 2 persone: per 5 servono "
+                         "almeno 3 camere. In quante camere?")
+        self.assertEqual(say.say_rooms_below_minimum(2, 5, 3, "en"),
+                         "The rooms of this trip hold at most 2 people: 5 people need at least 3 "
+                         "rooms. How many rooms?")
+
     def test_proposal_without_hotel_and_single_day(self):
         p = ProductSummary("1", "Titolo", None, None)
         s = say.say_proposal(p, Proposal("p", "i", "1", date(2026, 10, 1), date(2026, 10, 1), 1,
@@ -46,8 +64,9 @@ class SayTest(unittest.TestCase):
     def test_no_match_covers_every_criterion(self):
         from vela.domain.chooser import FILTERS
         texts = {c: say.say_no_match(c) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 6)   # archived e bookable condividono la frase
+        self.assertEqual(len(set(texts.values())), 7)   # archived, bookable e trip condividono la frase
         self.assertIn("scartato", texts["rejected"])
+        self.assertIn("camere", texts["rooms"])   # M21-D
         self.assertIn("più economico", texts["price"])
         self.assertIn("periodo", texts["dates"])
 
@@ -126,6 +145,34 @@ class SayM11Test(unittest.TestCase):
         self.assertIn("scartato", say.say_no_match("rejected", c))
         self.assertEqual(say.say_no_match("trip", c), say.say_no_match("archived"))
 
+    def test_no_match_rooms_says_the_minimum(self):
+        """M21-D (RF-66): le camere minime e il relativo massimo per camera dal chooser."""
+        c = Criteria("padel", pax=5, rooms=1)
+        self.assertEqual(say.say_no_match("rooms", c, rooms_needed=2, max_pax_per_room=4),
+                         "I viaggi compatibili hanno camere da massimo 4 persone: per 5 persone "
+                         "servono almeno 2 camere. Vuoi cambiare il numero di camere?")
+        self.assertEqual(say.say_no_match("rooms", replace(c, language="en"), rooms_needed=2,
+                                          max_pax_per_room=4),
+                         "The compatible trips have rooms for at most 4 people: 5 people need at "
+                         "least 2 rooms. Do you want to change the number of rooms?")
+
+    def test_no_match_rooms_without_numbers(self):
+        self.assertEqual(say.say_no_match("rooms"),
+                         "Non trovo viaggi per il numero di camere indicato: prova a cambiare il "
+                         "numero di camere.")
+
+    def test_no_match_alone_says_trips_start_from_two(self):
+        """M21-D (RF-68): da solo restano solo viaggi da 2 persone in su."""
+        self.assertEqual(say.say_no_match("pax", Criteria("padel", pax=1)),
+                         "I viaggi di padel compatibili partono da 2 persone: da solo non posso "
+                         "prenotarli. Vuoi cambiare qualcosa?")
+        self.assertEqual(say.say_no_match("pax", Criteria("any", pax=1)),
+                         "I viaggi compatibili partono da 2 persone: da solo non posso prenotarli. "
+                         "Vuoi cambiare qualcosa?")
+        self.assertEqual(say.say_no_match("pax", Criteria("tennis", pax=1, language="en")),
+                         "The compatible tennis trips start from 2 people: I can't book them for "
+                         "you alone. Do you want to change something?")
+
     def test_no_match_without_value_falls_back(self):
         self.assertIn("periodo", say.say_no_match("dates", Criteria()))
         self.assertIn("sport", say.say_no_match("sport"))
@@ -157,8 +204,9 @@ class EnglishTest(unittest.TestCase):
         from vela.domain.chooser import FILTERS
         en = Criteria(language="en")
         texts = {c: say.say_no_match(c, en) for c in FILTERS}
-        self.assertEqual(len(set(texts.values())), 6)   # archived, bookable e trip condividono la frase
+        self.assertEqual(len(set(texts.values())), 7)   # archived, bookable e trip condividono la frase
         self.assertIn("period", texts["dates"])
+        self.assertIn("rooms", texts["rooms"])   # M21-D
         self.assertIn("cheaper", texts["price"])
         self.assertNotEqual(texts["dates"], say.say_no_match("dates"))
 
@@ -404,6 +452,39 @@ class AgentToolSayTest(unittest.TestCase):
         self.assertEqual(say.say_understood(replace(c, language="en")),
                          "Got it: a tennis trip in Spain for 3 people with a budget of 600 euros "
                          "in total.")
+
+    def test_understood_says_the_rooms_with_more_than_two_people(self):
+        """M21-D (RF-54, RF-65): le camere dopo le persone; con 1 o 2 persone in 1 camera (il
+        default) non si dicono (decisione M21-D)."""
+        c = Criteria("padel", SPAIN, pax=5, rooms=3, budget=Decimal("3000"), budget_scope="total")
+        self.assertEqual(say.say_understood(c),
+                         "Ho capito: un viaggio di padel in Spagna per 5 persone in 3 camere con un "
+                         "budget di 3000 euro in tutto.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip in Spain for 5 people in 3 rooms with a budget of "
+                         "3000 euros in total.")
+
+    def test_understood_says_one_room_for_a_group(self):
+        c = Criteria("padel", pax=5, rooms=1)
+        self.assertEqual(say.say_understood(c), "Ho capito: un viaggio di padel per 5 persone in 1 camera.")
+        self.assertEqual(say.say_understood(replace(c, language="en")),
+                         "Got it: a padel trip for 5 people in 1 room.")
+
+    def test_understood_says_two_rooms_for_two_people(self):
+        self.assertEqual(say.say_understood(Criteria("padel", pax=2, rooms=2)),
+                         "Ho capito: un viaggio di padel per 2 persone in 2 camere.")
+
+    def test_understood_is_silent_on_the_default_room(self):
+        for c in (Criteria("padel", pax=2, rooms=1), Criteria("padel", pax=1, rooms=1),
+                  Criteria("padel", pax=4)):   # intento salvato prima di M21-D: nessuna camera
+            with self.subTest(c=c):
+                self.assertNotIn("camer", say.say_understood(c))
+                self.assertNotIn("room", say.say_understood(replace(c, language="en")))
+
+    def test_discarded_rooms(self):
+        self.assertEqual(say.say_discarded((("rooms", 6),)), "Non ho potuto usare 6 come numero di camere.")
+        self.assertEqual(say.say_discarded((("rooms", "tre"),), "en"),
+                         "I couldn't use tre as the number of rooms.")
 
     def test_understood_budget_saved_before_m21e_is_a_total(self):
         c = Criteria("padel", pax=2, budget=Decimal("800"))

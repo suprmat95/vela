@@ -134,6 +134,13 @@ class SyncTest(unittest.TestCase):
         flags = {pid: (p.featured, p.special_offer) for pid, p in self.products().items()}
         self.assertEqual(flags, {"1": (True, False), "2": (False, True), "3": (False, False)})
 
+    def test_max_pax_per_room_is_written_from_the_detail(self):
+        """M21-D (RF-66): il limite per camera arriva dal dettaglio esteso."""
+        source = FakeSource({"weebora.com": [[item(1, maxPaxPerRoom=2), item(2)]]})
+        self.sync(source, brands={"padel": "weebora.com"}).run()
+        limits = {pid: p.max_pax_per_room for pid, p in self.products().items()}
+        self.assertEqual(limits, {"1": 2, "2": None})
+
     def test_follows_the_cursor_across_pages(self):
         source = FakeSource({"weebora.com": [[item(1)], [item(2)], [item(3)]]})
         report = self.sync(source, {"padel": "weebora.com"}).run()

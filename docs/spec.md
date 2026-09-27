@@ -422,8 +422,8 @@ Origine: richiesta dell'utente del 2026-09-26 sui limiti del chooser v2. Decisio
 `docs/decisions.md` (2026-09-26, "Scelta v3"), casi d'uso in `docs/usecases/scelta.md`
 (UC-A..UC-F), implementazione in roadmap M21. RF-58 e RF-59 (durata) sono implementati da
 M21-A, RF-69 e RF-70 (budget a testa o totale) da M21-E, RF-60 e RF-61 (ordinamento e prodotti
-equivalenti, con il livello "livello e lezioni" neutro fino a M21-C) da M21-B; gli altri non
-ancora.
+equivalenti, con il livello "livello e lezioni" neutro fino a M21-C) da M21-B, RF-65..68 (persone
+e camere, con la migrazione 0011) da M21-D; gli altri non ancora.
 
 **Criteri dell'intento.** Sono salvati nel JSON di `intents.criteria` (nessuna migrazione) e
 restituiti nella risposta `intent_created` (interfaccia pubblica).
@@ -481,7 +481,7 @@ l'esclusione per hotel (RF-72) non sono criteri: si ricavano dai rifiuti dell'in
 - **RF-66** (UC-D) Un prodotto con `maxPaxPerRoom` richiede almeno ceil(pax /
   `maxPaxPerRoom`) camere; con meno camere chieste è escluso (`failed_criterion` `rooms` se
   nessuno resta). Il `say` della proposta dice il limite quando conta ("camere da massimo 2
-  persone: per 5 servono 3 camere").
+  persone: per 5 servono almeno 3 camere").
 - **RF-67** (UC-D) L'ordine salva il numero di camere e il job d'acquisto lo passa a
   `POST /v1/itineraries` (RF-14).
 - **RF-68** (UC-D) Un viaggiatore da solo per cui restano solo prodotti con `minPax` ≥ 2

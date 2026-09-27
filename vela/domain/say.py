@@ -82,6 +82,18 @@ def _people(n: Optional[int], lang: str = "it") -> str:
     return "1 persona" if n == 1 else "%d persone" % n
 
 
+def fmt_rooms(n: int, lang: str = "it") -> str:
+    if lang == "en":
+        return "1 room" if n == 1 else "%d rooms" % n
+    return "1 camera" if n == 1 else "%d camere" % n
+
+
+def rooms_said(pax: Optional[int], rooms: Optional[int]) -> bool:
+    """M21-D (decisione): le camere si dicono con più di 2 persone o con più di una camera; con
+    1 o 2 persone in 1 camera è il default, non un criterio detto. None = intento pre-M21-D."""
+    return rooms is not None and ((pax or 0) > 2 or rooms > 1)
+
+
 def _join(parts: list, lang: str = "it") -> str:
     if len(parts) <= 1:
         return "".join(parts)
@@ -119,6 +131,8 @@ def _describe(c: Criteria) -> str:
                      + ("," if c.pax or c.budget is not None else ""))
     if c.pax:
         parts.append(("for %s" if en else "per %s") % _people(c.pax, lang))
+    if rooms_said(c.pax, c.rooms):
+        parts.append("in " + fmt_rooms(c.rooms, lang))
     if c.budget is not None:
         parts.append(_budget_reading(c))
     return " ".join(parts)
@@ -160,7 +174,8 @@ _DISCARDED = {
            "budget": "Non ho potuto usare %s come budget.",
            "direction": "Non so spostare la ricerca verso %s.",
            "duration": "Non ho potuto usare %s come durata in notti.",
-           "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto."},
+           "budget_scope": "Non ho potuto usare %s come lettura del budget, a persona o in tutto.",
+           "rooms": "Non ho potuto usare %s come numero di camere."},
     "en": {"sport": "I don't handle %s: only padel or tennis.",
            "area": "I don't know the place %s.",
            "period": "I couldn't use the dates %s.",
@@ -168,7 +183,8 @@ _DISCARDED = {
            "budget": "I couldn't use %s as the budget.",
            "direction": "I can't move the search %s.",
            "duration": "I couldn't use %s as the length in nights.",
-           "budget_scope": "I couldn't use %s as the budget reading, per person or in total."},
+           "budget_scope": "I couldn't use %s as the budget reading, per person or in total.",
+           "rooms": "I couldn't use %s as the number of rooms."},
 }
 _DIRECTION_WORDS = {"it": {"north": "nord", "south": "sud"}, "en": {"north": "north", "south": "south"}}
 
@@ -195,8 +211,13 @@ def say_untranslatable(lang: str = "it") -> str:
     return "Non so scegliere in base a questo: ho escluso solo la proposta di prima."
 
 
-def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
+def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it",
+                 rooms: Optional[int] = None) -> str:
+    """`rooms` (M21-D, RF-06): "per 5 persone in 3 camere", con la regola di `rooms_said`."""
     hotel = ", hotel %s" % product.hotel if product.hotel else ""
+    people = _people(p.pax, lang)
+    if rooms_said(p.pax, rooms):
+        people += " in " + fmt_rooms(rooms, lang)
     if lang == "en":
         where = " in %s" % product.destination if product.destination else ""
         if p.start_date == p.end_date:
@@ -206,8 +227,7 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
         return ("I suggest %s%s%s, %s for %s, starting at %s per person: that's the minimum "
                 "price, the actual total depends on dates and availability and I'll tell you "
                 "before the payment link. %s Shall I go ahead?"
-                % (product.title, where, hotel, when, _people(p.pax, lang),
-                   fmt_money(p.price_from, lang), p.reason))
+                % (product.title, where, hotel, when, people, fmt_money(p.price_from, lang), p.reason))
     where = " a %s" % product.destination if product.destination else ""
     if p.start_date == p.end_date:
         when = on_date(p.start_date)
@@ -216,7 +236,20 @@ def say_proposal(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
     return ("Ti propongo %s%s%s, %s per %s, a partire da %s a persona: è il prezzo minimo, il "
             "totale effettivo dipende da date e disponibilità e te lo dico prima del link di "
             "pagamento. %s Ti va?"
-            % (product.title, where, hotel, when, _people(p.pax), fmt_money(p.price_from), p.reason))
+            % (product.title, where, hotel, when, people, fmt_money(p.price_from), p.reason))
+
+
+def say_rooms_below_minimum(max_pax_per_room: int, pax: int, needed: int, lang: str = "it") -> str:
+    """RF-65 su `accept_proposal`: la correzione delle camere è sotto il minimo del prodotto
+    (RF-66); nessun ordine, la domanda di RF-04."""
+    from vela.domain.intent import question_rooms   # evita l'import circolare (intent importa say? no: models)
+    if lang == "en":
+        head = ("The rooms of this trip hold at most %s: %s need at least %s."
+                % (_people(max_pax_per_room, lang), _people(pax, lang), fmt_rooms(needed, lang)))
+    else:
+        head = ("Le camere di questo viaggio ospitano al massimo %s: per %d servono almeno %s."
+                % (_people(max_pax_per_room), pax, fmt_rooms(needed)))
+    return head + " " + question_rooms(lang)
 
 
 _NO_MATCH = {
@@ -229,10 +262,17 @@ _NO_MATCH = {
         "dates": "Non trovo partenze nel periodo che hai chiesto: prova con un altro periodo.",
         "pax": "Non trovo viaggi per il numero di persone indicato: prova a cambiare il numero di persone.",
         "price": "Non ho niente di più economico per la tua richiesta: prova a cambiare periodo o destinazione.",
+        "rooms": "Non trovo viaggi per il numero di camere indicato: prova a cambiare il numero di camere.",
         None: "Non trovo nessun viaggio compatibile: dimmi cosa vuoi cambiare.",
         "sport_value": "Non trovo nessun viaggio di %s: prova con l'altro sport o dimmi cosa vuoi cambiare.",
         "dates_value": "Non trovo partenze %s: prova con un altro periodo.",
         "pax_value": "Non trovo viaggi per %s: prova a cambiare il numero di persone.",
+        # M21-D (RF-68): da solo restano solo viaggi da 2 persone in su
+        "pax_alone": "I viaggi%s compatibili partono da 2 persone: da solo non posso prenotarli. Vuoi cambiare qualcosa?",
+        "pax_alone_sport": " di %s",
+        # M21-D (RF-66): le camere minime che avrebbero salvato un prodotto
+        "rooms_value": ("I viaggi compatibili hanno camere da massimo %s: per %s servono almeno %s. "
+                        "Vuoi cambiare il numero di camere?"),
     },
     "en": {
         "archived": "Right now I have no bookable trips: please try again later.",
@@ -243,25 +283,39 @@ _NO_MATCH = {
         "dates": "I can't find departures in the period you asked for: try another period.",
         "pax": "I can't find trips for that number of people: try changing the number of people.",
         "price": "I have nothing cheaper for your request: try another period or destination.",
+        "rooms": "I can't find trips for that number of rooms: try changing the number of rooms.",
         None: "I can't find any matching trip: tell me what you want to change.",
         "sport_value": "I can't find any %s trip: try the other sport or tell me what you want to change.",
         "dates_value": "I can't find departures %s: try another period.",
         "pax_value": "I can't find trips for %s: try changing the number of people.",
+        "pax_alone": "The compatible%s trips start from 2 people: I can't book them for you alone. Do you want to change something?",
+        "pax_alone_sport": " %s",
+        "rooms_value": ("The compatible trips have rooms for at most %s: %s need at least %s. "
+                        "Do you want to change the number of rooms?"),
     },
 }
 
 
-def say_no_match(criterion: str, criteria: Optional[Criteria] = None) -> str:
+def say_no_match(criterion: str, criteria: Optional[Criteria] = None,
+                 rooms_needed: Optional[int] = None, max_pax_per_room: Optional[int] = None) -> str:
     """Frase di RF-09: dice quale criterio non si riesce a soddisfare e, se noto, con che valore,
-    nella lingua dei criteri."""
+    nella lingua dei criteri. Con una persona sola il filtro `pax` cade solo per `minPax` ≥ 2
+    (RF-68); per `rooms` i due numeri arrivano dal chooser (RF-66)."""
     c = criteria or Criteria()
-    texts = _NO_MATCH.get(c.language, _NO_MATCH["it"])
+    lang = c.language
+    texts = _NO_MATCH.get(lang, _NO_MATCH["it"])
     if criterion == "sport" and c.sport:
         return texts["sport_value"] % c.sport
     if criterion == "dates" and c.period:
-        return texts["dates_value"] % _when(c.period, c.language)
+        return texts["dates_value"] % _when(c.period, lang)
+    if criterion == "pax" and c.pax == 1:
+        sport = texts["pax_alone_sport"] % c.sport if c.sport in ("padel", "tennis") else ""
+        return texts["pax_alone"] % sport
     if criterion == "pax" and c.pax:
-        return texts["pax_value"] % _people(c.pax, c.language)
+        return texts["pax_value"] % _people(c.pax, lang)
+    if criterion == "rooms" and c.pax and rooms_needed and max_pax_per_room:
+        return texts["rooms_value"] % (_people(max_pax_per_room, lang), _people(c.pax, lang),
+                                       fmt_rooms(rooms_needed, lang))
     return texts.get(criterion, texts[None])
 
 
@@ -443,9 +497,10 @@ _REPLACED_INTRO = {
 }
 
 
-def say_replaced(product: ProductSummary, p: Proposal, lang: str = "it") -> str:
+def say_replaced(product: ProductSummary, p: Proposal, lang: str = "it",
+                 rooms: Optional[int] = None) -> str:
     """RF-17: la proposta sostitutiva, senza nominare l'errore del fornitore."""
-    return _REPLACED_INTRO.get(lang, _REPLACED_INTRO["it"]) + say_proposal(product, p, lang)
+    return _REPLACED_INTRO.get(lang, _REPLACED_INTRO["it"]) + say_proposal(product, p, lang, rooms)
 
 
 def say_cancelled_then(next_sentence: str, lang: str = "it") -> str:

@@ -194,7 +194,7 @@ Tempo di riferimento degli esempi: oggi 2026-09-26.
 - **Agente legge.**
   - "Ho capito: un viaggio di padel in Portogallo a novembre per 5 persone in 3 camere…"
   - Con `maxPaxPerRoom`: "Le camere di questo viaggio ospitano al massimo 2 persone: per 5
-    servono 3 camere, come hai chiesto."
+    servono almeno 3 camere, come hai chiesto."
   - `NoChoice("rooms")`: "I viaggi compatibili hanno camere da massimo 2 persone: per 5
     persone servono almeno 3 camere. Vuoi cambiare il numero di camere?"
   - Da solo: "I viaggi di padel compatibili partono da 2 persone: da solo non posso

@@ -1561,6 +1561,7 @@
     "updatedAt": "2026-09-25T10:39:37.183Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2028,6 +2029,7 @@
     "updatedAt": "2026-09-25T10:39:37.627Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "1",
      "name": "Academies",
@@ -2424,6 +2426,7 @@
     "updatedAt": "2026-09-25T10:39:40.589Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -2759,6 +2762,7 @@
     "updatedAt": "2026-09-25T10:39:40.802Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3094,6 +3098,7 @@
     "updatedAt": "2026-09-25T10:39:41.065Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -3384,6 +3389,7 @@
     "updatedAt": "2026-09-25T10:39:41.383Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3693,6 +3699,7 @@
     "updatedAt": "2026-09-25T10:39:41.595Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "13",
      "name": "Academies",
@@ -3963,6 +3970,7 @@
     "updatedAt": "2026-09-25T10:39:42.273Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4298,6 +4306,7 @@
     "updatedAt": "2026-09-25T10:39:42.429Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -4569,6 +4578,7 @@
     "updatedAt": "2026-09-25T10:39:42.627Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "15",
      "name": "Tournaments",
@@ -4841,6 +4851,7 @@
     "updatedAt": "2026-09-25T10:39:42.874Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5220,6 +5231,7 @@
     "updatedAt": "2026-09-25T10:39:42.964Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",
@@ -5603,6 +5615,7 @@
     "updatedAt": "2026-09-25T10:39:43.136Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "14",
      "name": "Holidays",

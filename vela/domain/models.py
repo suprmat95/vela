@@ -44,6 +44,7 @@ class Criteria:
     duration_min_nights: Optional[int] = None   # M21, RF-58: morbido, ordina e non esclude
     duration_max_nights: Optional[int] = None
     budget_scope: Optional[str] = None   # M21-E, RF-69: `per_person` | `total`; `budget` resta il totale
+    rooms: Optional[int] = None   # M21-D, RF-65: 1..pax; None solo negli intenti salvati prima di M21-D
 
 
 @dataclass(frozen=True)
@@ -60,13 +61,14 @@ class StructuredFields:
     duration_min_nights: Optional[object] = None
     duration_max_nights: Optional[object] = None
     budget_scope: Optional[object] = None
+    rooms: Optional[object] = None
 
     def as_dict(self) -> dict:
         return {"sport": self.sport, "area": self.area, "period_start": self.period_start,
                 "period_end": self.period_end, "pax": self.pax, "budget": self.budget,
                 "duration_min_nights": self.duration_min_nights,
                 "duration_max_nights": self.duration_max_nights,
-                "budget_scope": self.budget_scope}
+                "budget_scope": self.budget_scope, "rooms": self.rooms}
 
 
 def criteria_to_dict(c: Criteria) -> dict:
@@ -82,6 +84,7 @@ def criteria_to_dict(c: Criteria) -> dict:
         "duration_min_nights": c.duration_min_nights,
         "duration_max_nights": c.duration_max_nights,
         "budget_scope": c.budget_scope,
+        "rooms": c.rooms,
         "language": c.language,
     }
 
@@ -101,6 +104,7 @@ def criteria_from_dict(d: dict) -> Criteria:
         duration_min_nights=d.get("duration_min_nights"),
         duration_max_nights=d.get("duration_max_nights"),
         budget_scope=d.get("budget_scope"),
+        rooms=d.get("rooms"),
         language=d.get("language") or "it",
     )
 
@@ -208,6 +212,7 @@ class Product:
     brand: Optional[str] = None  # brand HofJ del catalogo di provenienza (M10); None = pre-M10
     featured: bool = False       # M21-B (RF-60): `featured` di HofJ, letto dal sync
     special_offer: bool = False  # M21-B (RF-60): `isSpecialOffer` di HofJ
+    max_pax_per_room: Optional[int] = None   # M21-D (RF-66): `maxPaxPerRoom` di HofJ; None = nessun limite
 
 
 # --- proposta, ordine, rifiuto -------------------------------------------------
@@ -271,6 +276,7 @@ class Order:
     enqueued_at: Optional[datetime] = None            # posizione FIFO (RF-48); ereditata in RF-17
     replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
     orphan_itineraries: int = 0                       # M18: timeout su POST /v1/itineraries
+    rooms: int = 1                                    # M21-D (RF-67): camere mandate a HofJ
 
 
 class JobKind(str, Enum):
@@ -370,12 +376,13 @@ class ProposalMade:
     product: ProductSummary
     say: str
     replaced: bool = False
+    rooms: int = 1   # M21-D (RF-06): dalle criteria dell'intento, nessuna colonna su `proposals`
 
     def to_dict(self) -> dict:
         p = self.proposal
         return {"proposal_id": p.id, "intent_id": p.intent_id, "product": self.product.to_dict(),
                 "start_date": p.start_date.isoformat(), "end_date": p.end_date.isoformat(),
-                "nights": p.nights, "pax": p.pax, "price_from": money_str(p.price_from),
+                "nights": p.nights, "pax": p.pax, "rooms": self.rooms, "price_from": money_str(p.price_from),
                 "total_from": money_str(p.total_from), "currency": p.currency,
                 "reason": p.reason, "replaced": self.replaced, "say": self.say}
 

@@ -383,7 +383,7 @@ class AgentToolContractTest(McpCase):
 
     async def test_uc7_invalid_field_is_declared_not_an_error(self):
         d = await self.ok("create_intent", text="Padel a Atlantide, siamo in tre.", sport="padel",
-                          area="Atlantide", pax=3, budget=1000)
+                          area="Atlantide", pax=3, rooms=2, budget=1000)
         self.assertIsNone(d["criteria"]["area"])
         self.assertTrue(d["say"].startswith("Non conosco il luogo Atlantide."))
 
@@ -471,7 +471,7 @@ class DurationContractTest(McpCase):
 class BudgetScopeContractTest(McpCase):
     """M21-E (UC-E): `budget_scope` opzionale, cifra passata come detta, lettura nel `say`."""
 
-    THREE = "tennis in Spagna a ottobre, siamo in tre"
+    THREE = "tennis in Spagna a ottobre, siamo in tre, due camere"
 
     def setUp(self):
         super().setUp()
@@ -514,3 +514,69 @@ class BudgetScopeContractTest(McpCase):
         d = await self.ok("reject_proposal", proposal_id=first["proposal_id"],
                           reason="no", budget_scope="per_person")
         self.assertIn("con un budget di 1800 euro a persona, 5400 in tutto", d["say"])
+
+
+class RoomsContractTest(McpCase):
+    """M21-D (UC-D, RF-65): `rooms` sui tool; con più di 2 persone senza camere `question`."""
+
+    FIVE = "padel in Portogallo a novembre, siamo in cinque"
+
+    async def test_rooms_is_an_optional_argument_of_intent_and_reject(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        for name in ("create_intent", "reject_proposal"):
+            with self.subTest(tool=name):
+                schema = tools[name].input_schema
+                self.assertIn("rooms", schema["properties"])
+                self.assertNotIn("rooms", schema["required"])
+
+    async def test_five_without_rooms_is_a_question(self):
+        d = await self.ok("create_intent", text=self.FIVE, sport="padel", pax=5)
+        self.assertEqual(d["question"], "In quante camere?")
+        self.assertNotIn("intent_id", d)
+
+    async def test_five_with_rooms_is_created(self):
+        d = await self.ok("create_intent", text=self.FIVE, sport="padel", pax=5, rooms=3)
+        self.assertEqual((d["criteria"]["pax"], d["criteria"]["rooms"]), (5, 3))
+        self.assertIn("per 5 persone in 3 camere", d["say"])
+
+    FIVE_TRAVELERS = dict(TRAVELER, participants=[{"first_name": "P%d" % i, "last_name": "Rossi"}
+                                                  for i in range(4)])
+    FIVE_OCT = "padel a ottobre, siamo in cinque"   # il prodotto sintetico parte a ottobre
+
+    async def test_rooms_is_an_optional_argument_of_accept(self):
+        async with Client(self.server) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+        schema = tools["accept_proposal"].input_schema
+        self.assertIn("rooms", schema["properties"])
+        self.assertNotIn("rooms", schema["required"])
+        self.assertIn("correct", schema["properties"]["rooms"]["description"])
+
+    async def test_descriptions_say_when_to_ask_the_rooms(self):
+        """RF-41 (M21-D): `create_intent` dice di chiedere le camere con più di 2 persone."""
+        for texts in (DESCRIPTIONS, DESCRIPTIONS_SMS):
+            with self.subTest(sms=texts is DESCRIPTIONS_SMS):
+                self.assertIn("How many rooms?", texts["create_intent"])
+                self.assertIn("more than 2 people", texts["create_intent"])
+                self.assertIn("`rooms`", texts["reject_proposal"])
+                self.assertIn("`rooms`", texts["accept_proposal"])
+
+    async def test_accept_below_the_minimum_is_a_question_without_an_order(self):
+        self.vela = make_vela(products=[make_product(1, price=300, max_pax_per_room=2)])
+        intent = await self.ok("create_intent", text=self.FIVE_OCT, sport="padel", pax=5, rooms=3)
+        proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        self.assertEqual(proposal["rooms"], 3)
+        d = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"], rooms=2,
+                          **self.FIVE_TRAVELERS)
+        self.assertEqual(d["question"], "In quante camere?")
+        self.assertIn("per 5 servono almeno 3 camere", d["say"])
+        self.assertIsNone(self.vela.repos.orders.get_by_proposal(proposal["proposal_id"]))
+
+    async def test_accept_with_a_rooms_correction(self):
+        self.vela = make_vela(products=[make_product(1, price=300, max_pax_per_room=2)])
+        intent = await self.ok("create_intent", text=self.FIVE_OCT, sport="padel", pax=5, rooms=3)
+        proposal = await self.ok("get_proposal", intent_id=intent["intent_id"])
+        d = await self.ok("accept_proposal", proposal_id=proposal["proposal_id"], rooms=4,
+                          **self.FIVE_TRAVELERS)
+        self.assertIn("order_id", d)
+        self.assertEqual(self.vela.repos.orders.get_by_proposal(proposal["proposal_id"]).rooms, 4)

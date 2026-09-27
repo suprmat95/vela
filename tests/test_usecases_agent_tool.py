@@ -161,12 +161,13 @@ class UC7InvalidFieldTest(unittest.TestCase):
     def test_unknown_area_is_discarded_and_invented_budget_is_repeated(self):
         vela = make_vela()
         r = vela.create_intent("Padel a Atlantide, siamo in tre.", fields=StructuredFields(
-            sport="padel", area="Atlantide", pax=3, budget=1000))
+            sport="padel", area="Atlantide", pax=3, rooms=2, budget=1000))
         self.assertIsInstance(r, IntentCreated)
         self.assertIsNone(r.criteria.area)
         self.assertTrue(r.say.startswith("Non conosco il luogo Atlantide."))
         # M21-E: la lettura del budget (RF-70); 1000 copre il più economico (300 × 3), quindi in tutto
-        self.assertIn("un viaggio di padel per 3 persone con un budget di 1000 euro in tutto", r.say)
+        self.assertIn("un viaggio di padel per 3 persone in 2 camere con un budget di 1000 euro in tutto",
+                      r.say)
 
     def test_discarded_field_before_the_question(self):
         r = make_vela().create_intent("una vacanza per due", fields=StructuredFields(sport="golf"))

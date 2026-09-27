@@ -6471,6 +6471,7 @@
     "updatedAt": "2026-09-25T10:44:12.537Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -6972,6 +6973,7 @@
     "updatedAt": "2026-09-25T10:44:12.613Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -7371,6 +7373,7 @@
     "updatedAt": "2026-09-25T10:43:59.723Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -7778,6 +7781,7 @@
     "updatedAt": "2026-09-25T10:44:08.832Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -8120,6 +8124,7 @@
     "updatedAt": "2026-09-25T10:44:14.393Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -8447,6 +8452,7 @@
     "updatedAt": "2026-09-25T10:44:09.297Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -9029,6 +9035,7 @@
     "updatedAt": "2026-09-25T10:44:07.840Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -9506,6 +9513,7 @@
     "updatedAt": "2026-09-25T10:43:59.813Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -9926,6 +9934,7 @@
     "updatedAt": "2026-09-25T10:44:25.125Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -10370,6 +10379,7 @@
     "updatedAt": "2026-09-25T10:44:14.501Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -10841,6 +10851,7 @@
     "updatedAt": "2026-09-25T10:44:08.201Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -11336,6 +11347,7 @@
     "updatedAt": "2026-09-25T10:44:09.382Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -11768,6 +11780,7 @@
     "updatedAt": "2026-09-25T10:44:09.008Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -12152,6 +12165,7 @@
     "updatedAt": "2026-09-25T10:44:14.583Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -12512,6 +12526,7 @@
     "updatedAt": "2026-09-25T10:44:08.280Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -12998,6 +13013,7 @@
     "updatedAt": "2026-09-25T10:44:15.561Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -13360,6 +13376,7 @@
     "updatedAt": "2026-09-25T10:44:13.603Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -13693,6 +13710,7 @@
     "updatedAt": "2026-09-25T10:44:09.644Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -14149,6 +14167,7 @@
     "updatedAt": "2026-09-25T10:44:00.217Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -14742,6 +14761,7 @@
     "updatedAt": "2026-09-25T10:44:08.635Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -15219,6 +15239,7 @@
     "updatedAt": "2026-09-25T10:44:00.338Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -15585,6 +15606,7 @@
     "updatedAt": "2026-09-25T10:44:00.407Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -15856,6 +15878,7 @@
     "updatedAt": "2026-09-25T10:44:13.799Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -16147,6 +16170,7 @@
     "updatedAt": "2026-09-25T10:44:13.959Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -16552,6 +16576,7 @@
     "updatedAt": "2026-09-25T10:44:14.105Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -17128,6 +17153,7 @@
     "updatedAt": "2026-09-25T10:44:14.191Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -17620,6 +17646,7 @@
     "updatedAt": "2026-09-25T10:43:59.895Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -17810,6 +17837,7 @@
     "updatedAt": "2026-09-25T10:44:09.912Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -17996,6 +18024,7 @@
     "updatedAt": "2026-09-25T10:44:15.782Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -18364,6 +18393,7 @@
     "updatedAt": "2026-09-25T10:44:14.738Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -18640,6 +18670,7 @@
     "updatedAt": "2026-09-25T10:44:14.913Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -19012,6 +19043,7 @@
     "updatedAt": "2026-09-25T10:44:08.524Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -19357,6 +19389,7 @@
     "updatedAt": "2026-09-25T10:44:16.234Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -19714,6 +19747,7 @@
     "updatedAt": "2026-09-25T10:44:12.816Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -20050,6 +20084,7 @@
     "updatedAt": "2026-09-25T10:44:12.730Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -20386,6 +20421,7 @@
     "updatedAt": "2026-09-25T10:44:16.322Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -20740,6 +20776,7 @@
     "updatedAt": "2026-09-25T10:44:16.577Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -21132,6 +21169,7 @@
     "updatedAt": "2026-09-25T10:44:16.741Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": 2,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -21545,6 +21583,7 @@
     "updatedAt": "2026-09-25T10:44:16.799Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -21892,6 +21931,7 @@
     "updatedAt": "2026-09-25T10:44:16.484Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -22384,6 +22424,7 @@
     "updatedAt": "2026-09-25T10:44:09.461Z",
     "featured": true,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -22780,6 +22821,7 @@
     "updatedAt": "2026-09-25T10:44:17.650Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -23135,6 +23177,7 @@
     "updatedAt": "2026-09-25T10:44:17.752Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -23407,6 +23450,7 @@
     "updatedAt": "2026-09-25T10:44:18.284Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -23791,6 +23835,7 @@
     "updatedAt": "2026-09-25T10:44:18.114Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -24184,6 +24229,7 @@
     "updatedAt": "2026-09-25T10:44:18.380Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -24518,6 +24564,7 @@
     "updatedAt": "2026-09-25T10:44:18.011Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -24791,6 +24838,7 @@
     "updatedAt": "2026-09-25T10:44:20.320Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -25154,6 +25202,7 @@
     "updatedAt": "2026-09-25T10:44:21.041Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -25530,6 +25579,7 @@
     "updatedAt": "2026-09-25T10:44:21.217Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -25896,6 +25946,7 @@
     "updatedAt": "2026-09-25T10:44:21.298Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -26278,6 +26329,7 @@
     "updatedAt": "2026-09-25T10:44:21.567Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -26685,6 +26737,7 @@
     "updatedAt": "2026-09-25T10:44:21.366Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -27055,6 +27108,7 @@
     "updatedAt": "2026-09-25T10:44:21.682Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -27333,6 +27387,7 @@
     "updatedAt": "2026-09-25T10:44:21.744Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -27696,6 +27751,7 @@
     "updatedAt": "2026-09-25T10:44:21.823Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -28048,6 +28104,7 @@
     "updatedAt": "2026-09-25T10:44:21.890Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -28455,6 +28512,7 @@
     "updatedAt": "2026-09-25T10:44:21.952Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -28862,6 +28920,7 @@
     "updatedAt": "2026-09-25T10:44:22.057Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -29197,6 +29256,7 @@
     "updatedAt": "2026-09-25T10:44:22.321Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "28",
      "name": "Esperienze",
@@ -29581,6 +29641,7 @@
     "updatedAt": "2026-09-25T10:44:22.398Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -30172,6 +30233,7 @@
     "updatedAt": "2026-09-25T10:44:22.452Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -30980,6 +31042,7 @@
     "updatedAt": "2026-09-25T10:44:22.584Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -31641,6 +31704,7 @@
     "updatedAt": "2026-09-25T10:44:22.654Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -32267,6 +32331,7 @@
     "updatedAt": "2026-09-25T10:44:25.192Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -32983,6 +33048,7 @@
     "updatedAt": "2026-09-25T10:44:25.262Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -33279,6 +33345,7 @@
     "updatedAt": "2026-09-25T10:44:25.333Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -33553,6 +33620,7 @@
     "updatedAt": "2026-09-25T10:44:25.393Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -33954,6 +34022,7 @@
     "updatedAt": "2026-09-25T10:44:25.455Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -34250,6 +34319,7 @@
     "updatedAt": "2026-09-25T10:44:25.511Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -34585,6 +34655,7 @@
     "updatedAt": "2026-09-25T10:44:25.587Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -34858,6 +34929,7 @@
     "updatedAt": "2026-09-25T10:44:25.654Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "9",
      "name": "Tornei",
@@ -35134,6 +35206,7 @@
     "updatedAt": "2026-09-25T10:44:25.717Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",
@@ -35443,6 +35516,7 @@
     "updatedAt": "2026-09-25T10:44:25.785Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -35845,6 +35919,7 @@
     "updatedAt": "2026-09-25T10:44:25.928Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "7",
      "name": "Accademie",
@@ -36261,6 +36336,7 @@
     "updatedAt": "2026-09-25T10:44:26.064Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "20",
      "name": "Vacanze",
@@ -36703,6 +36779,7 @@
     "updatedAt": "2026-09-25T10:44:26.125Z",
     "featured": false,
     "isSpecialOffer": false,
+    "maxPaxPerRoom": null,
     "category": {
      "id": "8",
      "name": "Vacanze",

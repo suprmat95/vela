@@ -246,3 +246,59 @@ class DurationTest(unittest.TestCase):
         r = refine(CRIT, "too long", PROPOSAL, VALENCIA, TODAY)
         self.assertTrue(r.understood)
         self.assertEqual(replace(r.criteria, duration_max_nights=None), CRIT)
+
+
+class RoomsTest(unittest.TestCase):
+    """M21-D (RF-65): le camere nel rifiuto, da testo e da campo, sempre entro le persone
+    aggiornate; se cambiano le persone senza dire le camere, `rooms = min(rooms, pax)`
+    (decisione M21-D, 1)."""
+
+    ONE_ROOM = replace(CRIT, rooms=1)   # intento creato dopo M21-D: 2 persone, una camera
+
+    def rooms(self, reason, criteria=ONE_ROOM, fields=None):
+        return refine(criteria, reason, PROPOSAL, VALENCIA, TODAY, fields=fields)
+
+    def test_rooms_from_the_text(self):
+        r = self.rooms("siamo in 4, in due camere")
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (4, 2))
+        self.assertTrue(r.understood)
+
+    def test_two_couples(self):
+        self.assertEqual((self.rooms("due coppie").criteria.pax, self.rooms("due coppie").criteria.rooms), (4, 2))
+
+    def test_rooms_from_the_field(self):
+        r = self.rooms("siamo in cinque", fields=StructuredFields(rooms=3))
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (5, 3))
+        self.assertEqual(r.discarded, ())
+
+    def test_more_people_without_rooms_keep_the_rooms(self):
+        self.assertEqual(self.rooms("siamo in 5").criteria.rooms, 1)
+
+    def test_fewer_people_clamp_the_rooms(self):
+        r = self.rooms("siamo in due", replace(CRIT, pax=4, rooms=3))
+        self.assertEqual((r.criteria.pax, r.criteria.rooms), (2, 2))
+
+    def test_field_above_the_people_is_discarded(self):
+        r = self.rooms("", fields=StructuredFields(rooms=3))
+        self.assertEqual(r.criteria.rooms, 1)
+        self.assertEqual(r.discarded, (("rooms", 3),))
+        self.assertEqual(r.conflicts, ())
+
+    def test_text_above_the_people_is_ignored(self):
+        r = self.rooms("tre camere")
+        self.assertEqual(r.criteria.rooms, 1)
+        self.assertEqual(r.discarded, ())
+
+    def test_field_beats_text_with_a_conflict(self):
+        r = self.rooms("siamo in 5, due camere", fields=StructuredFields(rooms=3))
+        self.assertEqual(r.criteria.rooms, 3)
+        self.assertEqual(r.conflicts, (("rooms", 2, 3),))
+
+    def test_invalid_field_is_discarded(self):
+        r = self.rooms("", fields=StructuredFields(rooms=0))
+        self.assertEqual(r.criteria.rooms, 1)
+        self.assertEqual(r.discarded, (("rooms", 0),))
+
+    def test_old_intent_without_rooms_stays_without(self):
+        self.assertIsNone(self.rooms("siamo in 4", CRIT).criteria.rooms)
+        self.assertEqual(self.rooms("siamo in 4, due camere", CRIT).criteria.rooms, 2)

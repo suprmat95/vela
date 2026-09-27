@@ -28,7 +28,7 @@ def proposal(pid="p1", iid="i1", product_id="1", created_at=NOW):
 
 def order(oid="o1", pid="p1"):
     return Order(oid, pid, "i1", "1", OrderStatus.AWAITING_PAYMENT, 2, Decimal("500"),
-                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1")
+                 Decimal("1000"), "EUR", PROFILE, NOW, NOW, itinerary_id="it-1", rooms=2)   # rooms: 0011
 
 
 def job(jid, oid, kind=JobKind.PURCHASE, enqueued_at=NOW, run_after=NOW, **kw):
@@ -75,11 +75,13 @@ class RepositoryContract:
         p = make_product(7, min_pax=2, max_pax=0, hotel=None, windows=(("2026-10-01", "2026-10-04"),
                                                                         ("2026-11-05", "2026-11-08")))
         p = replace(p, raw={"rawAttributes": {"k": [1, 2]}}, bookable=False, bookable_checked_at=NOW,
-                    brand="terrarossa.com", featured=True, special_offer=True)
+                    brand="terrarossa.com", featured=True, special_offer=True, max_pax_per_room=2)
         self.repos.products.upsert_many([p])
         got = self.repos.products.get("7")
         self.assertEqual(got, p)
         self.assertEqual((got.featured, got.special_offer), (True, True))   # M21-B, migrazione 0010
+        self.assertEqual(got.max_pax_per_room, 2)                            # M21-D, migrazione 0011
+        self.assertEqual(self.repos.products.list_all()[0].max_pax_per_room, 2)
 
     def test_products_empty(self):
         self.assertEqual(self.repos.products.count(), 0)

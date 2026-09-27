@@ -61,6 +61,16 @@ class ShapesTest(unittest.TestCase):
         self.assertEqual(first["data"]["limitPerMinute"], 120)
         self.assertIn("now", first["meta"])
 
+    def test_itinerary_takes_the_rooms_in_one_call(self):
+        """M21-D (RF-67): `rooms` nel body arriva al carrello, sempre una chiamata."""
+        r = self.c.post("/v1/itineraries", params=PADEL, headers=AUTH, json={
+            "productId": int(PRODUCT), "startDate": "2026-10-10", "adults": 5, "rooms": 3,
+            "currency": "EUR"})
+        self.assertEqual(r.status_code, 200, r.text)
+        iid = r.json()["data"]["itineraryId"]
+        self.assertEqual((self.f.cart._get(iid)["adults"], self.f.cart._get(iid)["rooms"]), (5, 3))
+        self.assertEqual(self.f.stats()["calls"], 1)
+
     def test_full_cart_and_booking_shapes(self):
         r = new_itinerary(self.c)
         self.assertEqual(r.status_code, 200, r.text)

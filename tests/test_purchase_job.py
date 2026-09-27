@@ -42,7 +42,7 @@ class Setup:
         self.repos.proposals.add(Proposal("p1", "i1", "1", date(2026, 10, 1), date(2026, 10, 4), 2,
                                           Decimal("350"), "EUR", "Motivo.", NOW))
         self.repos.orders.add(Order("o1", "p1", "i1", "1", OrderStatus.QUEUED, 2, Decimal("350"),
-                                    None, "EUR", PROFILE, NOW, NOW, enqueued_at=NOW))
+                                    None, "EUR", PROFILE, NOW, NOW, enqueued_at=NOW, rooms=2))
         self.hofj = hofj or FakeHofJ()
         self.payments = payments or StubPayments()
         self.proposed = []
@@ -129,10 +129,11 @@ class HappyPathTest(unittest.TestCase):
         self.assertEqual([(p.ref_id, p.first_name) for p in s.hofj.pax["it-1"]],
                          [("ref-0", "Anna"), ("ref-1", "Bo")])
 
-    def test_itinerary_request_uses_the_proposal(self):
+    def test_itinerary_request_uses_the_proposal_and_the_rooms_of_the_order(self):
+        """RF-14, RF-67 (M21-D): le camere dell'ordine, non più 1 fisso."""
         s = Setup()
         s.run()
-        self.assertEqual(s.hofj.calls[0], ("create_itinerary", "1", date(2026, 10, 1), 2, 1, "EUR"))
+        self.assertEqual(s.hofj.calls[0], ("create_itinerary", "1", date(2026, 10, 1), 2, 2, "EUR"))
 
     def test_success_reenables_unbookable_product(self):
         stale = replace(make_product(1, price=350), bookable=False,
