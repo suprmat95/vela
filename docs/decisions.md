@@ -1082,3 +1082,27 @@ pacchetto. Analisi dei dati e approccio approvati dall'utente prima dell'impleme
 | Fixture | Non registrate di nuovo (richiesta dell'utente): in replay `program` è `null`, hotel e club ci sono. Una registrazione futura conserverà `travelProgram` | Nessuna chiamata HofJ in questa task |
 | Sync forzato | Opzione `python -m vela.sync --full`: ignora `updatedAt` e riscarica ogni dettaglio attivo, sotto la quota `SYNC`. Scartati il riscaricamento automatico dei `raw` senza programma (regola nascosta, rischio di riscaricare a ogni giro) e l'azzeramento a mano di `hofj_updated_at` in Postgres | Il sync è incrementale: senza `--full` i prodotti invariati non avrebbero mai il programma. Il lancio in produzione lo fa l'utente |
 | Smoke MCP | `scripts/mcp_smoke.py` si aspetta sei tool e chiama `get_proposal_details` sulla prima proposta | Contro un server non ancora aggiornato lo smoke fallisce sulla lista dei tool: va lanciato dopo il deploy |
+
+## 2026-09-27 — Cache del prezzo con fanout (RF-84)
+
+Brainstorming "ridurre le chiamate ad HofJ" (branch `task/cache`), approvato dall'utente passo per
+passo: opzione, cache, TTL, ripiego, migrazione, rebase. Design in
+`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`, piano in
+`docs/plans/2026-09-27-cache-prezzo-fanout.md`. Nessuna chiamata a HofJ, Stripe o Anthropic.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Cosa si condivide | Solo il prezzo effettivo, per chiave (prodotto, data di inizio, adulti, camere, valuta) | Le proposte non chiamano HofJ (RF-11); il carrello contiene cliente e passeggeri, quindi è per viaggiatore, e `create_booking` non si condivide |
+| Forma | Opzione C: cache del prezzo con TTL e fanout (un solo leader per chiave, gli altri agganciati) | Con la sola cache, nel picco quasi tutti fanno miss perché anche il primo prezzo aspetta la coda; con il solo fanout il prezzo non sopravvive al picco |
+| Dove | Tabella Postgres `price_quotes`; porta `QuoteRepository` con implementazione in memoria per i test | Tutto lo stato condiviso sta già in Postgres (decisione "Architettura"); fanout e aggiornamento degli ordini nella stessa transazione. Scartati Redis (servizio nuovo, niente transazione con gli ordini) e una cache per processo (non condivisa tra istanze) |
+| TTL e interruttore | `Settings.price_quote_ttl_seconds = 900`; `Vela` ha default 0 = cache e fanout spenti | 15 minuti coprono un picco e limitano il danno di un prezzo vecchio a un secondo giro di conferma; i test che costruiscono `Vela` a mano restano validi e in produzione la cache si spegne con 0 |
+| Carrello dopo il sì | Un ordine servito dalla cache non ha carrello: la conferma salva `confirmed_total` e accoda il job dal passo 0; al passo 3 con lo stesso totale si va al link, altrimenti `awaiting_confirmation` con la frase "il prezzo è cambiato" | Il link porta sempre il totale del carrello (RF-16). Costo accettato: un prodotto non prenotabile si scopre dopo il sì |
+| Ripiego | Se il leader esce senza prezzo (`failed`, dead, `replaced`, `cancelled`) la riga `pending` sparisce e ogni agganciato riceve un job suo con il proprio `enqueued_at` | Scelta dell'utente: nessun caso speciale da propagare, il comportamento di ripiego è quello di oggi. Con un prodotto non prenotabile ogni agganciato spende una chiamata |
+| Rete di sicurezza | `claim` prende una riga `pending` il cui leader non è più `queued`; `get_order_status` e l'attesa di `accept_proposal` di un agganciato fanno il rilascio al posto del leader | Un crash o un'uscita senza rilascio non blocca gli agganciati |
+| Ordine delle scritture | Il job pubblica il prezzo prima di salvare il leader `awaiting_confirmation` | Al contrario un agganciato potrebbe vedere il leader fuori da `queued` con la riga ancora `pending` e rilasciare tutti |
+| Elezione su Postgres | `INSERT ... ON CONFLICT DO NOTHING RETURNING`, poi `SELECT ... FOR UPDATE` sulla riga, controllo del leader e `UPDATE`, in una transazione | Un solo `ON CONFLICT DO UPDATE ... WHERE NOT EXISTS (...)` ha dato 5 leader su 8 thread: SQLAlchemy non correla la sottoquery dentro `ON CONFLICT` e la snapshot dello statement non vede un leader appena confermato. Con psycopg 3 `rowcount` di un upsert vale -1: si usa `RETURNING` |
+| Prodotto non prenotabile | Nessun hit, e il `claim` prende anche una riga `ready` fresca | Il carrello vero dice se il prodotto è tornato prenotabile (RF-34) |
+| Migrazione | 0015, agganciata a 0011; 0012-0014 restano a M21-C, M21-F e M22. Chi fa il merge per secondo riaggancia `down_revision` e la testa in `tests/test_migrations.py` | Catena lineare di Alembic con task parallele |
+| Finestra di crash | Tra `release` (gli agganciati perdono `follows_quote`) e l'accodamento dei loro job un crash lascia ordini `queued` senza job | Pochi millisecondi; un job accodato "per sicurezza" altrove rischierebbe due job d'acquisto, cioè due carrelli, sullo stesso ordine |
+| Load test | `journey.py` tratta `200 awaiting_confirmation` all'accettazione come un prezzo arrivato; i giri di `RESULTS.md` si rifanno in una task separata | Con la cache in modalità `loadtest` un hit risponde subito 200 e il viaggiatore finto sarebbe finito come fallito |
+

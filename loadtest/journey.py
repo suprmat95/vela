@@ -51,7 +51,8 @@ def _journey(tr: Traveler, call: Call, clock, sleep, deadline: float, record: di
     if tr.accept_at is not None and clock() < tr.accept_at:
         sleep(tr.accept_at - clock())
     status, queued = call("POST", "/v1/proposals/%s/accept" % proposal_id, "accept_proposal")
-    if status != 202:
+    hit = status == 200 and queued.get("status") == "awaiting_confirmation"   # RF-84: prezzo dalla cache
+    if status != 202 and not hit:
         return _end(record, "accept_%s" % (queued.get("outcome") or status))
     record.update(t_accept=round(clock(), 3), order_id=queued["order_id"],
                   position=queued.get("position"), wait_seconds=queued.get("wait_seconds"))
