@@ -1177,7 +1177,10 @@ con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
 
 ## M23 — Cache del prezzo con fanout
 
-**Stato (2026-09-27).** Fatta sul branch `task/cache`.
+**Stato (2026-09-27).** Fatta sul branch `task/cache`. Load test rigirato lo stesso giorno, un
+solo giro C-2500 con la cache (`loadtest/RESULTS.md`, "Dopo la cache del prezzo"): criteri
+passati, prezzo subito a 473 accettazioni su 487, Marco confermato a 160 s contro 372; ritmo di
+acquisti invariato perché limitato dalla quota.
 
 **Risultato.** Nel picco molti viaggiatori accettano lo stesso viaggio: il prezzo effettivo si
 scopre una volta per chiave (prodotto, data, adulti, camere, valuta) e vale per tutti per 15

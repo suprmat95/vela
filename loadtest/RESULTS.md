@@ -167,6 +167,82 @@ Passaggio di stato atomico dell'ordine più indice unico sui job `booking` attiv
 Una sola `POST /v1/bookings` per itinerario prenotato, in entrambi i giri. Gli altri numeri
 restano quelli di M18: criteri tutti passati. Il p95 della conversazione non cambia (punto 12).
 
+## Dopo la cache del prezzo (RF-84) [misurato]
+
+Un solo giro, per scelta dell'utente: C-2500 identico ai precedenti (`--travelers 2500 --duration 8
+--arrival-minutes 5 --tail-minutes 3`, seme 13, finto ancorato con latenza standard), il
+2026-09-27 sul commit `526459e` (`master` con la conferma del prezzo, M21-A..E, RF-83 e la cache
+del prezzo, `price_quote_ttl_seconds = 900`), da compose pulito, stessa macchina (Apple M4 Pro,
+Docker Desktop 12 CPU, 17,5 GB). Nessun giro di controllo con la cache spenta: tra `49cc1cb` e
+`526459e` cambia anche altro (conferma del prezzo prima del link, M20 assorbita, M21, RF-83), quindi
+solo le righe sugli hit e sul prezzo sentito sono attribuibili alla cache da sola. Report completo
+in `loadtest/out/2500-cache/report.md` (non versionato).
+
+Gli hit sono contati a posteriori da `travelers.jsonl`: un'accettazione servita dalla cache
+risponde `200 order_status` in `awaiting_confirmation`, senza `position` né `wait_seconds`; un
+`202 order_queued` appena accodato le ha. `t_priced` è il polling in cui il viaggiatore finto vede
+il prezzo. `report.py` non calcola ancora queste due misure.
+
+| | C dopo M18 (fix) | C con la cache |
+|---|---|---|
+| Massimo chiamate Vela → HofJ in 60 s | 106 | 106 |
+| Massimo in 60 s con gli altri usi | 118 | 118 |
+| 429 ricevuti | 0 | 0 |
+| Chiamate Vela al minuto, a regime (minuti 2-6) | 99 | 99 |
+| Link (acquisti) al minuto, a regime | 17,8 | 17,8 |
+| Accettazioni / link / confermati | 487 / 135 / 75 | 487 / 127 / 72 |
+| **Accettazioni con il prezzo subito (hit)** | — (il prezzo arrivava con il carrello) | **473 su 487** |
+| **Prezzo effettivo sentito entro il giro** | 135 su 487 (chi è arrivato al link) | **487 su 487** |
+| Prezzo sentito dopo l'accettazione, p50 / p95 (s) | — | 44,7 / 58,9 (polling di 30-60 s del viaggiatore finto; Marco e Anna, che interrogano ogni 5 s, 5 s) |
+| Accettazioni in coda per il prezzo (leader) | 487 | 14, posizione media 1,9, attesa dichiarata 8-12 s |
+| Richieste `accept_proposal` | 487 | 974 (accettazione e conferma) |
+| Carrelli creati / `POST /v1/bookings` / itinerari prenotati | — / 85 / 85 | 136 / 78 / 78 |
+| Itinerari con `POST /v1/bookings` ripetuta, orfani | 0, 0 | 0, 0 |
+| In coda alla fine | 352 | 360, tutti con il prezzo già sentito |
+| Età massima della coda (s) | 402 | 422 |
+| Marco: prezzo sentito a / link a / confermato a (s) | — / — / 372 | 65 / 155 / **160** |
+| Anna (arriva a 180 s): proposta (ms) / prezzo sentito a (s) / link | 10-12 / — / — | 15 / 185 / nessuno entro il giro |
+| Pagamento → confermato, sentinelle (s) | 5 | 5 |
+| Errori REST / p95 REST peggiore (ms) | 0 / 190 | 0 / 220 (`reject_proposal`) |
+| p95 `create_intent` / `get_proposal` / `accept_proposal` / `get_order_status` (ms) | 29 / 140 / 130 / 70 | 47 / 140 / 150 / 79 |
+
+**Criteri: tutti e quattro passano** (429 = 0; 106 ≤ 108; Marco confermato a 160 s; 78
+booking = 78 itinerari prenotati, massimo una POST per itinerario).
+
+Cosa cambia con la cache, una frase per differenza.
+
+1. **Il prezzo arriva subito a quasi tutti.** 473 accettazioni su 487 (97%) sono hit: rispondono
+   `awaiting_confirmation` senza job e senza chiamate. Solo 14 hanno fatto la coda per il prezzo,
+   i leader delle poche chiavi dello scenario (quattro frasi, sempre due persone in una camera),
+   con posizione 1-3 e attesa dichiarata 8-12 s. Il ritardo misurato (p50 45 s, p95 59 s) è il
+   polling del viaggiatore finto, non Vela: Marco e Anna sentono il prezzo 5 s dopo aver
+   accettato. Prima il prezzo effettivo arrivava con il carrello, cioè a 135 accettazioni su 487
+   dentro il giro; ora a tutte e 487.
+2. **Marco è confermato a 160 s invece di 372.** Sente il prezzo a 65 s e la sua conferma entra in
+   coda quando davanti ha solo le conferme arrivate nei primi 30-60 s; prima il suo carrello per
+   il prezzo aveva davanti quelli di tutti gli accettati prima di lui. È un anticipo, non un
+   ritmo diverso (punto 3).
+3. **Il ritmo non cambia, e non poteva: il limite resta la quota.** 99 chiamate e 17,8 link al
+   minuto a regime, come dopo M18. 127 link contro 135 e 72 confermati contro 75 perché i
+   carrelli partono dopo il sì, che nel viaggiatore finto arriva al primo polling (30-60 s): il
+   minuto 1 fa 0 link (prima 12-14) e il giro di 8 minuti perde circa una finestra di polling.
+   A regime è lo stesso flusso spostato di 30-60 s.
+4. **Chiamate per ordine confermato invariate: 5 più il booking.** 136 carrelli per 127 link (9 in
+   corso alla fine), 78 booking per 78 pagati. Nel funnel del banco chi accetta conferma sempre:
+   il risparmio della cache (zero chiamate per chi rifiuta il prezzo, un solo carrello per il
+   prezzo di N accettazioni identiche) non è esercitato. Un giro con una quota di rifiuti del
+   prezzo lo misurerebbe; non fatto, per scelta.
+5. **La coda alla fine è la stessa, ma aspetta il link e non il prezzo.** 360 in coda contro 352,
+   età massima 422 s contro 402: sono gli stessi viaggiatori, che però hanno già sentito il
+   prezzo. Per gli hit non esiste più un'attesa dichiarata (`position` e `wait_seconds` nulli
+   nella risposta): lo scarto del report (152 s) confronta l'attesa dichiarata per il prezzo dei
+   14 leader con il loro tempo al link e non è più una misura utile. **Aperto:** cosa dichiarare
+   a un hit sul tempo al link (RF-48), e `report.py` da adeguare.
+6. **La conversazione resta nello stesso ordine di grandezza.** p95 peggiore 220 ms contro 190,
+   `create_intent` 47 contro 29 (il parser di M21 fa più lavoro), `accept_proposal` 150 contro
+   130 con il doppio delle richieste; `get_proposal` invariata a 140. Nessun errore su 9.700
+   richieste.
+
 ## Cosa dicevano i numeri prima di M18
 
 1. **Il confine non reggeva [misurato].** In ogni giro con latenza standard Vela mandava a HofJ
