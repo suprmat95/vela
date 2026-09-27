@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable, Optional, Tuple, Union
 
@@ -19,11 +19,12 @@ from vela.domain.intent import parse_intent, question_rooms, validate_fields
 from vela.domain.models import (Intent, IntentCreated, IntentQuestion, Job, JobKind, JobStatus,
                                 MissingTravelerData, NoMatch, Order, OrderQueued, OrderStatus,
                                 OrderStatusResponse, Product, ProductSummary, Proposal,
-                                ProposalDetails, ProposalMade, Rejection, StructuredFields,
-                                TravelerDefaults, TravelerProfile)
+                                ProposalDetails, ProposalMade, QuoteKey, QuoteStatus, Rejection,
+                                StructuredFields, TravelerDefaults, TravelerProfile)
 from vela.domain.orders import NotFound, OrderService
-from vela.domain.purchase import STEP_LINK
+from vela.domain.purchase import STEP_ITINERARY, STEP_LINK
 from vela.domain.quota import estimated_wait_seconds, wait_minutes
+from vela.domain.quotes import quote_key, release_quote, unstick
 from vela.domain.refine import Refinement, is_price_reason, refine
 from vela.ports.hofj import HofJRouter
 from vela.ports.llm import IntentExtractor
@@ -53,8 +54,10 @@ class Vela:
                  new_id: Optional[Callable[[], str]] = None,
                  extractor: Optional[IntentExtractor] = None, sms_enabled: bool = False,
                  accept_wait_seconds: float = 0, accept_poll_seconds: float = 1.0,
-                 sleep: Optional[Callable[[float], None]] = None):
+                 sleep: Optional[Callable[[float], None]] = None, price_quote_ttl_seconds: int = 0):
         self.repos = repos
+        # RF-84: vita del prezzo in cache; 0 = cache e fanout spenti (accettazione come prima)
+        self.price_quote_ttl = timedelta(seconds=price_quote_ttl_seconds)
         # Decisione 2026-09-26: `accept_proposal` aspetta il prezzo effettivo (e dopo la conferma
         # il link) fino a questo tetto, rileggendo l'ordine; 0 = risponde subito `queued`
         self.accept_wait_seconds = accept_wait_seconds
@@ -146,6 +149,7 @@ class Vela:
                                                  OrderStatus.AWAITING_PAYMENT):
             return False
         self.repos.orders.save(replace(order, status=OrderStatus.CANCELLED, updated_at=self.now()))
+        release_quote(self.repos, order, self.now(), self.new_id)   # RF-84: ripiego
         return True
 
     def _refined(self, intent: Intent, proposal: Proposal, reason: str,
@@ -265,16 +269,25 @@ class Vela:
             self.repos.intents.update_criteria(intent.id, replace(intent.criteria, rooms=corrected))
         now = self.now()
         enqueued_at = replaced.enqueued_at if replaced and replaced.enqueued_at else now   # RF-17
+        quotes_on = self.price_quote_ttl > timedelta(0)
         order = Order(self.new_id(), proposal.id, intent.id, proposal.product_id, OrderStatus.QUEUED,
                       proposal.pax, proposal.price_from, None, proposal.currency, profile, now, now,
-                      enqueued_at=enqueued_at, rooms=chosen)
+                      enqueued_at=enqueued_at, rooms=chosen, follows_quote=quotes_on)
+        cached = self._cached_total(order, proposal, product, now) if quotes_on else None
+        if cached is not None:   # RF-84: hit, nessun job e nessuna chiamata
+            order = replace(order, status=OrderStatus.AWAITING_CONFIRMATION, total=cached,
+                            follows_quote=False)
         try:
             self.repos.orders.add(order)
         except DuplicateOrder:
             return self.get_order_status(self.repos.orders.get_by_proposal(proposal_id).id)
-        self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
-                                    enqueued_at, now))
-        result = self._await_progress(order.id)
+        if cached is not None:
+            result = self.get_order_status(order.id)
+        else:
+            if not quotes_on or self._lead(order, proposal, product, now):
+                self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
+                                            enqueued_at, now))
+            result = self._await_progress(order.id)
         return replace(result, say=say.prefixed(prefix, result.say)) if prefix else result
 
     def _rooms_correction(self, proposal: Proposal, rooms: Optional[int]) -> Tuple[Optional[int], tuple]:
@@ -287,13 +300,49 @@ class Vela:
             return None, (("rooms", rooms),)
         return value, discarded
 
+    # --- RF-84: cache del prezzo --------------------------------------------
+
+    def _quote_key(self, order: Order) -> QuoteKey:
+        return quote_key(order, self.repos.proposals.get(order.proposal_id).start_date)
+
+    def _cached_total(self, order: Order, proposal: Proposal, product: Optional[Product],
+                      now: datetime) -> Optional[Decimal]:
+        """Il totale in cache se è `ready`, più giovane del TTL e il prodotto è ancora prenotabile."""
+        quote = self.repos.quotes.get(quote_key(order, proposal.start_date))
+        if (quote is None or quote.status != QuoteStatus.READY or product is None
+                or not product.bookable or quote.priced_at < now - self.price_quote_ttl):
+            return None
+        return quote.total
+
+    def _lead(self, order: Order, proposal: Proposal, product: Optional[Product], now: datetime) -> bool:
+        """L'ordine, nato agganciato, prova a diventare leader. Se perde e intanto un leader ha
+        pubblicato prende subito quel prezzo; altrimenti resta agganciato. Con il prodotto non
+        prenotabile nessun prezzo in cache vale: la riga `ready` si prende comunque e il carrello
+        vero dirà se il prodotto è tornato prenotabile (RF-34)."""
+        key = quote_key(order, proposal.start_date)
+        bookable = product is not None and product.bookable
+        fresh_after = now - self.price_quote_ttl if bookable else now
+        # `detach` e non `save_if_status`: se un rilascio ha già sganciato l'ordine (e gli ha dato
+        # un job) non si accoda un secondo job né si prende il prezzo in cache
+        if self.repos.quotes.claim(key, order.id, now, fresh_after):
+            return self.repos.quotes.detach(replace(order, follows_quote=False))
+        quote = self.repos.quotes.get(key)
+        if quote is not None and quote.status == QuoteStatus.READY:
+            self.repos.quotes.detach(replace(order, status=OrderStatus.AWAITING_CONFIRMATION,
+                                             total=quote.total, follows_quote=False, updated_at=now))
+        return False
+
     def _confirm(self, order: Order) -> Union[OrderQueued, OrderStatusResponse]:
-        """Il sì al prezzo effettivo: l'ordine torna in coda e il job riparte dal link."""
+        """Il sì al prezzo effettivo: l'ordine torna in coda. Con il carrello il job riparte dal
+        link; senza (RF-84, prezzo dalla cache) riparte dal carrello e al passo 3 confronta il
+        totale con quello confermato qui."""
         now = self.now()
-        self.repos.orders.save(replace(order, status=OrderStatus.QUEUED, updated_at=now))
+        cart = order.itinerary_id is not None
+        confirmed = order if cart else replace(order, confirmed_total=order.total)
+        self.repos.orders.save(replace(confirmed, status=OrderStatus.QUEUED, updated_at=now))
         if self.repos.jobs.active_for_order(order.id, JobKind.PURCHASE) is None:
             self.repos.jobs.enqueue(Job(self.new_id(), JobKind.PURCHASE, order.id, JobStatus.PENDING,
-                                        now, now, step=STEP_LINK))
+                                        now, now, step=STEP_LINK if cart else STEP_ITINERARY))
         return self._await_progress(order.id)
 
     def _await_progress(self, order_id: str) -> Union[OrderQueued, OrderStatusResponse]:
@@ -303,8 +352,10 @@ class Vela:
         while waited < self.accept_wait_seconds:
             self.sleep(self.accept_poll_seconds)
             waited += self.accept_poll_seconds
-            if self.repos.orders.get(order_id).status != OrderStatus.QUEUED:
+            current = self.repos.orders.get(order_id)
+            if current.status != OrderStatus.QUEUED:
                 return self.get_order_status(order_id)
+            unstick(self.repos, current, self.now(), self.new_id, self.now() - self.price_quote_ttl)   # RF-84
         order = self.repos.orders.get(order_id)
         if order.status != OrderStatus.QUEUED:
             return self.get_order_status(order_id)
@@ -325,6 +376,11 @@ class Vela:
 
     def _queue_position(self, order_id: str) -> Tuple[Optional[int], Optional[int]]:
         """RF-48: posizione tra gli acquisti in attesa e attesa stimata in secondi."""
+        order = self.repos.orders.get(order_id)
+        if order is not None and order.follows_quote:   # RF-84: la posizione del leader
+            quote = self.repos.quotes.get(self._quote_key(order))
+            if quote is not None and quote.status == QuoteStatus.PENDING:
+                order_id = quote.leader_order_id
         position = self.repos.jobs.queued_purchase_position(order_id)
         if position is None:
             return None, None
@@ -335,6 +391,9 @@ class Vela:
 
     def get_order_status(self, order_id: str) -> OrderStatusResponse:
         order = self.orders.get(order_id)
+        if order.follows_quote:   # RF-84: un leader uscito senza rilascio non blocca nessuno
+            unstick(self.repos, order, self.now(), self.new_id, self.now() - self.price_quote_ttl)
+            order = self.orders.get(order_id)
         intent = self.repos.intents.get(order.intent_id)
         lang = intent.criteria.language if intent is not None else "it"
         status = order.status
@@ -358,10 +417,13 @@ class Vela:
         if payable:
             self._check_payment_now(order.id)
         differs = None if order.total is None else order.total != estimate
+        sentence = say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
+                                  price_from_total=estimate, phone_tail=tail, pax=order.pax)
+        if (status == OrderStatus.AWAITING_CONFIRMATION and order.confirmed_total is not None
+                and order.total != order.confirmed_total):   # RF-84
+            sentence = say.say_price_changed_since(order.total, order.confirmed_total, lang)
         return OrderStatusResponse(
-            order.id, status,
-            say.say_status(status, order.booking_code, order.failure_reason, lang, order.total,
-                           price_from_total=estimate, phone_tail=tail, pax=order.pax),
+            order.id, status, sentence,
             total=order.total, currency=order.currency if order.total is not None else None,
             price_from_total=estimate if order.total is not None else None, total_differs=differs,
             payment_url=order.payment_url if payable else None, booking_code=order.booking_code,

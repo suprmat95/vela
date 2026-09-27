@@ -562,6 +562,18 @@ def say_confirm_price(total: Decimal, price_from_total: Optional[Decimal], pax: 
     return text + " Confermi? Se mi dici di sì preparo il link di pagamento."
 
 
+def say_price_changed_since(total: Decimal, confirmed: Decimal, lang: str = "it") -> str:
+    """RF-84: il carrello, creato dopo il sì a un prezzo in cache, costa un'altra cifra. Il link
+    nasce solo con un nuovo sì."""
+    if lang == "en":
+        return ("In the meantime the price has changed: it is now %s in total instead of the %s you "
+                "confirmed. Do you confirm? If you say yes, I'll prepare the payment link." % (
+                    fmt_money(total, lang), fmt_money(confirmed, lang).replace(" euros", "")))
+    return ("Nel frattempo il prezzo è cambiato: ora è %s in totale invece dei %s che avevi "
+            "confermato. Confermi? Se mi dici di sì preparo il link di pagamento." % (
+                fmt_money(total), fmt_money(confirmed).replace(" euro", "")))
+
+
 def say_queued_for_price(minutes: int, lang: str = "it") -> str:
     """L'attesa per il prezzo effettivo, quando il caso d'uso smette di aspettare prima che il
     carrello sia pronto: nessun SMS, il prezzo si chiede all'agente."""

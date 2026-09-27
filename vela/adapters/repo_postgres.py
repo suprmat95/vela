@@ -3,19 +3,21 @@ import threading
 from dataclasses import replace
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set
 
-from sqlalchemy import and_, case, func, or_, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from vela.adapters.schema import (intents_t, jobs_t, orders_t, products_t, proposals_t,
-                                  quota_window_t, rejections_t)
+from vela.adapters.schema import (intents_t, jobs_t, orders_t, price_quotes_t, products_t,
+                                  proposals_t, quota_window_t, rejections_t)
 from vela.domain.labels import ordered
 from vela.domain.models import (Availability, Criteria, Intent, Job, JobKind, JobStatus, Order,
-                                OrderStatus, Product, Proposal, QuotaClass, Rejection, criteria_from_dict,
-                                criteria_to_dict, profile_from_dict, profile_to_dict)
+                                OrderStatus, PriceQuote, Product, Proposal, QuotaClass, QuoteKey,
+                                QuoteStatus, Rejection, criteria_from_dict, criteria_to_dict,
+                                profile_from_dict, profile_to_dict)
 from vela.domain.quota import (CALLS_PER_PURCHASE, DEFAULT_BURST, DEFAULT_FLOOR, BucketRules, QuotaBucket, after_429,
                                claim_refresh, describe, fresh_bucket, from_snapshot,
                                available_at, try_take)
@@ -198,6 +200,7 @@ def _order_row(o: Order) -> dict:
         "created_at": o.created_at, "updated_at": o.updated_at, "paid_at": o.paid_at,
         "enqueued_at": o.enqueued_at, "replacement_proposal_id": o.replacement_proposal_id,
         "orphan_itineraries": o.orphan_itineraries, "rooms": o.rooms,
+        "follows_quote": o.follows_quote, "confirmed_total": o.confirmed_total,
     }
 
 
@@ -209,7 +212,8 @@ def _order(m) -> Order:
                  payment_ref=m["payment_ref"], booking_code=m["booking_code"],
                  failure_reason=m["failure_reason"], paid_at=m["paid_at"],
                  enqueued_at=m["enqueued_at"], replacement_proposal_id=m["replacement_proposal_id"],
-                 orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"])
+                 orphan_itineraries=m["orphan_itineraries"], rooms=m["rooms"],
+                 follows_quote=bool(m["follows_quote"]), confirmed_total=m["confirmed_total"])
 
 
 class PostgresOrders:
@@ -294,6 +298,109 @@ class PostgresRejections:
                                 .order_by(rejections_t.c.created_at)).mappings().all()
         return [Rejection(m["intent_id"], m["proposal_id"], m["product_id"], m["reason"],
                           m["created_at"]) for m in rows]
+
+
+_QUOTE_FIELDS = ("status", "leader_order_id", "total", "priced_at", "updated_at")
+
+
+def _quote_where(key: QuoteKey):
+    t = price_quotes_t.c
+    return and_(t.product_id == key.product_id, t.start_date == key.start_date,
+                t.adults == key.adults, t.rooms == key.rooms, t.currency == key.currency)
+
+
+def _followers_where(key: QuoteKey):
+    """Ordini `queued` agganciati alla chiave; la data sta sulla proposta."""
+    o = orders_t.c
+    return and_(o.follows_quote.is_(True), o.status == OrderStatus.QUEUED.value,
+                o.product_id == key.product_id, o.pax == key.adults, o.rooms == key.rooms,
+                o.currency == key.currency,
+                o.proposal_id.in_(select(proposals_t.c.id).where(proposals_t.c.start_date == key.start_date)))
+
+
+def _quote(m) -> PriceQuote:
+    return PriceQuote(QuoteKey(m["product_id"], m["start_date"], m["adults"], m["rooms"], m["currency"]),
+                      QuoteStatus(m["status"]), m["leader_order_id"], m["updated_at"],
+                      m["total"], m["priced_at"])
+
+
+class PostgresQuotes:
+    """RF-84: una riga per chiave; elezione del leader con un solo `INSERT ... ON CONFLICT`."""
+
+    def __init__(self, engine: Engine):
+        self.engine = engine
+
+    def get(self, key: QuoteKey) -> Optional[PriceQuote]:
+        with self.engine.connect() as conn:
+            m = conn.execute(select(price_quotes_t).where(_quote_where(key))).mappings().first()
+        return None if m is None else _quote(m)
+
+    def _upsert(self, key: QuoteKey, **values):
+        stmt = pg_insert(price_quotes_t).values(**key._asdict(), **values)
+        return stmt, {f: stmt.excluded[f] for f in _QUOTE_FIELDS}
+
+    def claim(self, key: QuoteKey, order_id: str, now: datetime, fresh_after: datetime) -> bool:
+        """Due passi nella stessa transazione. `INSERT ... DO NOTHING` vince se la riga manca;
+        altrimenti `SELECT ... FOR UPDATE` mette in fila i concorrenti sulla riga e ognuno, con
+        statement nuovi (READ COMMITTED), vede il leader scritto da chi lo precede. Un solo
+        `ON CONFLICT DO UPDATE ... WHERE` non basta: la sottoquery sul leader userebbe la snapshot
+        di inizio statement e potrebbe non vedere un leader appena confermato."""
+        t = price_quotes_t.c
+        pending = dict(status=QuoteStatus.PENDING.value, leader_order_id=order_id, total=None,
+                       priced_at=None, updated_at=now)
+        with self.engine.begin() as conn:
+            inserted = conn.execute(pg_insert(price_quotes_t).values(**key._asdict(), **pending)
+                                    .on_conflict_do_nothing().returning(t.leader_order_id)).first()
+            if inserted is not None:
+                return True
+            row = conn.execute(select(price_quotes_t).where(_quote_where(key)).with_for_update()).mappings().first()
+            if row is None:   # cancellata tra i due statement: riprova l'inserimento
+                return conn.execute(pg_insert(price_quotes_t).values(**key._asdict(), **pending)
+                                    .on_conflict_do_nothing().returning(t.leader_order_id)).first() is not None
+            if row["status"] == QuoteStatus.READY.value:
+                takeable = row["priced_at"] < fresh_after
+            else:
+                leader_id = row["leader_order_id"]
+                leader = conn.execute(select(orders_t.c.status).where(orders_t.c.id == leader_id)).scalar()
+                busy = conn.execute(select(jobs_t.c.id).where(
+                    jobs_t.c.order_id == leader_id, jobs_t.c.kind == JobKind.PURCHASE.value,
+                    jobs_t.c.status.in_(ACTIVE)).limit(1)).first() is not None
+                takeable = (leader != OrderStatus.QUEUED.value
+                            or (not busy and row["updated_at"] < fresh_after))
+            if takeable:
+                conn.execute(update(price_quotes_t).where(_quote_where(key)).values(**pending))
+            return takeable
+
+    def publish(self, key: QuoteKey, leader_order_id: str, total: Decimal, now: datetime) -> List[str]:
+        stmt, excluded = self._upsert(key, status=QuoteStatus.READY.value, leader_order_id=leader_order_id,
+                                      total=total, priced_at=now, updated_at=now)
+        fanout = (update(orders_t).where(_followers_where(key))
+                  .values(status=OrderStatus.AWAITING_CONFIRMATION.value, total=total,
+                          follows_quote=False, updated_at=now)
+                  .returning(orders_t.c.id))
+        with self.engine.begin() as conn:
+            conn.execute(stmt.on_conflict_do_update(index_elements=list(QuoteKey._fields), set_=excluded))
+            return sorted(r[0] for r in conn.execute(fanout))
+
+    def release(self, key: QuoteKey, leader_order_id: str) -> List[Order]:
+        t = price_quotes_t.c
+        with self.engine.begin() as conn:
+            gone = conn.execute(delete(price_quotes_t).where(
+                _quote_where(key), t.status == QuoteStatus.PENDING.value,
+                t.leader_order_id == leader_order_id)).rowcount
+            if gone != 1:
+                return []
+            rows = conn.execute(update(orders_t).where(_followers_where(key))
+                                .values(follows_quote=False).returning(*orders_t.c)).mappings().all()
+        return sorted((_order(m) for m in rows), key=lambda o: o.id)
+
+    def detach(self, order: Order) -> bool:
+        values = {k: v for k, v in _order_row(order).items() if k != "id"}
+        with self.engine.begin() as conn:
+            res = conn.execute(update(orders_t).where(
+                orders_t.c.id == order.id, orders_t.c.status == OrderStatus.QUEUED.value,
+                orders_t.c.follows_quote.is_(True)).values(**values))
+        return res.rowcount == 1
 
 
 def _job_row(j: Job) -> dict:
@@ -478,6 +585,7 @@ class PostgresRepositories:
         self.orders = PostgresOrders(engine)
         self.rejections = PostgresRejections(engine)
         self.jobs = PostgresJobs(engine)
+        self.quotes = PostgresQuotes(engine)
         self.quota = PostgresQuota(engine, rules=BucketRules(quota_margin, booking_reserve,
                                                              quota_burst, quota_floor))
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 def money_str(value: Decimal) -> str:
@@ -290,6 +290,34 @@ class Order:
     replacement_proposal_id: Optional[str] = None     # RF-17: proposta che sostituisce l'ordine
     orphan_itineraries: int = 0                       # M18: timeout su POST /v1/itineraries
     rooms: int = 1                                    # M21-D (RF-67): camere mandate a HofJ
+    follows_quote: bool = False                       # RF-84: agganciato a un prezzo in volo, senza job
+    confirmed_total: Optional[Decimal] = None         # RF-84: totale confermato prima del carrello
+
+
+class QuoteStatus(str, Enum):
+    """RF-84: prezzo in volo (`pending`, un leader sta facendo il carrello) o letto (`ready`)."""
+    PENDING = "pending"
+    READY = "ready"
+
+
+class QuoteKey(NamedTuple):
+    """RF-84: due ordini con la stessa chiave hanno per HofJ lo stesso carrello, a meno di
+    cliente e passeggeri, quindi lo stesso prezzo."""
+    product_id: str
+    start_date: date
+    adults: int
+    rooms: int
+    currency: str
+
+
+@dataclass(frozen=True)
+class PriceQuote:
+    key: QuoteKey
+    status: QuoteStatus
+    leader_order_id: str
+    updated_at: datetime
+    total: Optional[Decimal] = None
+    priced_at: Optional[datetime] = None    # base del TTL, solo `ready`
 
 
 class JobKind(str, Enum):

@@ -13,7 +13,10 @@ RF-12, RF-14, RF-39..41, RF-49, RF-52..54, §7 e §4.12 (RF-58..75) aggiornati i
 v3 (roadmap M21, `docs/usecases/scelta.md`): descrivono il comportamento dopo M21, le parti
 marcate "(M21)" non sono ancora implementate. RF-06, RF-16, RF-19, RF-25, RF-39, RF-45,
 RF-46, RF-49 e RNF-05 aggiornati il 2026-09-26 per la conferma del prezzo effettivo prima
-del link. RNF-04 aggiornato il 2026-09-27 per l'attesa dell'accettazione (roadmap M20). Origine: `docs/brief.md` e
+del link. RNF-04 aggiornato il 2026-09-27 per l'attesa dell'accettazione (roadmap M20). RF-84
+aggiunto e RF-14, RF-16, RF-45, RF-46, RF-48, RF-49 aggiornati il 2026-09-27 per la cache del
+prezzo con fanout (roadmap M23,
+`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`). Origine: `docs/brief.md` e
 intervista del 2026-09-25 (decisioni in `docs/decisions.md`).
 
 ## 1. Scopo e contesto
@@ -141,7 +144,8 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
 - **RF-14** Il job d'acquisto (RF-46) crea l'itinerario HofJ (`POST /v1/itineraries` con prodotto,
   data di inizio, adulti, camere dell'ordine (RF-67, M21; prima era sempre 1), valuta EUR),
   imposta il cliente (`PUT .../customer`), legge
-  gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`).
+  gli slot pax (`GET .../pax`) e li aggiorna preservando ogni `refId` (`PUT .../pax`). Il
+  carrello di un ordine servito dalla cache del prezzo nasce dopo il sì (RF-84).
 - **RF-15** Vela accetta la sistemazione di default dell'itinerario. Non sceglie hotel
   alternativi né aggiunge attività: il prodotto HofJ è già "esperienza + hotel".
 - **RF-16** Vela legge il totale reale dall'itinerario. La proposta dice il prezzo "a partire da"
@@ -149,7 +153,8 @@ Vincoli che squalificano la consegna (dal brief, ripresi qui perché ogni requis
   del totale l'ordine passa a `awaiting_confirmation`: la risposta (RF-25) dà il totale reale,
   la stima della proposta e la differenza, e chiede conferma. Il link nasce solo dopo la
   conferma, cioè una seconda `accept_proposal` sulla stessa proposta, e porta sempre il totale
-  reale (decisione del 2026-09-26).
+  reale (decisione del 2026-09-26). Con il prezzo dalla cache (RF-84) si conferma prima che il
+  carrello esista; se il carrello costa un'altra cifra serve un nuovo sì.
 - **RF-17** Se la creazione dell'itinerario fallisce per un errore del prodotto (4xx/5xx da
   HofJ riconducibile al prodotto, non alla quota o alla rete), il job d'acquisto segna il
   prodotto come non prenotabile, sceglie la proposta successiva per lo stesso intento e porta
@@ -350,14 +355,18 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
   fino a un tetto configurabile (100 s, sotto i 120 s massimi di un tool MCP su ElevenLabs);
   sulla conferma del prezzo aspetta allo stesso modo il link. Se il tetto scade risponde
   `queued` e la frase `say` dichiara l'attesa in minuti, arrotondata per eccesso. In modalità
-  `loadtest` il tetto è zero (decisione del 2026-09-26).
+  `loadtest` il tetto è zero (decisione del 2026-09-26). Con un prezzo in cache risponde subito
+  `awaiting_confirmation`; con un prezzo in volo per la stessa chiave l'ordine si aggancia al
+  leader senza job suo (RF-84).
 - **RF-46** Un job d'acquisto per ordine esegue in sequenza: creazione itinerario, cliente,
   lettura pax, scrittura pax, lettura del totale reale; qui l'ordine passa a
   `awaiting_confirmation` e il job si chiude. La conferma (RF-16) accoda un job d'acquisto che
   riparte dalla creazione del link di pagamento; poi l'ordine passa a `awaiting_payment`. Ogni passo salva il proprio esito (`itineraryId`
   compreso) così che un'interruzione riprenda dal passo successivo. Un passo fallito per rete,
   timeout o 5xx viene ripetuto fino a tre volte nelle finestre successive; poi l'ordine passa a
-  `failed` con un motivo leggibile. Un errore del prodotto segue RF-17.
+  `failed` con un motivo leggibile. Un errore del prodotto segue RF-17. Alla lettura del totale
+  il job aggiorna la cache del prezzo e sblocca gli ordini agganciati; per un ordine già
+  confermato sul prezzo in cache, con lo stesso totale prosegue fino al link (RF-84).
 - **RF-47** Lo scheduler della quota è unico per il cluster: un token bucket condiviso
   in Postgres (RF-36), tre classi in ordine di priorità: `booking` (prenotazioni di ordini
   pagati), `purchase` (job d'acquisto, in ordine di arrivo), `sync` (solo a coda `purchase`
@@ -370,12 +379,24 @@ design trasforma questo tetto in attesa dichiarata invece che in errori.
 - **RF-48** Attesa stimata = posizione in coda × 60 s ÷ acquisti al minuto, con acquisti al
   minuto = ritmo al minuto × 80% ÷ 5 (16 con il limite di 120): il 20% del ritmo si lascia
   alle prenotazioni, così la stima è prudente. Ricalcolata a ogni `get_order_status`. Non
-  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata.
+  esiste un tetto: un'attesa di ore viene dichiarata, non rifiutata. Un ordine agganciato
+  (RF-84) ha la posizione del suo leader.
 - **RF-49** `reject_proposal` sulla proposta di un ordine `queued`, `awaiting_confirmation` o
   `awaiting_payment` porta l'ordine a `cancelled`, lo toglie dalla coda e restituisce la proposta
   successiva (RF-08). Un rifiuto per prezzo dopo il prezzo effettivo usa il totale reale come
   tetto della proposta successiva (decisione M7, aggiornata il 2026-09-26). (M21) Non vale per
-  la domanda chiusa di RF-75: senza rifiuto registrato l'ordine resta com'è.
+  la domanda chiusa di RF-75: senza rifiuto registrato l'ordine resta com'è. Se l'ordine
+  cancellato era il leader di un prezzo in volo, gli agganciati tornano ordini normali (RF-84).
+- **RF-84** Il prezzo effettivo si mette in cache per chiave (prodotto, data di inizio, adulti,
+  camere, valuta) per 15 minuti (`price_quote_ttl_seconds`, 0 = cache e fanout spenti). Con un
+  prezzo in cache, e il prodotto ancora prenotabile, `accept_proposal` risponde subito
+  `awaiting_confirmation`, senza coda né chiamate a HofJ, e il carrello si crea dopo il sì. Con
+  un prezzo in volo per la stessa chiave l'ordine si aggancia al leader, senza job suo, e riceve
+  il prezzo quando il leader lo legge. Se il carrello creato dopo il sì costa un'altra cifra,
+  l'ordine torna `awaiting_confirmation` e serve un nuovo sì; il link porta sempre il totale del
+  carrello. Se il leader esce senza prezzo (`failed`, `replaced`, `cancelled`), gli agganciati
+  tornano ordini normali al loro posto in coda. Migrazione 0015: `price_quotes`,
+  `orders.follows_quote`, `orders.confirmed_total` (decisione del 2026-09-27).
 - **RF-50** I job girano in ogni istanza del processo (RNF-02): ogni istanza preleva job dalla
   tabella in Postgres con lock non bloccante (`FOR UPDATE SKIP LOCKED`), con concorrenza per
   istanza configurabile (default 10, M18). Un job è idempotente e ripartibile (RF-27).

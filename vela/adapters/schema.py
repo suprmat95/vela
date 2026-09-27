@@ -94,6 +94,8 @@ orders_t = Table(
     Column("replacement_proposal_id", String(36), index=True),
     Column("orphan_itineraries", Integer, nullable=False, server_default="0"),   # M18
     Column("rooms", Integer, nullable=False, server_default="1"),                # 0011 (M21-D)
+    Column("follows_quote", Boolean, nullable=False, server_default=text("false")),   # 0015 (RF-84)
+    Column("confirmed_total", Numeric(12, 2)),                                         # 0015 (RF-84)
     UniqueConstraint("proposal_id", name="uq_orders_proposal_id"),   # RNF-03: un ordine per proposta
 )
 
@@ -136,4 +138,20 @@ quota_window_t = Table(
     Column("needs_refresh", Boolean, nullable=False, default=False),
     Column("tokens", Float, nullable=False),                  # token bucket (M18), può essere negativo
     Column("refilled_at", DateTime(timezone=True), nullable=False),
+)
+
+# RF-84: cache del prezzo con fanout (migrazione 0015). Nessuna FK verso `orders`: il leader è un
+# riferimento debole, un leader sparito vale come leader non più `queued`.
+price_quotes_t = Table(
+    "price_quotes", metadata,
+    Column("product_id", String(32), primary_key=True),
+    Column("start_date", Date, primary_key=True),
+    Column("adults", Integer, primary_key=True),
+    Column("rooms", Integer, primary_key=True),
+    Column("currency", String(3), primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("leader_order_id", String(36), nullable=False),
+    Column("total", Numeric(12, 2)),
+    Column("priced_at", DateTime(timezone=True)),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
 )

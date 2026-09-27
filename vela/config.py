@@ -83,6 +83,7 @@ class Settings:
     payment_poll_seconds: int = 60                     # RF-20, verifica della Checkout Session
     accept_wait_seconds: int = 100                     # accept aspetta prezzo e link (2026-09-26), < 120 s di ElevenLabs
     accept_poll_seconds: float = 1.0                   # rilettura dell'ordine durante l'attesa
+    price_quote_ttl_seconds: int = 900                 # RF-84: vita del prezzo in cache; 0 = cache e fanout spenti
     replay_latency: Tuple[float, float] = (0.0, 0.0)   # replay: latenza simulata min/max (M13)
     replay_limit: Optional[int] = None                 # replay: quota simulata, None = illimitata
 

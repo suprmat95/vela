@@ -558,3 +558,17 @@ class SmsPhrasesTest(unittest.TestCase):
                      say.say_status(OrderStatus.AWAITING_PAYMENT, None, None, "it", Decimal("1"),
                                     phone_tail="4567")):
             self.assertNotIn("http", text)
+
+
+class PriceChangedSinceTest(unittest.TestCase):
+    def test_italian(self):
+        text = say.say_price_changed_since(Decimal("768"), Decimal("700"))
+        self.assertIn("768", text)
+        self.assertIn("700", text)
+        self.assertIn("Confermi?", text)
+
+    def test_english(self):
+        text = say.say_price_changed_since(Decimal("768"), Decimal("700"), "en")
+        self.assertIn("768", text)
+        self.assertIn("you confirmed", text)
+        self.assertIn("Do you confirm?", text)

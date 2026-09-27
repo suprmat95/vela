@@ -1175,6 +1175,29 @@ con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
 
 ---
 
+## M23 — Cache del prezzo con fanout
+
+**Stato (2026-09-27).** Fatta sul branch `task/cache`.
+
+**Risultato.** Nel picco molti viaggiatori accettano lo stesso viaggio: il prezzo effettivo si
+scopre una volta per chiave (prodotto, data, adulti, camere, valuta) e vale per tutti per 15
+minuti. Chi trova il prezzo in cache lo sente subito, senza coda né chiamate a HofJ, e il
+carrello si crea dopo il sì; chi arriva mentre il prezzo è in volo si aggancia al primo ordine.
+N accettazioni identiche costano 5 chiamate per il prezzo invece di 5·N. Design in
+`docs/superpowers/specs/2026-09-27-cache-prezzo-fanout-design.md`, piano in
+`docs/plans/2026-09-27-cache-prezzo-fanout.md`.
+**Scope.** Tabella `price_quotes` e `orders.follows_quote`, `orders.confirmed_total`
+(migrazione 0015); porta `QuoteRepository` in memoria e Postgres; `accept_proposal` con hit,
+leader e agganciati; pubblicazione e fanout al passo 3 del job d'acquisto; conferma senza
+carrello e secondo giro se il prezzo cambia; ripiego quando il leader esce senza prezzo;
+`loadtest/journey.py` accetta la risposta `200 awaiting_confirmation`.
+**Test.** Contratto dei repository (anche elezione concorrente su Postgres),
+`tests/test_price_quotes.py`, frase nuova in `tests/test_say.py`, viaggio del load test.
+**Copre.** RF-14, RF-16, RF-45, RF-46, RF-48, RF-49, RF-84.
+**Resta fuori.** Rifare i giri di `loadtest/RESULTS.md` per misurare il risparmio.
+
+---
+
 ## Matrice dei requisiti
 
 | Requisito | Macro task |
@@ -1222,6 +1245,7 @@ con le camere), M21-F (tipo di rifiuto `hotel`, RF-71, RF-72).
 | RF-69, RF-70 | M21-E |
 | RF-71..RF-75 | M21-F (RF-72 anche M22-b) |
 | RF-76..RF-82 | M22-a (bozza), M22-b |
+| RF-84 | M23 |
 | RNF-01, RNF-02, RNF-03 | M2, M6 |
 | RNF-04 | M5, M18 |
 | RNF-05 | M13a, M13b |

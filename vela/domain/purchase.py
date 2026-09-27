@@ -5,10 +5,11 @@ Passi, ognuno salvato prima del successivo così una ripresa (RF-27) non rifà c
   0 itinerario (`create_itinerary`, salva `itinerary_id`)       1 chiamata HofJ
   1 cliente (`set_customer`)                                    1
   2 passeggeri (`get_pax` + `set_pax`, un'unica unità di ripresa) 2
-  3 importo da pagare (`get_itinerary`, salva `total`)          1
+  3 importo da pagare (`get_itinerary`, salva `total`, pubblica il prezzo in cache, RF-84)  1
     → l'ordine passa a `awaiting_confirmation` e il job si chiude qui (decisione 2026-09-26):
       il viaggiatore sente il prezzo effettivo e solo la sua conferma accoda un nuovo job
       d'acquisto che riparte dal passo 4
+      (RF-84: se l'ordine ha già un `confirmed_total` uguale, si prosegue al link senza fermarsi)
   4 link di pagamento (porta dei pagamenti), job di verifica e SMS    0
   5 fatto: l'ordine è `awaiting_payment`
 
@@ -34,6 +35,7 @@ from vela.domain import say
 from vela.domain.models import (Job, JobKind, JobStatus, NoMatch, Order, OrderStatus, ProposalMade,
                                 Rejection, TravelerDefaults)
 from vela.domain.notify import enqueue_sms
+from vela.domain.quotes import quote_key, release_quote
 from vela.ports.hofj import (ConfigError, Customer, HofJError, HofJRouter, ProductError, QuotaError,
                              UpstreamTimeout)
 from vela.ports.payments import PaymentsError, PaymentsPort
@@ -119,8 +121,15 @@ class PurchaseJob:
             hofj.set_pax(order.itinerary_id, filled)
         elif job.step == STEP_TOTAL:
             itinerary = hofj.get_itinerary(order.itinerary_id)
-            self._save_order(replace(order, total=itinerary.total, currency=itinerary.currency,
-                                     status=OrderStatus.AWAITING_CONFIRMATION))
+            self._publish(order, itinerary.total)   # RF-84: prima che l'ordine lasci `queued`
+            priced = replace(order, total=itinerary.total, currency=itinerary.currency)
+            if order.confirmed_total == itinerary.total and order.currency == itinerary.currency:
+                self._save_order(priced)   # RF-84: il viaggiatore ha già detto sì a questo importo
+            else:
+                if order.confirmed_total is not None:
+                    log.info("quote_price_changed order_id=%s confirmed=%s total=%s",
+                             order.id, order.confirmed_total, itinerary.total)
+                self._save_order(replace(priced, status=OrderStatus.AWAITING_CONFIRMATION))
         elif job.step == STEP_LINK:
             link = self.payments.create_payment_link(order, product.title)
             self._save_order(replace(order, status=OrderStatus.AWAITING_PAYMENT,
@@ -137,6 +146,17 @@ class PurchaseJob:
 
     def _save_order(self, order: Order) -> None:
         self.repos.orders.save(replace(order, updated_at=self.now()))
+
+    def _publish(self, order: Order, total) -> None:
+        """RF-84: se la chiave è in cache (la riga esiste solo con la cache accesa), il prezzo letto
+        la aggiorna e sblocca gli agganciati. Va chiamata prima di salvare il nuovo stato: finché
+        il leader è `queued` nessun agganciato lo crede uscito e lo rilascia."""
+        key = quote_key(order, self.repos.proposals.get(order.proposal_id).start_date)
+        if self.repos.quotes.get(key) is None:
+            return
+        ids = self.repos.quotes.publish(key, order.id, total, self.now())
+        if ids:
+            log.info("quote_fanout order_id=%s followers=%d", order.id, len(ids))
 
     def _count_orphan(self, job: Job) -> None:
         order = self.repos.orders.get(job.order_id)
@@ -172,6 +192,8 @@ class PurchaseJob:
         if order is not None and order.status == OrderStatus.QUEUED:
             self._save_order(replace(order, status=OrderStatus.FAILED,
                                      failure_reason=say.failure_reason(reason, self._lang(order))))
+        if order is not None:
+            release_quote(self.repos, order, self.now(), self.new_id)   # RF-84: ripiego
 
     def _replace(self, job: Job, exc: Exception) -> JobResult:
         """RF-17, RF-33: prodotto non prenotabile per tutti; proposta successiva per questo intento."""
@@ -186,6 +208,7 @@ class PurchaseJob:
                                      replacement_proposal_id=result.proposal.id))
         else:
             self._fail_order(job, "no_alternative")
+        release_quote(self.repos, order, now, self.new_id)   # RF-84: ripiego
         return self._close(job, JobStatus.DONE, exc)
 
 

@@ -7,8 +7,8 @@ from decimal import Decimal
 
 from support import NOW, make_product
 from vela.domain.models import (Area, Criteria, Intent, Job, JobKind, JobStatus, Order,
-                                OrderStatus, Participant, Period, Proposal, Rejection,
-                                TravelerProfile)
+                                OrderStatus, Participant, Period, Proposal, QuoteKey, QuoteStatus,
+                                Rejection, TravelerProfile)
 from vela.ports.jobs import DuplicateJob
 from vela.ports.repositories import DuplicateOrder, SyncState
 
@@ -259,6 +259,117 @@ class RepositoryContract:
         self.assertEqual(results.count(False), THREADS - 1, results)
         winner = "pi_%d" % results.index(True)
         self.assertEqual(self.repos.orders.get("o1").payment_ref, winner)
+
+    # cache del prezzo (RF-84)
+    KEY = QuoteKey("1", date(2026, 10, 1), 2, 1, "EUR")
+
+    def quote_world(self, n, follows=True):
+        """`n` ordini `queued` sulla stessa chiave: prodotto 1, 1 ottobre, 2 adulti, 1 camera."""
+        self.seed()
+        for i in range(1, n + 1):
+            self.repos.proposals.add(proposal("p%d" % i))
+            self.repos.orders.add(replace(order("o%d" % i, "p%d" % i), status=OrderStatus.QUEUED,
+                                          total=None, itinerary_id=None, rooms=1,
+                                          enqueued_at=NOW + timedelta(seconds=i),
+                                          follows_quote=follows))
+
+    def test_order_roundtrip_with_quote_fields(self):
+        self.seed()
+        self.repos.proposals.add(proposal())
+        o = replace(order(), follows_quote=True, confirmed_total=Decimal("700"))
+        self.repos.orders.add(o)
+        self.assertEqual(self.repos.orders.get("o1"), o)
+
+    def test_quote_claim_first_wins_then_refused_while_leader_queued(self):
+        self.quote_world(2)
+        self.assertIsNone(self.repos.quotes.get(self.KEY))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o1", NOW, NOW - timedelta(minutes=15)))
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.leader_order_id, q.total), (QuoteStatus.PENDING, "o1", None))
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o1")
+
+    def test_quote_claim_takes_over_when_leader_not_queued(self):
+        self.quote_world(2)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), status=OrderStatus.FAILED))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o2")
+
+    def test_quote_claim_refuses_fresh_ready_and_takes_expired(self):
+        self.quote_world(2)
+        self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), NOW)
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW + timedelta(minutes=16),
+                                                NOW + timedelta(minutes=1)))
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.total, q.priced_at), (QuoteStatus.PENDING, None, None))
+
+    def test_quote_publish_fans_out_only_to_followers_of_the_key(self):
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), follows_quote=False))
+        other = replace(self.repos.orders.get("o3"), rooms=2)          # altra chiave
+        self.repos.orders.save(other)
+        later = NOW + timedelta(seconds=30)
+        ids = self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), later)
+        self.assertEqual(ids, ["o2"])
+        o2 = self.repos.orders.get("o2")
+        self.assertEqual((o2.status, o2.total, o2.follows_quote, o2.updated_at),
+                         (OrderStatus.AWAITING_CONFIRMATION, Decimal("700"), False, later))
+        self.assertEqual(self.repos.orders.get("o1").status, OrderStatus.QUEUED)   # il leader no
+        self.assertEqual(self.repos.orders.get("o3"), other)
+        q = self.repos.quotes.get(self.KEY)
+        self.assertEqual((q.status, q.total, q.priced_at), (QuoteStatus.READY, Decimal("700"), later))
+
+    def test_quote_release_only_by_pending_leader_and_frees_followers(self):
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.repos.orders.save(replace(self.repos.orders.get("o1"), follows_quote=False))
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o2"), [])   # non è il leader
+        freed = self.repos.quotes.release(self.KEY, "o1")
+        self.assertEqual([o.id for o in freed], ["o2", "o3"])
+        self.assertTrue(all(not o.follows_quote for o in freed))
+        self.assertEqual(freed[0].enqueued_at, NOW + timedelta(seconds=2))
+        self.assertFalse(self.repos.orders.get("o2").follows_quote)
+        self.assertIsNone(self.repos.quotes.get(self.KEY))
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o1"), [])   # una volta sola
+
+    def test_quote_release_ignores_ready_rows(self):
+        self.quote_world(1)
+        self.repos.quotes.publish(self.KEY, "o1", Decimal("700"), NOW)
+        self.assertEqual(self.repos.quotes.release(self.KEY, "o1"), [])
+        self.assertEqual(self.repos.quotes.get(self.KEY).status, QuoteStatus.READY)
+
+    def test_quote_claim_takes_over_jobless_leader_older_than_fresh_after(self):
+        """Leader `queued` senza job d'acquisto (crash tra `claim` e accodamento): la riga si
+        libera solo dopo `fresh_after`; con un job attivo il leader resta."""
+        self.quote_world(3)
+        self.repos.quotes.claim(self.KEY, "o1", NOW, NOW)
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW - timedelta(minutes=15)))
+        self.assertTrue(self.repos.quotes.claim(self.KEY, "o2", NOW, NOW + timedelta(seconds=1)))
+        self.repos.jobs.enqueue(job("j2", "o2"))
+        self.assertFalse(self.repos.quotes.claim(self.KEY, "o3", NOW, NOW + timedelta(minutes=1)))
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, "o2")
+
+    def test_quote_detach_only_while_queued_and_following(self):
+        self.quote_world(2)
+        o1 = self.repos.orders.get("o1")
+        self.assertTrue(self.repos.quotes.detach(replace(o1, follows_quote=False)))
+        self.assertFalse(self.repos.orders.get("o1").follows_quote)
+        self.assertFalse(self.repos.quotes.detach(replace(o1, follows_quote=False, total=Decimal("1"))))
+        self.assertIsNone(self.repos.orders.get("o1").total)                  # già sganciato
+        o2 = replace(self.repos.orders.get("o2"), status=OrderStatus.CANCELLED)
+        self.repos.orders.save(o2)
+        self.assertFalse(self.repos.quotes.detach(replace(o2, status=OrderStatus.QUEUED, follows_quote=False)))
+        self.assertEqual(self.repos.orders.get("o2").status, OrderStatus.CANCELLED)
+
+    def test_quote_concurrent_claim_has_one_winner(self):
+        self.quote_world(THREADS)
+        results = all_at_once(lambda i: self.repos.quotes.claim(self.KEY, "o%d" % (i + 1), NOW, NOW))
+        self.assertEqual(results.count(True), 1, results)
+        winner = "o%d" % (results.index(True) + 1)
+        self.assertEqual(self.repos.quotes.get(self.KEY).leader_order_id, winner)
 
     # job (RF-27, RF-50)
     def seed_orders(self, n):

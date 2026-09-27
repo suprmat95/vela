@@ -50,6 +50,10 @@ Vela: 100% riceve una proposta, 30% dice "troppo caro", 20% accetta, chi ha acce
 stato ogni 30-60 s, 60% di chi riceve il link paga. Due sentinelle in più: **Marco** accetta a
 60 s e paga appena ha il link; **Anna** arriva al minuto 6, rifiuta e accetta.
 
+Con la cache del prezzo (RF-84) chi accetta un viaggio già prezzato riceve subito
+`200 awaiting_confirmation`: il viaggiatore finto lo tratta come un prezzo arrivato e conferma al
+primo giro di polling.
+
 ## Il finto HofJ
 
 Variabili del compose (o opzioni di `python -m loadtest.fake_hofj`):
