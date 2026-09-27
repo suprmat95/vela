@@ -1286,3 +1286,19 @@ load test. Approccio approvato dall'utente.
 | Etichette | Mantenute [misurato] / [previsto] / [proposta] del piano; le correzioni di M18 e M19 restano proposte | Il piano (sezione 9) vieta di scrivere le previsioni come fatti |
 | Doppio job di prenotazione | Il punto 3 della sezione 3.3 del piano ("da verificare nel codice") è scritto come letto nel codice: `_enqueue_booking` controlla e poi accoda senza lock né vincolo unico, quindi due job concorrenti sono possibili; non riprodotto | Verificato leggendo `vela/domain/orders.py` e `vela/adapters/schema.py`; la correzione, se serve, è di M18 |
 | Mapping A2A | Stati del task A2A ↔ stati dell'ordine scritti come proposta da confermare | Non era nei documenti; va confermato dall'utente o da M16 |
+
+## 2026-09-27 — `ARCHITECTURE.md` riscritto (M15)
+
+Origine: richiesta dell'utente di rileggere tutte le note dello sviluppo e riscrivere da capo
+`ARCHITECTURE.md` mostrando scelte architetturali e compromessi. Supera la bozza del 2026-09-26
+(voce "Bozza di `ARCHITECTURE.md` (M15)"), scritta prima di M13b, M18, M19, della cache del prezzo
+e di M21.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Lingua | Inglese; nomi del codice e titoli delle voci di questo file invariati, note italiane linkate | Il documento è per i valutatori, anglofoni. Scelta dell'utente |
+| Struttura | Per tema: panoramica, percorso di un acquisto, 13 decisioni (scelta / scartato / compromesso / prove), twist con le 5 richieste del brief, cambi di idea in ordine, vincoli e lacune, prossimi passi, dove stanno le prove | Scelta dell'utente tra per tema, cronologico e ADR numerati |
+| Numeri | Solo da `loadtest/RESULTS.md`, `vela/config.py` e questo file, con etichette measured / projected / predicted; confronti non omogenei dichiarati (M19 al 2% di paganti, cache senza giro di controllo) | Nessun numero inventato; i segnaposto della bozza sono sostituiti dai numeri misurati |
+| Lacune dichiarate | `/mcp` senza autenticazione (M8 non fatta), niente log JSON né comando di cancellazione (M14), niente catalogo in memoria per istanza (RNF-12), criterio vocale da eseguire, A2A non fatto | Il documento descrive il sistema com'è, non la spec |
+| Mapping A2A | Resta una proposta non validata nei prossimi passi | Come nella bozza; non confermato |
+| Fuori portata | Testo superato altrove, da correggere in un'altra task: tabella Settings del README, stato di M19 e M23 in roadmap, riferimenti al webhook e RNF-10 in spec, Anna "minuto 6" e timeout 15 s in `loadtest/README.md`, "~43 link/min" in `RESULTS.md`, criterio 5 in `acceptance.md` | Una task alla volta |
