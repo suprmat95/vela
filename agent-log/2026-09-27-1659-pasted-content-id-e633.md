@@ -956,3 +956,152 @@ Non fare il giro Giro al 60%
 Ok, niente giro al 60%. Tolgo il riferimento dal README del banco e registro la scelta in `decisions.md`.
 
 - 🔧 Bash: python3 - <<'EOF' p='loadtest/README.md' s=open(p).read() o='''I due giri di M19…
+
+Il giro al 60% non lo faccio. Ho tolto il riferimento dal README del banco e ho scritto in `decisions.md` che il giro è uno solo, per tua scelta (commit `aa6c058`).
+
+Senza quel giro manca un dato: il confronto con i giri precedenti a parità di paganti, cioè quanto rallenta il ritmo quando paga molta gente e ogni pagamento costa 3 chiamate di booking. Lo segno come aperto nei risultati.
+
+Il giro al 2% è ancora in corso e mancano pochi minuti. Quando finisce scrivo la sezione in `RESULTS.md` e la proiezione a 50.000, completo `decisions.md` e la roadmap, poi mi fermo prima del merge.
+
+## Utente 18:06
+
+come sta andando il giro?
+
+## Agente 18:06
+
+- 🔧 Bash: tail -3 /tmp/claude-501/m19-pay2.log; python3 - <<'EOF' import json,collections,…
+
+Il giro è a circa 4 minuti e mezzo su 8, e finora va come previsto. Questi numeri sono parziali, letti dal registro del finto HofJ mentre il giro è ancora in corso:
+
+| Misura | Finora | Riferimento |
+|---|---|---|
+| Chiamate Vela → HofJ al minuto, a regime (minuti 2-4) | 98-103 | come prima: il tetto resta la quota |
+| Massimo in 60 s | 104 | limite 108 |
+| 429 ricevuti | 0 | 0 |
+| Errori dal finto (compresi i 400 per booking senza cliente o passeggeri) | 0 | 0 |
+| Carrelli: creazioni e letture del totale | 179 e 179 | 2 chiamate per link |
+| Prenotazioni: cliente, passeggeri, booking | 7, 7, 7 | 3 chiamate per ordine pagato, `get_pax` mai servito |
+
+- **Link al minuto:** a regime circa 49 carrelli al minuto (circa 100 chiamate diviso 2 a carrello), contro i 17,8 del giro con la cache. È in linea con la stima di ~48.
+- **Prenotazioni:** 7 finora, cioè Marco più i pochi che pagano al 2%. Tutte con cliente e passeggeri prima del booking, e nessun rifiuto dal finto.
+
+Mancano gli ultimi 3-4 minuti di coda, poi il report con link, pagati, confermati, coda alla fine e tempi di Marco e Anna.
+
+## Utente 18:07
+
+ma qui la cache c'è anche vero?
+
+## Agente 18:07
+
+- 🔧 Bash: grep -n "price_quote_ttl" vela/app.py vela/config.py; docker compose -p m19 exec…
+
+Sì, la cache del prezzo è accesa anche in questo giro, come nel giro "Dopo la cache del prezzo" di `RESULTS.md`:
+
+- **Configurazione:** `price_quote_ttl_seconds` è a 900 (15 minuti), il default. In modo `loadtest` Vela la legge da lì.
+- **Nel database del giro:** la tabella `price_quotes` ha 8 prezzi `ready`, uno per chiave (le quattro frasi dello scenario su prodotti e date diverse). Sui 487 ordini nessuno è ancora agganciato a un prezzo in volo.
+
+Cosa vuol dire per i numeri che ti ho dato:
+
+- **Prezzo e carrelli.** Quasi tutti sentono il prezzo subito dalla cache, senza chiamate. Il carrello nasce dopo il sì: i 179 carrelli sono in gran parte conferme di prezzi presi dalla cache, e ognuno ora costa 2 chiamate invece di 5.
+- **Cosa misura il confronto.** Rispetto al giro con la cache cambia solo M19, perché la cache c'era già. Il salto da 17,8 a circa 49 link al minuto viene dal carrello a 2 chiamate e dai pochi pagamenti, non dalla cache.
+- **La scadenza degli ordini silenziosi qui non scatta.** Il viaggiatore finto chiede lo stato ogni 30-60 s, quindi nessun ordine resta 15 minuti senza segni di vita.
+
+## Utente 18:08
+
+quindi in sostanza per arrivare al link di pagamento quante richieste occorre fare contro hofj considerando anche la cache?
+
+## Agente 18:08
+
+Per arrivare al link servono sempre **2 richieste a HofJ**, con o senza cache: `POST /v1/itineraries` e `GET /v1/itineraries/{id}` per il totale. Prima di M19 erano 5. Cambia solo il momento in cui partono:
+
+| Chi | Prezzo sentito | Dopo il sì, fino al link | Totale per il link |
+|---|---|---|---|
+| **Hit**: il prezzo è in cache (il 97% nel giro con la cache) | 0 chiamate, subito | 2 (il carrello nasce dopo il sì) | **2** |
+| **Leader**: primo a chiedere quella combinazione | 2 (il carrello serve anche per il prezzo) | 0 (il carrello c'è già) | **2** |
+| **Agganciato**: stesso prezzo già in volo | 0, arriva dal leader | 2 | **2** |
+
+Dove la cache fa risparmiare è **chi non arriva al link**:
+- Chi sente il prezzo dalla cache e poi rifiuta costa **0** chiamate.
+- Un leader che rifiuta costa 2 e lascia un carrello orfano.
+- Senza cache ognuno costerebbe 2.
+
+Dopo il pagamento, per chi paga, si aggiungono **3** chiamate: cliente, passeggeri e booking. Diventano 5 solo nel caso di ripiego, se HofJ rifiuta i `refId` dei passeggeri.
+
+Casi eccezionali, rari:
+- Un timeout sulla creazione dell'itinerario lascia un carrello orfano e il nuovo tentativo costa 1 chiamata in più.
+- Un prodotto non prenotabile costa 1 chiamata, poi si passa alla proposta successiva.
+- Se il prezzo è cambiato dopo il sì, il carrello c'è già: il secondo sì va al link senza altre chiamate.
+
+In sintesi, **2 chiamate per link e 3 per ogni ordine pagato**. Il giro in corso lo conferma: 179 creazioni di itinerario e 179 letture del totale, e per i 7 pagati 7 + 7 + 7 chiamate di cliente, passeggeri e booking.
+
+## Utente 18:10
+
+considerando 50000 utenti che arrivano in 10 minuti in maniera costante dove, il 50% naviga solamente, il 30% chiede il prezzo, 18% arriva al pagamento e il 2% paga, in quanto tempo si svuoterebbe la cache?
+
+## Agente 18:10
+
+Una premessa: la cache in sé non va svuotata. Ogni prezzo resta valido 15 minuti e poi scade da solo, quindi al più tardi circa 25 minuti dopo l'inizio (10 di arrivi più 15 di vita) è vuota senza costare nulla. Quello che impiega ore a smaltirsi è la **coda dei link**, e credo che la tua domanda sia questa: te la calcolo.
+
+## Il tuo scenario in chiamate HofJ
+
+| Gruppo | Persone | Chiamate HofJ | Totale |
+|---|---|---|---|
+| 50% naviga | 25.000 | 0 (proposte a zero chiamate, RF-11) | 0 |
+| 30% chiede il prezzo e si ferma | 15.000 | 0 se il prezzo è in cache | ~0 |
+| 18% arriva al link e non paga | 9.000 | 2 | 18.000 |
+| 2% paga | 1.000 | 2 per il link + 3 dopo il pagamento | 5.000 |
+| **Totale** | 50.000 | | **~23.000** |
+
+In più ci sono i leader della cache: 2 chiamate per ogni combinazione (prodotto, data, persone, camere) ogni 15 minuti. Con poche combinazioni sono qualche decina di chiamate e il conto non cambia.
+
+## Tempi
+
+Il ritmo è quello che il giro in corso sta misurando: circa 100 chiamate al minuto, il tetto della quota con il margine. Con 3 chiamate di booking ogni 10 link servono 2,3 chiamate per link, quindi **circa 43 link al minuto**.
+
+- **Arrivi:** 10.000 conferme in 10 minuti, cioè 1.000 al minuto. A fine arrivi Vela ha prodotto circa 430 link e ne restano in coda circa **9.570**.
+- **Smaltimento: 10.000 ÷ 43 ≈ 233 minuti, circa 3 ore e 50** dall'inizio.
+- **Attese:**
+  - chi conferma al minuto 1 aspetta circa 22 minuti;
+  - chi conferma al minuto 6 circa 2 ore e 15;
+  - l'ultimo circa 3 ore e 40.
+- **Chi paga:** il booking passa sempre davanti alla coda grazie alla soglia, quindi è confermato entro circa un minuto dal pagamento.
+
+Per confronto, prima di M19 (5 chiamate per link, 17,8 link al minuto) la stessa coda avrebbe richiesto circa **9 ore e 20**.
+
+## Cosa può cambiare questi numeri
+
+- **Ordini silenziosi.**
+  - Se gli SMS sono attivi, chi conferma sente "ti mando il link per SMS" e non scade mai: i numeri sopra valgono così.
+  - Senza SMS, chi smette di chiedere lo stato per 15 minuti esce dalla coda a costo zero, e con attese di ore saranno in tanti. Lo smaltimento si accorcerebbe molto, ma quanto dipende da un comportamento dei viaggiatori che non abbiamo misurato.
+- **Ritmo.** Il ritmo è una misura del giro in corso: lo confermo quando finisce e rifaccio la proiezione a 50.000 con `loadtest/projection.py`. Nota che la proiezione del banco usa un imbuto diverso dal tuo: il 20% accetta e ogni accettazione arriva al link.
+- **Carico REST.** Con migliaia di persone in coda che chiedono lo stato, il carico sulle API REST è una proiezione e non una misura: in `RESULTS.md` è già segnato come punto aperto.
+
+## Utente 18:10
+
+<task-notification>
+<task-id>bxz2z9q92</task-id>
+<tool-use-id>toolu_01BpJXAeyfAsiChSVMksxRhB</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m19/f41d7e06-bf67-416a-ba5e-b916796d24d0/tasks/bxz2z9q92.output</output-file>
+<status>completed</status>
+<summary>Background command "O=/private/tmp/claude-501/-Users-matteodospina-orca-workspaces-vela-task-m19/f41d7e06-bf67-416a-ba5e-b916796d24d0/scratchpad/noports.yml &amp;&amp; git log --oneline -1 &gt; loadtest/out/.m19-commit 2&gt;/dev/null; (docker compose -p m19 -f docker-compose.yml -f $O --profile loadtest build &gt;/tmp/claude-501/m19-build.log 2&gt;&amp;1 &amp;&amp; docker compose -p m19 -f docker-compose.yml -f $O up -d &gt;&gt;/tmp/claude-501/m19-build.log 2&gt;&amp;1 &amp;&amp; docker compose -p m19 -f docker-compose.yml -f $O --profile loadtest run --rm locust --travelers 2500 --duration 8 --arrival-minutes 5 --tail-minutes 3 --pay 0.02 --label 2500-m19-pay2 &gt; /tmp/claude-501/m19-pay2.log 2&gt;&amp;1; echo "exit $?" &gt;&gt; /tmp/claude-501/m19-pay2.log)" completed (exit code 0)</summary>
+</task-notification>
+
+## Agente 18:10
+
+- 🔧 Bash: tail -3 /tmp/claude-501/m19-pay2.log; cat loadtest/out/2500-m19-pay2/report.md
+
+Il giro è finito, tutti i criteri passano. Rifaccio la proiezione a 50.000 con il ritmo misurato.
+
+- 🔧 Bash: uv run python3 loadtest/projection.py --rate 47.4 2>&1 | head -12; python3 -c " …
+
+- 🔧 Bash: sed -n 274,290p loadtest/RESULTS.md; sed -n 1,15p loadtest/RESULTS.md
+
+Scrivo la sezione in `RESULTS.md` e la proiezione.
+
+- 🔧 Bash: python3 - <<'EOF' p='loadtest/RESULTS.md' s=open(p).read() anchor='## Cosa dicev…
+
+Ora `decisions.md` (esito del giro ed elenco dei test cambiati) e la roadmap M19.
+
+- 🔧 Bash: cat >> docs/decisions.md <<'EOF'  ## 2026-09-27 — M19 passo 2: esecuzione e load…
+
+- 🔧 Bash: DATABASE_URL=postgresql+psycopg://postgres:m19@localhost:55432/vela_m19 uv run p…

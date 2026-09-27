@@ -733,6 +733,12 @@ lettura").
 
 **Taglia.** M. **Dipende da** M18, M13b (cambia i numeri). **Ondata** 5, condizionata.
 
+**Stato (2026-09-27).** Passo 1: due sonde su staging (5 + 7 chiamate), verdetto "sì su staging"
+(`docs/api/customer-pax.md`). Passo 2 fatto su `task/m19`, non ancora in `master`: link con 2
+chiamate, booking con cliente, pax e booking (3 chiamate), riserva da `expected_pay_share`, ordini
+silenziosi a 15 minuti (migrazione 0016). Giro C-2500 con il 2% di paganti: 47,4 link/min (prima
+17,8). Aperti: domanda 10 a HofJ per la produzione, giro con il 60% di paganti, taglia vera L.
+
 **Prompt.**
 > Leggi docs/decisions.md ("2026-09-26 — Twist, seconda lettura"),
 > docs/plans/2026-09-26-twist-seconda-lettura.md (sezione 3.4), docs/hofj-questions.md
