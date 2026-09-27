@@ -221,3 +221,35 @@ Last check before the design: availability windows in the fixtures, to decide wh
 I have the full picture. Here is the design; I'll write it into a spec in `docs/superpowers/specs/` and commit it before any code:
 
 - 🔧 Write /Users/matteodospina/orca/workspaces/vela/task-21f/docs/superpowers/specs/2026-09-27-rifiuti-motivo-design.md
+
+- 🔧 Bash: Commit the design spec
+
+Spec committed. The plan is short enough to keep in the repo as an ordered checklist rather than a separate skill pass. Then TDD, one step at a time.
+
+- 🔧 Bash: Write plan and find rejection contract tests
+
+- 🔧 Bash: Read rejection contract and migration test examples
+
+- 🔧 Bash: Read Postgres migration test
+
+- 🔧 Bash: List table columns in schema
+
+Step 1, tests first: migration tests and the repository contract.
+
+- 🔧 Bash: Add migration 0016 tests
+
+Now the repository contract for `kind`, `keep_product` and `update`:
+
+- 🔧 Edit /Users/matteodospina/orca/workspaces/vela/task-21f/tests/repo_contract.py
+
+- 🔧 Bash: Run the new tests (expect failure)
+
+Failing as expected. Implementation: model, migration 0016, table, repositories and port.
+
+- 🔧 Bash: Add rejection kind, keep_product and update to models, schema, repos
+
+- 🔧 Bash: Write migration 0016 and rerun tests
+
+- 🔧 Bash: Show the remaining error
+
+- 🔧 Bash: Run memory repo tests and full suite

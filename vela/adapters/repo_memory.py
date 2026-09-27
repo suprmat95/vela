@@ -142,6 +142,12 @@ class MemoryRejections:
     def add(self, rejection: Rejection) -> None:
         self._items.setdefault(rejection.proposal_id, rejection)
 
+    def update(self, rejection: Rejection) -> None:
+        current = self._items.get(rejection.proposal_id)
+        if current is not None:
+            self._items[rejection.proposal_id] = replace(current, kind=rejection.kind,
+                                                         keep_product=rejection.keep_product)
+
     def product_ids_for_intent(self, intent_id: str) -> Set[str]:
         return {r.product_id for r in self._items.values() if r.intent_id == intent_id}
 

@@ -107,6 +107,8 @@ rejections_t = Table(
     Column("product_id", String(32), ForeignKey("products.id"), nullable=False),
     Column("reason", Text, nullable=False, default=""),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("kind", String(16)),                                                  # 0016 (M21-F)
+    Column("keep_product", Boolean, nullable=False, server_default=text("false")),   # 0016 (M21-F)
     UniqueConstraint("proposal_id", name="uq_rejections_proposal_id"),
 )
 

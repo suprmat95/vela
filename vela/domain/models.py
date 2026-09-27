@@ -357,6 +357,10 @@ class Job:
     last_error: Optional[str] = None
 
 
+REJECT_KINDS = ("price", "place", "hotel", "dates", "duration", "sport", "pax", "level",
+                "direction", "other")   # RF-71, in quest'ordine: con più tipi si registra il primo
+
+
 @dataclass(frozen=True)
 class Rejection:
     intent_id: str
@@ -364,6 +368,8 @@ class Rejection:
     product_id: str
     reason: str
     created_at: datetime
+    kind: Optional[str] = None     # M21-F (RF-71): None = senza tipo (prima di M21-F, o RF-17)
+    keep_product: bool = False     # M21-F (RF-74): il prodotto resta, escluse solo le sue date
 
 
 @dataclass(frozen=True)
