@@ -1,205 +1,168 @@
 # Vela
 
-Vela permette a un viaggiatore di comprare un viaggio di padel o tennis con hotel esprimendo
-un solo intento, a parole sue, all'assistente che usa già (Claude via MCP, un agente vocale
-ElevenLabs, o un client REST). Non ha una homepage e non mostra liste: propone un viaggio alla
-volta, lo prenota sull'API House of Journeys e restituisce il codice di prenotazione.
-Requisiti in `docs/spec.md`, roadmap in `docs/roadmap.md`, decisioni in `docs/decisions.md`.
+Vela vende viaggi di padel e tennis con hotel a partire da una sola frase. Il viaggiatore la dice
+all'assistente che usa già (Claude via MCP, un agente vocale ElevenLabs o un client REST), per
+esempio "un weekend di padel in Spagna a ottobre, siamo in due, massimo 800 euro". Vela propone
+**un** viaggio alla volta, mai una lista. Se il viaggiatore lo rifiuta ("troppo caro", "altre
+date") ne propone un altro. Se lo accetta, manda il link di pagamento, prenota su House of
+Journeys (HofJ) e restituisce il codice di prenotazione.
 
-Stato: M3 e M4 (superfici MCP e REST). L'app espone `GET /health`, la superficie MCP su `/mcp`
-(vedi "Collegare Claude"), la superficie REST sotto `/v1` (bearer `VELA_API_TOKEN`, contratto e
-comandi `curl` in `docs/rest.md`) e, in replay, `GET /replay/checkout/{order_id}` (pagamento
-simulato). I cinque casi d'uso (`create_intent`, `get_proposal`, `reject_proposal`,
-`accept_proposal`, `get_order_status`) vivono in `vela/domain/usecases.py`.
+Tutto il prodotto sta in cinque casi d'uso (`vela/domain/usecases.py`): `create_intent`,
+`get_proposal`, `reject_proposal`, `accept_proposal`, `get_order_status`. Requisiti in
+`docs/spec.md`, decisioni in `docs/decisions.md`, architettura in `ARCHITECTURE.md`, riferimento
+operativo (variabili d'ambiente, worker, Docker, deploy, landing) in `docs/operations.md`.
 
-## Requisiti
+## Collegare Claude
 
-- [uv](https://docs.astral.sh/uv/) (gestisce anche l'interprete Python 3.12, vedi `.python-version`)
-- Docker, per costruire l'immagine
-- Postgres per l'esecuzione reale; i test non lo richiedono
+Vela espone i cinque casi d'uso come tool MCP su `/mcp` (Streamable HTTP, stateless). Il servizio
+pubblico è `https://vela-n506.onrender.com/mcp`.
+
+1. In claude.ai: Settings → Connectors → Add custom connector.
+2. Nome `Pacchetti Viaggio di Padel Tennis`, URL `https://vela-n506.onrender.com/mcp`, nessuna
+   autenticazione.
+3. In una chat nuova, con il connector attivo, scrivi per esempio: "Vorrei un weekend di padel in
+   Spagna a ottobre, siamo in due, massimo 800 euro".
+
+Claude chiama `create_intent` e `get_proposal` e ripete la frase `say` di Vela. Ogni modifica
+richiesta passa da `reject_proposal`. Dopo il sì l'ordine va in coda: Vela dichiara un'attesa e il
+link di pagamento arriva quando si chiede lo stato (`get_order_status`). In replay il pagamento si
+simula aprendo il link; in live si paga il Checkout di Stripe con la carta di test
+`4242 4242 4242 4242`.
+
+Per un'istanza tua: `VELA_PUBLIC_URL` deve essere l'URL pubblico del servizio, perché oltre a
+`localhost` è l'unico host che `/mcp` accetta (gli altri ricevono 421). Con il servizio in replay puoi provare il flusso
+senza Claude (nessuna chiamata a HofJ o Stripe, lascia un ordine di prova nel DB):
+
+```bash
+uv run python scripts/mcp_smoke.py https://<servizio>/mcp
+```
+
+La superficie REST (`/v1`, bearer `VELA_API_TOKEN`) è descritta in `docs/rest.md`.
 
 ## Avvio in locale
 
-```bash
-uv sync                                  # crea .venv con Python 3.12 e le dipendenze di uv.lock
-source .venv/bin/activate
-export DATABASE_URL=postgresql://user:pass@localhost:5432/vela   # oppure sqlite:////tmp/vela.db per una prova
-alembic upgrade head                     # migrazioni
-uvicorn vela.app:app --reload            # http://127.0.0.1:8000/health
-```
-
-In replay, a ogni avvio l'app riallinea la tabella `products` alle fixture dell'host di
-produzione (`fixtures/catalog*.json`, una per brand, `docs/fixtures.md`): se i prodotti attivi
-sono diversi carica le fixture e archivia gli altri, senza cancellarli; se sono gli stessi non
-tocca nulla (M7). Poi legge la quota HofJ (`GET /v1/quota`, una chiamata), riaccoda la
-prenotazione degli ordini `paid_pending_booking` senza job e avvia il worker (M5).
-
-`VELA_UPSTREAM_MODE=live` chiama HofJ vero e richiede `HOFJ_API_KEY`, `HOFJ_BASE_URL`,
-`HOFJ_BRANDS` e `STRIPE_SECRET_KEY` (senza pagamento reale l'app non parte). Il catalogo viene dal
-sync multi-brand (M10): al boot, dopo la quota, parte un thread che sincronizza subito se il
-catalogo è vuoto o più vecchio di 6 ore e poi ogni 6 ore, un'istanza alla volta (advisory lock
-Postgres). Ogni brand di `HOFJ_BRANDS` ha il suo client HofJ; carrello e prenotazione usano il
-brand del prodotto dell'ordine. Il locale delle chiamate è quello delle fixture registrate su
-`HOFJ_BASE_URL` (senza fixture per l'host l'app non parte).
-
-Sync a mano (stampa prima le chiamate previste; `--dry-run` si ferma lì):
+Servono [uv](https://docs.astral.sh/uv/), che installa anche Python 3.12, e un Postgres
+(anche usa e getta: `docker run -d --rm -e POSTGRES_USER=vela -e POSTGRES_PASSWORD=vela -p 5432:5432 postgres:16`).
+Il modo predefinito è
+`replay`: il catalogo viene da `fixtures/`, il pagamento è simulato e non parte nessuna chiamata
+esterna.
 
 ```bash
-uv run python -m vela.sync --dry-run      # piano, nessuna chiamata
-uv run python -m vela.sync                # un giro su tutti i brand, nel DB di DATABASE_URL
-uv run python -m vela.sync --full         # come sopra, ma riscarica anche i dettagli invariati (RF-83)
-uv run python -m vela.sync --record --sport tennis   # rigenera una fixture (docs/fixtures.md)
+uv sync                                    # .venv con Python 3.12 e le dipendenze di uv.lock
+export DATABASE_URL=postgresql://vela:vela@localhost:5432/vela
+uv run alembic upgrade head                # migrazioni
+uv run uvicorn vela.app:app --reload       # http://127.0.0.1:8000
+curl -s localhost:8000/health              # {"status":"ok","db":"ok",...}
 ```
 
-`GET /health` risponde `200 {"status":"ok","db":"ok"}` se il database risponde, altrimenti
-`503 {"status":"degraded","db":"error"}`. Non richiede autenticazione.
+Claude.ai non raggiunge `localhost`: in locale il flusso si prova con
+`uv run python scripts/mcp_smoke.py http://localhost:8000/mcp` (lo stesso host dei link di
+pagamento, `http://localhost:8000` se `VELA_PUBLIC_URL` non è impostata) oppure via REST
+(`export VELA_API_TOKEN=...` prima di `uvicorn`, poi i comandi di `docs/rest.md`).
 
-## Coda e worker (M5)
+Test e lint (entrambi devono passare prima di un commit):
 
-L'accettazione mette l'ordine in coda e risponde subito con posizione e attesa stimata. Un worker
-in ogni istanza (thread nel processo) preleva i job da Postgres con `FOR UPDATE SKIP LOCKED`:
-acquisto (carrello HofJ e link di pagamento), verifica del pagamento, prenotazione. Nessuna
-chiamata a HofJ parte senza un blocco di quota prenotato nel contatore condiviso (finestra di
-60 s, limite effettivo 108 su 120, riserva di 21 per le prenotazioni).
+```bash
+uv run python3 -m unittest discover -s tests   # i test Postgres girano solo con DATABASE_URL
+uv run ruff check .
+```
 
-I parametri sono campi di `Settings` con default, non variabili d'ambiente (spec §6):
+Modi `live` e `loadtest`, variabili d'ambiente e Docker sono in `docs/operations.md`.
 
-| Campo | Default | Uso |
+## Load test
+
+Il load test verifica che, con migliaia di viaggiatori, le chiamate di Vela a HofJ in qualsiasi
+intervallo di 60 s restino sotto 108 (il limite di 120 al minuto meno il 10% di margine). Gira
+tutto in locale con Docker Compose: Postgres, Vela in modo `loadtest`, un finto HofJ con le
+regole di quota e latenza di quello vero, e Locust. **Non tocca mai HofJ vero, Render o Stripe.**
+
+```bash
+docker compose up -d --build
+docker compose run --rm locust --travelers 10000 --browse 50 --proposal 30 --link 18 \
+    --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k
+docker compose down -v        # ogni giro riparte con DB, coda e quota puliti
+uv run python loadtest/projection.py --rate <link/min misurati> --sizes 10000,50000
+```
+
+Il giro aspetta che Vela abbia caricato tutto il catalogo, lancia Locust e scrive il report in
+`loadtest/out/<label>/` (`report.md`, `report.json`, `travelers.jsonl`, `calls.jsonl`, statistiche
+di Locust). Dopo una modifica a `vela/` serve `docker compose --profile loadtest build`. Risultati
+del giro da 10.000 in `loadtest/RESULTS.md`, dettagli in `loadtest/README.md`.
+
+### Il funnel
+
+Ogni viaggiatore sta in uno solo di quattro gruppi. Le percentuali si danno per i primi tre;
+il quarto è il resto fino a 100.
+
+| Gruppo | Opzione | Default | Cosa fa | Esito |
+|---|---|---|---|---|
+| Solo sito | `--browse` | 50 | Naviga la landing, che è statica e separata: viene contato ma non fa richieste a Vela | `site_only` |
+| Proposta | `--proposal` | 30 | `create_intent` e `get_proposal`, poi si ferma | `proposal_only` |
+| Link | `--link` | 18 | Accetta, conferma il prezzo, arriva al link di pagamento e non paga | `link_unpaid` |
+| Pagamento | (resto) | 2 | Accetta, conferma il prezzo, paga e aspetta la conferma della prenotazione | `confirmed` |
+
+- I gruppi hanno numeri esatti: 10.000 al 50/30/18 danno 5.000, 3.000, 1.800 e 200. Il comando li
+  stampa prima di partire; se le tre percentuali sommano più di 100 si ferma con un errore.
+- Gli arrivi sono uniformi nella finestra degli arrivi e i gruppi sono mescolati con il seme:
+  lo scenario non dipende dalle risposte di Vela (modello aperto).
+- Chi ha accettato chiede lo stato ogni 30-60 s. Nessuno del funnel rifiuta. Chi alla fine è
+  ancora in coda risulta `open_<stato>`.
+- Due sentinelle in più, fuori dai gruppi, chiedono lo stato ogni 5 s: **Marco** arriva a 55 s,
+  accetta a 60 s e paga appena ha il link; **Anna** arriva al 60% della finestra degli arrivi,
+  rifiuta con "troppo caro" e accetta la proposta successiva.
+
+### Opzioni del giro (`loadtest/run.py`)
+
+| Opzione | Default | Cosa fa |
 |---|---|---|
-| `worker_concurrency` | 4 | thread del worker per istanza (0 = nessun thread, solo `drain` nei test) |
-| `quota_margin` | 0,10 | margine sul `limitPerMinute` di HofJ |
-| `booking_reserve` | 0,20 | quota della finestra riservata alle prenotazioni |
-| `purchase_max_attempts` | 3 | tentativi del job d'acquisto su rete/5xx |
-| `booking_max_attempts`, `booking_backoff` | 5, (5, 10, 20, 40) s | tentativi e attese della prenotazione |
-| `job_lease_seconds` | 120 | dopo quanto un job `running` di un'istanza morta torna prelevabile |
-| `payment_poll_seconds` | 60 | intervallo della verifica della Checkout Session |
-| `replay_latency`, `replay_limit` | (0, 0), nessuno | latenza e quota simulate dal replay (M13) |
+| `--travelers` | 10000 | Viaggiatori in arrivo (più le due sentinelle) |
+| `--browse` | 50 | % del gruppo "solo sito" |
+| `--proposal` | 30 | % del gruppo "proposta" |
+| `--link` | 18 | % del gruppo "link"; paga il resto (100 − le tre) |
+| `--duration` | 10 | Minuti dell'intero giro, arrivi + coda |
+| `--arrival-minutes` | 2/3 di `--duration` | Minuti in cui arrivano i viaggiatori |
+| `--tail-minutes` | il resto di `--duration` | Minuti di coda dopo l'ultimo arrivo; con `--arrival-minutes` la somma non supera `--duration` |
+| `--seed` | 13 | Seme di arrivi, gruppi e frasi |
+| `--label` | `<travelers>` | Nome del giro e della sua cartella in `loadtest/out/` |
+| `--vela` | `$VELA_URL` o `http://vela:8000` | URL di Vela |
+| `--fake` | `$FAKE_HOFJ_URL` o `http://fake-hofj:8001` | URL del finto HofJ |
+| `--brands` | `weebora.com,terrarossa.com` | Brand delle fixture da cui si conta il catalogo atteso |
+| `--calls` | `loadtest/out/calls.jsonl` | Registro delle chiamate del finto (volume condiviso) |
+| `--out` | `loadtest/out` | Cartella dei report |
 
-## Test
+### Il finto HofJ
 
-```bash
-uv sync
-source .venv/bin/activate
-python3 -m unittest discover -s tests
-```
+Si configura con variabili d'ambiente passate a `docker compose up`:
 
-Equivalente senza attivare il venv: `uv run python3 -m unittest discover -s tests`.
-Lint: `uv run ruff check .` (regole in `pyproject.toml`, vedi `docs/decisions.md`).
-Nessun test chiama servizi esterni. I test che richiedono Postgres girano solo se
-`DATABASE_URL` è impostata, altrimenti vengono saltati. Attenzione: il `python3` di sistema
-potrebbe essere una versione vecchia; la suite richiede il 3.12 del venv e lo verifica.
-
-I test Postgres lavorano nello schema `vela_test` (creato se manca) e non toccano le tabelle
-dell'app. Fa eccezione il test di migrazione di M0, che applica `alembic upgrade head` allo
-schema principale. Per eseguirli in locale: `set -a; . ./.env; set +a; uv run python -m unittest
-discover -s tests` in una sola riga, senza stampare le variabili.
-
-## Variabili d'ambiente
-
-Solo variabili d'ambiente: nessun file `.env` viene letto dal codice (e non va mai aperto
-dagli agenti). Per uso locale si può esportare a mano o usare `set -a; . ./.env; set +a`.
-
-| Variabile | Obbligatoria | Uso |
+| Variabile | Default | Valori |
 |---|---|---|
-| `DATABASE_URL` | sì | Postgres (`postgres://...` di Render viene riscritto in `postgresql+psycopg://`). Senza, `/health` risponde 503 e le migrazioni falliscono. |
-| `VELA_UPSTREAM_MODE` | no, default `replay` | `replay` usa `fixtures/` senza chiamate esterne; `live` chiama HofJ vero e richiede le variabili HofJ e `STRIPE_SECRET_KEY`. `loadtest` (M13a) chiama il finto HofJ di `loadtest/fake_hofj` (solo `localhost`, `127.0.0.1`, `fake-hofj`) con pagamenti finti: vedi `loadtest/README.md`. |
-| `HOFJ_API_KEY` | in `live` | Chiave dell'API House of Journeys. |
-| `HOFJ_BASE_URL` | in `live` | Base URL dell'API HofJ. |
-| `HOFJ_BRANDS` | in `live` | Mappa sport → brand HofJ, es. `padel=weebora.com,tennis=terrarossa.com` (M10). Sport `padel` e `tennis`, brand distinti, almeno una voce. La vecchia `HOFJ_BRAND` da sola blocca l'avvio con l'indicazione di migrare. |
-| `STRIPE_SECRET_KEY` | per Stripe reale | Chiave Stripe di test (una `rk_test` fornita da HofJ). Se impostata, i link di pagamento sono Checkout Session reali (M6), anche con HofJ in replay; richiede `VELA_PUBLIC_URL`. Vedi `docs/stripe.md`. |
-| `STRIPE_WEBHOOK_SECRET` | no | Non usata: niente webhook Stripe; il pagamento si verifica leggendo la Checkout Session e si chiude con `POST /v1/bookings` di HofJ (M5). |
-| `VELA_API_TOKEN` | per usare `/v1` | Bearer token statico della superficie REST (e token statico MCP da M8). Senza, `/v1/*` risponde 503. |
-| `VELA_PUBLIC_URL` | in replay su Render | URL pubblico di Vela: base del link di checkout replay (M2) e dei ritorni Stripe (M6). Senza, i link puntano a `http://localhost:8000`. Obbligatoria con `STRIPE_SECRET_KEY`. |
-| `ANTHROPIC_API_KEY` | no | Se presente abilita il fallback Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) quando il parser non trova né sport né periodo; timeout 5 s, 1 retry. Prova manuale (una chiamata): `uv run python scripts/try_haiku.py "testo"`. |
-| `TWILIO_ACCOUNT_SID` | per SMS reali | Account Twilio. Con `TWILIO_AUTH_TOKEN` e `TWILIO_FROM` Vela manda al viaggiatore l'SMS con il link di pagamento e quello di conferma; senza nessuna delle tre gli SMS sono finti; con solo alcune l'app non parte. Vedi `docs/sms.md`. |
-| `TWILIO_AUTH_TOKEN` | per SMS reali | Token dell'account Twilio. |
-| `TWILIO_FROM` | per SMS reali | Numero Twilio del mittente in E.164 (es. `+1555…`). |
+| `FAKE_HOFJ_WINDOW` | `anchored` | `anchored` (60 s dalla prima chiamata dopo la scadenza, come HofJ), `rolling` (ultimi 60 s) |
+| `FAKE_HOFJ_LATENCY` | `standard` | `standard` (2-6 s su `POST /v1/itineraries`, 0,3-1,5 s sugli altri), `pessimistic` (2-6 s ovunque), `none` |
+| `FAKE_HOFJ_BACKGROUND_RPM` | `12` | Chiamate al minuto di altri usi della stessa chiave (il margine del 10%) |
+| `FAKE_HOFJ_FAULTS` | vuota | Guasti `<METODO path>=<tipo>:<probabilità>` separati da `;` |
+| `FAKE_HOFJ_SEED` | `13` | Seme di guasti e latenze |
 
-## Docker
+Tipi di guasto: `hang_then_execute` (l'effetto avviene, ma la risposta resta appesa 20 s, oltre il
+timeout di 15 s del client), `hang` (appeso senza effetto), `5xx` (503), `product_502` (502 di
+prodotto). Una chiamata respinta con 429 conta comunque nella finestra. Esempio di giro con
+guasti:
 
 ```bash
-docker build -t vela .
-docker run --rm -e DATABASE_URL=sqlite:////tmp/vela.db -p 8000:8000 vela
-curl -s localhost:8000/health
+FAKE_HOFJ_LATENCY=pessimistic \
+FAKE_HOFJ_FAULTS="POST /v1/itineraries=hang_then_execute:0.03;POST /v1/bookings=hang_then_execute:0.05" \
+docker compose up -d --build
+docker compose run --rm locust --travelers 10000 --duration 8 --arrival-minutes 5 --tail-minutes 3 --label 10k-guasti
 ```
 
-`docker-entrypoint.sh` esegue `alembic upgrade head` e poi `uvicorn` sulla porta `PORT`
-(default 8000; Render la imposta da sé). Senza `DATABASE_URL` il container termina con un
-errore esplicito.
+### Proiezione (`loadtest/projection.py`)
 
-## Deploy su Render
+Porta un giro misurato a più viaggiatori con lo stesso funnel, con un modello a coda satura.
 
-`render.yaml` descrive un web service Docker, lo static site della landing e un Postgres gestito
-(piano free, Frankfurt).
-
-1. Dashboard Render → New → Blueprint → questo repository e branch.
-2. Render crea `vela-db`, il servizio `vela` e lo static site `vela-landing`; `DATABASE_URL` è collegata al database.
-3. Inserire nella dashboard le variabili marcate `sync: false`. Il Blueprint fissa
-   `VELA_UPSTREAM_MODE=live` (M7, HofJ staging): servono `HOFJ_API_KEY`,
-   `HOFJ_BASE_URL=https://staging.api.hofj.com`, `HOFJ_BRANDS=padel=staging.weebora.com,tennis=staging.tennis.weebora.com`,
-   `STRIPE_SECRET_KEY`, `VELA_PUBLIC_URL` e `VELA_API_TOKEN`, altrimenti l'app non parte. Per tornare
-   in replay si cambia il valore nel file.
-4. Nel log del deploy compare `Running upgrade  -> 0001`: le migrazioni sono state applicate.
-5. `curl https://<servizio>.onrender.com/health` →
-   `{"status":"ok","db":"ok","catalog":{...},"quota":{...},"queue":{...}}`
-   (`catalog`: numero di prodotti, `fetched_at`, `age_seconds`; `quota`: token bucket con limite
-   effettivo, capienza, ritmo, gettoni, soglia e ultima finestra nota di HofJ; `queue`: età del
-   più vecchio acquisto in coda e itinerari orfani).
-
-Il piano free spegne il servizio dopo inattività: la prima richiesta può richiedere
-qualche decina di secondi. Il Postgres free scade dopo 30 giorni.
-
-URL live: https://vela-n506.onrender.com (`GET /health`, deploy M0 verificato il 2026-09-25).
-
-## Collegare Claude (connector MCP)
-
-La superficie MCP è su `https://<servizio>.onrender.com/mcp` (Streamable HTTP, stateless, senza
-autenticazione fino a M8). Su Render `VELA_PUBLIC_URL` deve essere l'URL pubblico del servizio:
-serve al link di checkout replay ed è l'host che `/mcp` accetta (gli altri ricevono 421).
-
-1. Verifica il servizio: `curl https://<servizio>.onrender.com/health`.
-2. Solo con il servizio in replay: smoke test del flusso di spec §10.1 (nessuna chiamata a HofJ o
-   Stripe; lascia un ordine di prova nel DB):
-   `uv run python scripts/mcp_smoke.py https://<servizio>.onrender.com/mcp`. In live il flusso si
-   prova con `scripts/rest_flow.py` (`docs/rest.md`).
-3. In claude.ai: Settings → Connectors → Add custom connector, nome
-   `Pacchetti Viaggio di Padel Tennis` (come sulla landing), URL
-   `https://<servizio>.onrender.com/mcp`, nessuna autenticazione.
-4. In una chat nuova, con il connector attivo: "Vorrei un weekend di padel in Spagna a ottobre,
-   siamo in due, massimo 800 euro". Dopo il sì Vela dichiara un'attesa; il link arriva con la
-   domanda sullo stato. Il pagamento in replay si simula aprendo il link ricevuto; in live si paga
-   il Checkout di Stripe con `4242 4242 4242 4242`.
-
-"Troppo caro" produce sempre una proposta più economica, anche fuori dall'area chiesta
-(dichiarandolo); se non ce n'è, Vela lo dice (M7).
-
-## Landing
-
-`landing/` è una pagina statica in italiano che spiega come raggiungere Vela: connector MCP in
-Claude, agente vocale ElevenLabs nel browser, numero di telefono. Non mostra viaggi né liste
-(`docs/superpowers/specs/2026-09-26-landing-design.md`). HTML, CSS e JS sono scritti a mano,
-senza build.
-
-- Anteprima: `python3 -m http.server -d landing 8080`, poi http://127.0.0.1:8080.
-- Configurazione: `landing/config.js` (URL MCP, agent id ElevenLabs, numero in formato E.164).
-  Con agent id o numero vuoti la sezione mostra "In arrivo" e lo script ElevenLabs non si carica.
-- Deploy: static site `vela-landing` in `render.yaml`. Si ricostruisce solo per modifiche sotto
-  `landing/`, che il servizio `vela` ignora.
-
-## Struttura
-
-```
-vela/domain     modelli, parser, chooser, frasi say, ordini, casi d'uso (M2); quota, job d'acquisto, prenotazione e verifica del pagamento, processore (M5)
-vela/sync.py    sync multi-brand del catalogo, scheduler e comando `python -m vela.sync` (M10); vela/fixtures.py registra le fixture
-vela/ports      HofJPort, PaymentsPort, repository (M2); JobRepository, QuotaStore (M5); HofJRouter, CatalogSource (M10)
-vela/adapters   db.py, repository memoria/Postgres, replay HofJ, pagamento finto (M2); HofJ HTTP e worker (M5), Stripe (M6); router per brand, catalogo da fixture (M10)
-vela/surfaces   health.py, replay.py (M2), mcp.py (M3), rest.py e problems.py (M4), checkout_pages.py (M6)
-vela/app.py     factory FastAPI
-alembic/        migrazioni
-fixtures/       catalogo registrato per replay e test, una fixture per host e brand (M1, M10)
-loadtest/       finto HofJ, scenario Locust, report e risultati (M13a)
-landing/        pagina statica, static site Render `vela-landing`
-tests/          python3 -m unittest discover -s tests
-docs/           brief, spec, roadmap, decisioni, piani
-agent-log/      trascrizioni delle sessioni con gli agenti (vedi docs/agents-log.md)
-```
+| Opzione | Default | Cosa fa |
+|---|---|---|
+| `--rate` | obbligatoria | Link di pagamento al minuto misurati a regime |
+| `--minutes` | 5 | Minuti di arrivi |
+| `--tail-minutes` | 3 | Minuti di coda |
+| `--browse`, `--proposal`, `--link` | 50, 30, 18 | Il funnel, come in `run.py` |
+| `--sizes` | `10000,50000` | Numeri di viaggiatori da proiettare, separati da virgola |
+| `--json` | no | Stampa il risultato in JSON |

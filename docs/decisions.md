@@ -1346,3 +1346,13 @@ Origine: merge su `master` di `suprmat95/last-load-test` (giro da 10.000 a quatt
 | Finestra della proiezione | Quella di `RESULTS.md`: 50.000 in 5 minuti, dichiarata più severa dei 10 minuti del twist; la proiezione precedente a 10 minuti citata in una riga | Un solo modello, quello del file versionato |
 | Conversazione | Misurata a 34 req/s (p95 200-220 ms, 0 errori) e a 86,8 req/s (p95 0,8-1,1 s, 3 errori per il pool esaurito); a 454 req/s stimate 6-14 istanze (454 ÷ 87 e 454 ÷ 34), non verificate | Supera la stima di "circa 13 istanze" della voce "Carico della conversazione a 50.000" |
 | Pool del database | Dichiarato come primo limite di Vela prima della quota (§3.2, §6) e tra i prossimi passi (§7) | Misurato nel giro da 10.000; non cambiato |
+
+## 2026-09-27 — README ridotto, riferimento operativo in `docs/operations.md`
+
+Origine: richiesta dell'utente di un README che dica solo cos'è Vela, come si collega a Claude,
+come si avvia in locale e come si lancia il load test con tutti i parametri del funnel.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Parti che escono dal README | Spostate in `docs/operations.md` (modi di avvio, sync a mano, coda e worker, variabili d'ambiente, test Postgres, Docker, deploy su Render, landing, struttura), senza eliminarle (opzione A) | Scelta dell'utente: la tabella delle variabili d'ambiente e i passi del deploy esistevano solo nel README |
+| Database nell'avvio in locale | Postgres, non più SQLite | Con SQLite il boot fallisce nel contatore della quota (datetime naive contro aware); bug segnalato in `docs/operations.md` e non corretto |
