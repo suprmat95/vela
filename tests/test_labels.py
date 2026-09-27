@@ -20,15 +20,15 @@ def details(name):
 
 
 PADEL = details("catalog.json")
-B, I, A = BEGINNER, INTERMEDIATE, ADVANCED
+B, M, A = BEGINNER, INTERMEDIATE, ADVANCED
 
 # (id, frase vera della descrizione, livelli attesi, coaching atteso)
 REAL = [
     ("962", "Ti allenerai al **Bela Padel Center** con istruttori esperti. Questo viaggio per "
-            "**giocatori di livello intermedio e avanzato** include la colazione", {I, A}, True),
+            "**giocatori di livello intermedio e avanzato** include la colazione", {M, A}, True),
     ("1027", "Migliora il tuo gioco sulla **Costa del Sol** con la coach Sandra Flores. Questa "
              "vacanza offre **sei ore di allenamento** e tre ore di partita. Il programma è ideale "
-             "per **giocatrici di livello intermedio** e principianti.", {B, I}, True),
+             "per **giocatrici di livello intermedio** e principianti.", {B, M}, True),
     ("218", "Il programma è stato progettato per offrire un'esperienza di padel completa, adatta a "
             "ogni livello di gioco", {ALL}, False),
     ("218", "che tu sia un principiante che desidera sviluppare fondamentali solidi o un giocatore "
@@ -43,7 +43,7 @@ REAL = [
     ("645", "con **8 ore di campo guidate da coach esperti**. È il mix perfetto tra tecnica, "
             "intensità e spirito di competizione.", set(), True),
     ("230", "5 giorni di padel ad alto livello a Madrid", set(), False),
-    ("1090", "Questo viaggio è adatto a giocatori **da principianti a intermedi**.", {B, I}, False),
+    ("1090", "Questo viaggio è adatto a giocatori **da principianti a intermedi**.", {B, M}, False),
 ]
 
 
@@ -61,7 +61,7 @@ class RealSentencesTest(unittest.TestCase):
     def test_whole_descriptions_of_the_uc_c_products(self):
         """UC-C: 962 intermedio e avanzato, non esclusivo; 1027 principianti e intermedi; 218
         ogni livello; 940 tutti i livelli; 622 nessuna parola sul livello né sulle lezioni."""
-        expected = {"962": ({I, A}, True), "1027": ({B, I}, True), "218": ({B, A, ALL}, True),
+        expected = {"962": ({M, A}, True), "1027": ({B, M}, True), "218": ({B, A, ALL}, True),
                     "940": ({ALL}, True), "622": (set(), False)}
         for pid, (levels, coaching) in expected.items():
             with self.subTest(pid):
@@ -85,13 +85,13 @@ class ExclusiveTest(unittest.TestCase):
         table = [
             ("Viaggio solo per avanzati.", {A}),
             ("Il camp è riservato a giocatori esperti.", {A}),
-            ("Solo per giocatori intermedi e avanzati.", {I, A}),
+            ("Solo per giocatori intermedi e avanzati.", {M, A}),
             ("Riservato esclusivamente ai principianti.", {B}),
             ("Advanced players only.", {A}),
-            ("Only for intermediate and advanced players.", {I, A}),
-            ("Not suitable for beginners.", {I, A}),
-            ("Il programma non è adatto ai principianti.", {I, A}),
-            ("Sconsigliato ai principianti, pensato per giocatori di livello intermedio.", {I, A}),
+            ("Only for intermediate and advanced players.", {M, A}),
+            ("Not suitable for beginners.", {M, A}),
+            ("Il programma non è adatto ai principianti.", {M, A}),
+            ("Sconsigliato ai principianti, pensato per giocatori di livello intermedio.", {M, A}),
         ]
         for text, levels in table:
             with self.subTest(text):
