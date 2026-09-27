@@ -163,11 +163,58 @@ class QuotaTest(unittest.TestCase):
         self.assertEqual(f.stats()["calls_vela"], 1)
 
 
+def fill_cart(c, iid):
+    """Cliente e passeggeri: senza, il finto rifiuta il booking (M19)."""
+    c.put("/v1/itineraries/%s/customer" % iid, params=PADEL, headers=AUTH,
+          json={"firstName": "Mario", "lastName": "Rossi", "email": "m@x.it", "phone": "+39",
+                "address": {"street1": "Via", "postalCode": "1", "city": "Milano", "region": "MI",
+                            "countryCode": "IT"}})
+    c.put("/v1/itineraries/%s/pax" % iid, params=PADEL, headers=AUTH,
+          json=[{"refId": "pax-1", "firstName": "Mario", "lastName": "Rossi"},
+                {"refId": "pax-2", "firstName": "Anna", "lastName": "Bianchi"}])
+
+
+class CustomerAndPaxTest(unittest.TestCase):
+    """M19: quello che le sonde del 2026-09-27 hanno verificato (`docs/api/customer-pax.md`)."""
+
+    def setUp(self):
+        self.f, _ = fake()
+        self.c = client(self.f)
+        self.iid = new_itinerary(self.c).json()["data"]["itineraryId"]
+
+    def total(self):
+        return self.c.get("/v1/itineraries/%s" % self.iid, params=PADEL,
+                          headers=AUTH).json()["data"]["checkout"]["openAmount"]
+
+    def test_total_is_known_before_customer_and_pax_and_does_not_change(self):
+        before = self.total()
+        fill_cart(self.c, self.iid)
+        self.assertEqual(self.total(), before)
+
+    def test_pax_ref_ids_exist_from_creation(self):
+        r = self.c.put("/v1/itineraries/%s/pax" % self.iid, params=PADEL, headers=AUTH,
+                       json=[{"refId": "pax-1", "firstName": "A", "lastName": "B"},
+                             {"refId": "pax-2", "firstName": "C", "lastName": "D"}])
+        self.assertEqual(r.status_code, 200)
+
+    def test_booking_without_customer_or_pax_is_refused_and_not_executed(self):
+        r = self.c.post("/v1/bookings", params=PADEL, headers=AUTH, json={"itineraryId": self.iid})
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["type"], "https://api.hofj.com/problems/bad-request")
+        self.assertEqual(self.f.bookings, {})
+
+    def test_booking_after_customer_and_pax(self):
+        fill_cart(self.c, self.iid)
+        r = self.c.post("/v1/bookings", params=PADEL, headers=AUTH, json={"itineraryId": self.iid})
+        self.assertEqual((r.status_code, r.json()["data"]), (200, self.iid))
+
+
 class FaultsTest(unittest.TestCase):
     def booking_after(self, fault):
         f, clock = fake(faults=(parse_fault(fault),), hang_seconds=20)
         c = client(f)
         iid = new_itinerary(c).json()["data"]["itineraryId"]
+        fill_cart(c, iid)
         clock.slept.clear()
         r = c.post("/v1/bookings", params=PADEL, headers=AUTH, json={"itineraryId": iid})
         return f, clock, iid, r
