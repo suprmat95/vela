@@ -935,3 +935,62 @@ rilettura ogni secondo), più ampia di M20 (solo posizione 1, 10 s, 0,5 s).
 |---|---|---|
 | Codice di M20 | Non si mergia; `task/m20` resta come archivio | Riportare le regole di M20 romperebbe la conferma del prezzo: chi non è primo in coda non sentirebbe il prezzo nella stessa chiamata. Vale la decisione più recente |
 | Cosa si tiene | I test su sostituzione, fallimento e doppio accept durante l'attesa (`tests/test_usecases.py`, `PriceConfirmationTest`), il test REST del 200 `order_status` con il link, RNF-04 corretto | Coprono esiti dell'attesa che `master` gestiva senza test; RNF-04 diceva ancora che nessun caso d'uso aspetta |
+
+## 2026-09-27 — M22-a: scelta dell'hotel con degrado dinamico
+
+Origine: richiesta dell'utente del 2026-09-27. Oggi RF-15 fissa l'hotel di default e §7
+esclude la scelta dell'hotel. Bozza in `docs/plans/2026-09-27-m22-hotel.md`, roadmap M22. Qui
+ci sono solo le decisioni già prese dall'utente. Le domande aperte della bozza (§10) entrano
+dopo la sua risposta.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| Mai una lista | Il viaggiatore esprime una preferenza (più vicino al campo, più economico, più stelle, recensioni migliori) e Vela propone un solo hotel alternativo, con la motivazione. Gli hotel di `/accommodations` non si elencano mai | È la premessa del brief (RF-10) |
+| Priorità della quota | `booking` > `purchase` > `hotel` > `sync`. `purchase` ha precedenza assoluta: con un solo acquisto in attesa, `hotel` e `sync` non prendono gettoni. `hotel` prende tutti i gettoni del cambio insieme o nessuno. `sync` cede anche a `hotel` | Il cambio di hotel è un lusso della coda vuota: non deve rallentare chi sta comprando, e non deve mai restare a metà |
+| Catalogo vecchio | Rischio accettato: con cambi continui a coda vuota il catalogo può superare le 6 h. Nessun tetto di età | Coperto da RF-17/RF-33 (un prodotto che fallisce al carrello viene sostituito) |
+| Proposta | Resta a 0 chiamate HofJ; la latenza di `/accommodations` passa dalla coda, come gli acquisti | RF-11, RNF-05 |
+| Hotel fisso | Il cambio vale solo per i prodotti con `hotelSelection` o `allowAccommodationList`; per gli altri Vela dice che l'hotel è fisso | Campi già nel catalogo: 0 chiamate |
+| Momento e ingresso | Ordine in `awaiting_confirmation`; `reject_proposal` con `reject_kind="hotel"` (M21-F) più una preferenza; nessun tool MCP nuovo | È il momento in cui il viaggiatore sente hotel e totale reale, e il carrello esiste già |
+| Collocazione | M22 dopo M21-D (`orders.rooms`) e M21-F (tipo `hotel`): M22-a (bozza, sonda, verdetto, niente codice in `vela/`) e M22-b (implementazione, condizionata al verdetto) | M22 è un ramo del rifiuto `hotel` e usa le camere dell'ordine |
+| Dove sta la bozza | `docs/plans/2026-09-27-m22-hotel.md`, non `docs/spec.md` | Ogni task di M21 modifica la spec: i testi entrano all'inizio di M22-b |
+| Schema | Migrazione 0014 solo proposta (campi hotel sull'ordine), da approvare in M22-b. Tipo di job e classe di quota non la richiedono: `jobs.kind` è `String(16)` senza vincoli e la classe si ricava dal tipo nel codice | Verificato su `alembic/versions/0005_jobs_quota.py` |
+
+### Revisione della bozza (2026-09-27)
+
+Bozza approvata dall'utente con queste modifiche. Sostituiscono le raccomandazioni della bozza
+dove diverse; la bozza è già aggiornata (§10).
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| M22 o RF-72 | Un rifiuto `hotel`, con o senza preferenza, propone UN altro hotel dello stesso viaggio quando valgono le condizioni del ramo a: ordine in `awaiting_confirmation`, prodotto con `hotelSelection` o `allowAccommodationList`, nessun acquisto `pending`. Non decide più la presenza di `hotel_preference` (raccomandazione della bozza, scartata) | "L'hotel non mi piace" su un viaggio che va bene chiede un altro hotel, non un altro viaggio |
+| Preferenza assente | Primo hotel in ordine `recommended` di HofJ diverso dall'attuale e da quelli già rifiutati sull'ordine | Nessuna domanda in più; l'ordine del fornitore è l'unico dato neutro |
+| Hotel rifiutati | `orders.rejected_accommodations` (JSON, default `[]`), uno dei cinque campi di 0014 al posto di `tried_accommodations`: contiene l'hotel di default e ogni hotel lasciato | Un secondo "non mi piace" non torna al primo |
+| Nessuna alternativa | Hotel fisso, lista vuota, hotel tutti già rifiutati → RF-72: altro viaggio, escluso quell'hotel. Con una preferenza e alternative nessuna delle quali migliore dell'attuale resta l'esito `no_better` della prima bozza: hotel e totale invariati, ordine in conferma (scelta dell'utente, che ha scartato la proposta di trattarlo come RF-72) | Senza alternative il rifiuto va rispettato con un altro viaggio; con alternative peggiori per la preferenza, l'hotel incluso è la risposta migliore alla preferenza stessa |
+| Istruzioni MCP | Nessuna domanda preventiva sulla preferenza: l'agente chiama subito `reject_proposal` con `reject_kind="hotel"` | Un turno in più, a voce, per un dato facoltativo |
+| Risposta nel ramo a | `reject_proposal` aspetta fino a 100 s come `accept_proposal` e restituisce l'ordine in `awaiting_confirmation`. Rottura di compatibilità accettata: i client sono nostri. In M22-b: istruzioni MCP, descrizione di `reject_proposal`, `docs/rest.md`, `scripts/rest_flow.py` se serve; ElevenLabs `response_timeout_secs` ≥ 120 | La forma che l'agente conosce già dalla conferma del prezzo |
+| Rifiuto nei rami a e b | Non registrato, ordine non cancellato (eccezione a RF-49, come RF-75) | Il viaggiatore non ha rifiutato il viaggio |
+| Job `hotel_change` | Non aspetta mai: al run, con un acquisto `pending` o senza tutti i gettoni del cambio subito, esito `busy` (ramo b). Sostituisce "rinuncia se arriva un acquisto mentre aspetta" | Più semplice: nessuno stato di attesa, nessuna attesa nella conversazione |
+| Acquisto in attesa | Per il cambio contano solo i job d'acquisto in stato `pending`; quelli in lavorazione hanno già preso i loro gettoni. Sostituisce "prima del link" della bozza. Il sync resta bloccato da ogni acquisto attivo, come oggi, e in più dai `hotel_change` attivi | Chi ha già i gettoni non compete col cambio |
+| Totale dopo il `PATCH` | Riletto e salvato su `orders.total` prima di ogni conferma; senza, il link non nasce (RF-82) | Il link Stripe usa `order.total` |
+| Altre domande (raccomandazioni della bozza) | Nessun tetto ai cambi per ordine; hotel sceglibile letto dal JSON grezzo del prodotto; ordine non in conferma → RF-72; tre riletture del totale fallite → ordine `failed` con motivo leggibile; "torna all'hotel di prima" fuori da M22 | Scelta dell'utente: "segui le tue raccomandazioni" |
+| Migrazione 0014 | Approvata come proposta: cinque campi su `orders` (`hotel_name`, `accommodation_id`, `hotel_preference`, `rejected_accommodations`, `hotel_change`) | Tipo di job e classe di quota senza migrazione |
+| ARCHITECTURE.md | Sul branch `doc/architecture`: il nuovo ordine di sacrificio (catalogo → scelta dell'hotel → attesa del link → mai le prenotazioni pagate) va in §5.2 (bilancio della quota), l'esperienza del viaggiatore a coda piena in §5.3 (il minuto sei) | Correzione dell'utente sui riferimenti del piano |
+
+### Sonda e verdetto (2026-09-27)
+
+Sonda `scripts/accommodations_probe.py` su staging, 11 chiamate HofJ su 13 approvate
+dall'utente (12 del piano più 1 per il giro sul prodotto 25), nessun booking, nessuna chiamata
+Stripe. Esiti in `docs/api/accommodations.md`, differenze #28-#35 in
+`docs/api/differences.md`, domande 11-13 in `docs/hofj-questions.md`.
+
+| Decisione | Scelta | Motivo |
+|---|---|---|
+| `.env` | L'utente ha chiesto di usare `.env`: caricato con `set -a; . ./.env` nel solo processo della sonda, senza aprirlo né stamparlo, con `HOFJ_BASE_URL` forzato su staging | Eccezione esplicita dell'utente alla regola "mai aprire `.env`"; il valore forzato evita un host di produzione eventualmente scritto nel file |
+| Giro sul prodotto 25 | Dopo 8 chiamate con tre liste vuote, 3 chiamate su un prodotto con `allowAccommodationList: true` (l'unico su staging), approvate dall'utente come 5 massimo | Verificare l'ipotesi "la lista esiste solo con `allowAccommodationList`" |
+| Chiamate non fatte | Nessun `PATCH` e nessuna rilettura del totale: nessun hotel con `roomsConfiguration` non vuota. Le 2 chiamate approvate e non usate non sono state spese su chiamate diverse da quelle concordate | Senza `roomIds` il `PATCH` non si può scrivere |
+| Itinerari orfani | `arjeuuuzzw9s` (124), `fcocq0pgspd1` (28), `p8htf0mqbarg` (124, 2 camere), `phtjys9d6rip` (25), su `staging.weebora.com`; nessun pagamento, nessun booking | Come nelle sonde di M5 |
+| Latenza di `/accommodations` | 1,5-2,1 s su 4 misure, anche con la lista vuota | Un cambio di 3 chiamate starebbe nel tetto di 100 s |
+| **Verdetto: M22-b non si fa** | M22 si chiude con M22-a. Bozza, casi d'uso e decisioni restano come archivio pronto. Criterio dell'utente: "se il `PATCH` non è affidabile, M22 si chiude qui". Il `PATCH` non è stato visto funzionare nemmeno una volta: su 4 itinerari nessun hotel con camere da mandare | Costruire job, classe di quota, migrazione e contratto nuovo su una chiamata mai osservata vorrebbe dire scoprire in produzione se funziona. Inoltre la lista esiste di fatto solo con `allowAccommodationList` (1 prodotto su 56 a staging, 8 su 126 in produzione): il vincolo 4 ("`hotelSelection` o `allowAccommodationList`") coprirebbe quasi solo prodotti senza lista |
+| Condizioni per riaprire M22 | Risposte di HofJ alle domande 11-13, oppure una sonda approvata su un prodotto di produzione con `allowAccommodationList` (323, 326, 985, 1059, 1065 padel; 372, 795, 1007 tennis) che mostri `roomsConfiguration`, `PATCH` e totale. Alla riapertura, il vincolo 4 va ristretto ad `allowAccommodationList` | La bozza non cambia: cambiano solo i prodotti a cui si applica |
+| Scoperta fuori da M22: prodotti senza hotel | Sul prodotto 25 (`removableAccommodation: true`, anche in `rawAttributes`) l'itinerario nasce senza hotel preselezionato (differenza #30). Nelle fixture il flag è su un solo prodotto per ambiente: 25 a staging, 795 (tennis) in produzione. **Decisione dell'utente: nessuna esclusione dal chooser** e nessun controllo nel passo del totale; il rischio resta annotato e la domanda 13 in `docs/hofj-questions.md` | Un solo prodotto in produzione, comportamento del booking senza hotel non verificato: una regola nuova non vale il costo |
+| `ARCHITECTURE.md` | Testi per §5.2 e §5.3 (branch `doc/architecture`) in `docs/plans/2026-09-27-m22-architecture.md`, in due varianti: senza M22-b (quella che vale ora) e con M22-b (per la riapertura) | Richiesta dell'utente |
